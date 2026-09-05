@@ -57,6 +57,19 @@ h1{font-family:"Zen Old Mincho",serif;font-size:19px;margin:0;letter-spacing:.05
 .pt{border:1px solid var(--line);border-radius:999px;padding:3px 11px;background:var(--surface)}
 .pt b{font-family:"IBM Plex Mono",monospace;font-size:13px}
 
+.addtoggle{font:inherit;font-size:12.5px;padding:4px 13px;margin:10px 0 0;cursor:pointer;
+ border:1px dashed var(--line-strong);background:transparent;color:var(--ink-2);border-radius:999px}
+.add{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:10px 0 0;
+ background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:11px 13px}
+.add[hidden]{display:none}   /* display:flex が hidden 属性に勝ってしまうため */
+.add input,.add select{font:inherit;font-size:13.5px;color:var(--ink);background:var(--surface);
+ border:1px solid var(--line-strong);border-radius:3px;padding:6px 9px}
+.add #addtitle{flex:1;min-width:180px}
+.add .prim{font:inherit;font-size:13px;font-weight:700;padding:7px 16px;cursor:pointer;
+ border:1px solid var(--accent);background:var(--accent);color:var(--paper);border-radius:3px}
+.add .prim:disabled{opacity:.45;cursor:default}
+.addnote{font-size:12.5px;color:var(--ink-3)}
+
 h2{font-family:"Zen Old Mincho",serif;font-size:15px;margin:22px 0 8px;letter-spacing:.04em;
  display:flex;align-items:baseline;gap:9px}
 h2 .cnt{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3);font-weight:400}
@@ -122,6 +135,21 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
     <span class="pts" id="pts"></span>
   </div>
 
+  <button class="addtoggle" id="addtoggle" type="button" aria-expanded="false">＋ 手で足す</button>
+  <form class="add" id="add" hidden>
+    <input type="text" id="addtitle" placeholder="件名（例：算数ドリル p.12）" required>
+    <select id="addchild" aria-label="どの子"></select>
+    <select id="addkind" aria-label="種別">
+      <option value="deadline">提出</option>
+      <option value="bring">持ち物</option>
+      <option value="homework">宿題</option>
+      <option value="event">行事</option>
+    </select>
+    <input type="date" id="adddate" aria-label="日付" required>
+    <button type="submit" class="prim" id="addgo">入れる</button>
+    <span class="addnote" id="addnote"></span>
+  </form>
+
   <div id="body"></div>
 
   <footer>
@@ -168,6 +196,11 @@ function renderKidButtons(){
   $("#kidbtns").innerHTML=data.children.map((n,i)=>
     '<button data-f="kid:'+esc(n)+'" aria-pressed="false">'+esc(n)+"</button>").join("");
   markFilter();
+  const sel=$("#addchild"), keep=sel.value;
+  sel.innerHTML=data.children.map(n=>"<option>"+esc(n)+"</option>").join("");
+  if(keep) sel.value=keep;
+  // 打ちかけの日付を、タブに戻った拍子に上書きしない。
+  if(!$("#adddate").value) $("#adddate").value=data.today;
 }
 
 function markFilter(){
@@ -179,6 +212,36 @@ function markFilter(){
 // load() はタブに戻るたびに走る。そのたびにボタンへリスナーを貼ると
 // 二重三重に付いて、1回のクリックで2回反転する＝押しても効かなくなる。
 // 貼るのは親に一度だけ。
+// 写真を撮るほどでもない1件を、その場で足す。抽出を通さないので承認も要らない。
+$("#addtoggle").addEventListener("click",()=>{
+  const open=$("#add").hidden;
+  $("#add").hidden=!open;
+  $("#addtoggle").setAttribute("aria-expanded",String(open));
+  if(open) $("#addtitle").focus();
+});
+
+$("#add").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const title=$("#addtitle").value.trim();
+  const child=$("#addchild").value;
+  if(!title) return;
+  $("#addgo").disabled=true; $("#addnote").textContent="入れています…";
+  try{
+    const res=await fetch("/api/register",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({items:[{kind:$("#addkind").value,title:child+"｜"+title,
+        child:child,date:$("#adddate").value}]})});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.detail||"入れられませんでした");
+    const r=(j.results||[])[0];
+    if(!r||r.status!=="ok") throw new Error(r&&r.error||"入れられませんでした");
+    $("#addtitle").value=""; $("#addnote").textContent="入れました";
+    await load();
+  }catch(err){
+    $("#addnote").textContent=err.message;
+  }
+  $("#addgo").disabled=false;
+});
+
 $(".filters").addEventListener("click",e=>{
   const b=e.target.closest("button");
   if(!b||!b.dataset.f) return;
