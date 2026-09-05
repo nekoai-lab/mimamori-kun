@@ -79,6 +79,9 @@ async def extract(image: UploadFile = File(...), hint: str = Form("")):
 
 class RegisterRequest(BaseModel):
     items: List[Dict[str, Any]]
+    # 子の画面から撮ったものは承認待ちで入れる。親が /board で通すまで、
+    # 子のやることには出ない。
+    pending: bool = False
 
 
 @app.post("/api/register")
@@ -86,7 +89,7 @@ def register(req: RegisterRequest):
     if not req.items:
         raise HTTPException(400, "登録するものがありません。")
     try:
-        return {"results": create_events(req.items)}
+        return {"results": create_events(req.items, "pending" if req.pending else "todo")}
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"カレンダー登録に失敗しました: {e}") from e
 
@@ -106,8 +109,8 @@ class StatusRequest(BaseModel):
 
 @app.post("/api/status")
 def status(req: StatusRequest):
-    if req.status not in ("todo", "doing", "done"):
-        raise HTTPException(400, "status は todo / doing / done のいずれかです。")
+    if req.status not in ("pending", "todo", "doing", "done", "rejected"):
+        raise HTTPException(400, "status は pending / todo / doing / done / rejected のいずれかです。")
     try:
         return set_status(req.event_id, req.status)
     except Exception as e:  # noqa: BLE001

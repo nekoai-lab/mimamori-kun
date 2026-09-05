@@ -140,6 +140,9 @@ def list_tasks(days: int = 14) -> Dict[str, Any]:
         # ポイント合計が膨らみ、「済」も伸びる。過去は未完了だけ拾う。
         items = [e for e in items if e["date"] >= today.isoformat() or e["status"] != "done"]
 
+    # 親が「けす」を押したものは、記録としてカレンダーには残すが画面には出さない。
+    items = [e for e in items if e["status"] != "rejected"]
+
     for e in items:
         d = dt.date.fromisoformat(e["date"])
         e["days_left"] = (d - today).days
@@ -213,7 +216,7 @@ def _demo_items(today: dt.date) -> List[Dict[str, Any]]:
 
 # ---------------------------------------------------------------- 書き
 
-def _body(item: Dict[str, Any]) -> Dict[str, Any]:
+def _body(item: Dict[str, Any], status: str = "todo") -> Dict[str, Any]:
     date = item["date"]
     end_date = item.get("end_date") or date
     t0, t1 = item.get("time_start"), item.get("time_end")
@@ -245,7 +248,7 @@ def _body(item: Dict[str, Any]) -> Dict[str, Any]:
                 "app": MARK,
                 "child": item.get("child", ""),
                 "kind": item.get("kind", ""),
-                "status": "todo",
+                "status": status,
                 "points": str(_points_for(item)),
                 "bring": ("、".join(item["bring"]) if isinstance(item.get("bring"), list) else (item.get("bring") or "")),
             }
@@ -262,7 +265,7 @@ def _points_for(item: Dict[str, Any]) -> int:
     return {"homework": 3, "deadline": 3, "bring": 2, "event": 0}.get(item.get("kind", ""), 1)
 
 
-def _demo_add(item: Dict[str, Any]) -> None:
+def _demo_add(item: Dict[str, Any], status: str = "todo") -> None:
     """デモ台帳に足す。
 
     ここで足さないと、撮ったおたよりが一覧にも会話にも出てこない。
@@ -278,7 +281,7 @@ def _demo_add(item: Dict[str, Any]) -> None:
             "date": item["date"],
             "child": item.get("child", ""),
             "kind": item.get("kind", ""),
-            "status": "todo",
+            "status": status,
             "points": _points_for(item),
             "bring": "、".join(bring) if isinstance(bring, list) else (bring or ""),
             "mine": True,
@@ -289,19 +292,24 @@ def _demo_add(item: Dict[str, Any]) -> None:
     )
 
 
-def create_events(items: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-    """確定した項目をカレンダーに登録する。ユーザーの承認後にだけ呼ぶ。"""
+def create_events(items: List[Dict[str, Any]], status: str = "todo") -> List[Dict[str, str]]:
+    """項目をカレンダーに登録する。
+
+    status に "pending" を渡すと、親が承認するまで子のやることには出ない。
+    子の画面から撮ったものは、外から来た画像を読ませた結果がそのまま
+    書き込みになるので、必ず承認を挟む。
+    """
     results = []
     for item in items:
         if DEMO:
             try:
-                _demo_add(item)
+                _demo_add(item, status)
                 results.append({"title": item["title"], "status": "ok", "link": ""})
             except Exception as e:  # noqa: BLE001
                 results.append({"title": item.get("title", "?"), "status": "error", "error": str(e)})
             continue
         try:
-            ev = _svc().events().insert(calendarId=config.calendar_id, body=_body(item)).execute()
+            ev = _svc().events().insert(calendarId=config.calendar_id, body=_body(item, status)).execute()
             results.append({"title": item["title"], "status": "ok", "link": ev.get("htmlLink", "")})
         except Exception as e:  # noqa: BLE001
             results.append({"title": item.get("title", "?"), "status": "error", "error": str(e)})
@@ -309,7 +317,7 @@ def create_events(items: List[Dict[str, Any]]) -> List[Dict[str, str]]:
 
 
 def set_status(event_id: str, status: str) -> Dict[str, Any]:
-    """状態を変える。todo / doing / done。
+    """状態を変える。pending / todo / doing / done / rejected。
 
     完了しても予定は消さない。件名に ✓ を付けて記録として残し、
     ダッシュボードの未完了リストからは外れる。

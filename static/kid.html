@@ -282,18 +282,22 @@ $("#cam").addEventListener("change",async e=>{
       return;
     }
     registering=true;
+    // 子の画面から入れたものは、親が通すまでやることにしない。
+    // 撮った紙をそのまま台帳に書けると、外から来た画像で予定を作れてしまう。
     const reg=await fetch("/api/register",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({items:keep})});
+      body:JSON.stringify({items:keep,pending:true})});
     const registered=await reg.json();
     stopThinking(t);
     const added=(registered.results||[]).filter(x=>x.status==="ok");
-    if(!reg.ok||added.length<keep.length) add("sys","登録できなかったものがある。おうちの人に見てもらってね。");
+    if(!reg.ok||added.length<keep.length) add("sys","わたせなかったものがある。おうちの人に見てもらってね。");
     if(!reg.ok||!added.length) return;
-    add("sys","追加しました\n"+added.map(x=>"・"+String(x.title||"").replace(/^[^｜]*｜/,"").trim()).join("\n"));
-    await send("おたよりを撮った。"+added.map(x=>x.title).join("、")+" が入った。", true);
+    add("sys","おうちの人にわたしました\n"
+      +added.map(x=>"・"+String(x.title||"").replace(/^[^｜]*｜/,"").trim()).join("\n")
+      +"\n通してもらえたら、やることに出るよ。");
+    await send("おたよりを撮った。"+added.map(x=>x.title).join("、")+" をおうちの人にわたした。まだ承認まち。", true);
   }catch(err){
     stopThinking(t);
-    if(registering) add("sys","登録できたか確認できなかった。おうちの人に見てもらってね。");
+    if(registering) add("sys","わたせたか確認できなかった。おうちの人に見てもらってね。");
     else{
       const retry=add("bot","",esc("うーん、うまく読めなかった。ちょっと暗いかも。もう一回撮れる？")+'<br><button type="button">もう一回撮る</button>');
       retry.querySelector("button").addEventListener("click",()=>{if(!busy) $("#cam").click();});

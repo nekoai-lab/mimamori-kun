@@ -43,7 +43,8 @@ def get_my_tasks(child: str) -> List[Dict[str, Any]]:
     data = list_tasks(days=14)
     out = []
     for t in data["items"]:
-        if t["child"] != child or t["status"] == "done":
+        # pending は親がまだ承認していない。子には、やることとして出さない。
+        if t["child"] != child or t["status"] in ("done", "pending"):
             continue
         out.append(
             {
