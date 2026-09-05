@@ -23,6 +23,11 @@ _service = None
 
 DEMO = os.getenv("MIMAMORI_DEMO", "").lower() in ("1", "true", "yes")
 
+# デモモードのときだけ使う、プロセス内の仮の台帳。
+# 「終わった」が会話のあいだ残らないと伴走にならないので、状態を持たせる。
+_demo_store: List[Dict[str, Any]] = []
+_demo_day: str = ""
+
 
 def _svc():
     global _service
@@ -61,7 +66,12 @@ def list_events(start_date: str, end_date: str) -> List[Dict[str, Any]]:
         件名・日付だけに絞った予定のリスト
     """
     if DEMO:
-        return [{"summary": "下の子｜身体測定", "date": "2026-09-25", "id": "demo-x"}]
+        today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
+        return [
+            {"summary": e["summary"], "date": e["date"], "id": e["id"]}
+            for e in _demo_state(today)
+            if start_date <= e["date"] <= end_date
+        ]
     return [
         {"summary": e["summary"], "date": e["date"], "id": e["id"]}
         for e in _raw(start_date, end_date)
@@ -113,7 +123,7 @@ def list_tasks(days: int = 14) -> Dict[str, Any]:
     end = today + dt.timedelta(days=days)
 
     if DEMO:
-        items = _demo_items(today)
+        items = _demo_state(today)
     else:
         items = [e for e in _raw(today.isoformat(), end.isoformat()) if e["mine"]]
 
@@ -135,6 +145,15 @@ def list_tasks(days: int = 14) -> Dict[str, Any]:
         "items": sorted(items, key=lambda x: (x["status"] == "done", x["date"], x["summary"])),
         "points": points,
     }
+
+
+def _demo_state(today: dt.date) -> List[Dict[str, Any]]:
+    """デモ用の台帳。日付が変わったときだけ作り直す。"""
+    global _demo_store, _demo_day
+    if _demo_day != today.isoformat() or not _demo_store:
+        _demo_store = _demo_items(today)
+        _demo_day = today.isoformat()
+    return _demo_store
 
 
 def _demo_items(today: dt.date) -> List[Dict[str, Any]]:
@@ -235,7 +254,13 @@ def set_status(event_id: str, status: str) -> Dict[str, Any]:
     ダッシュボードの未完了リストからは外れる。
     """
     if DEMO:
-        return {"id": event_id, "status": status}
+        for it in _demo_store:
+            if it["id"] == event_id:
+                it["status"] = status
+                title = it["summary"].lstrip("✓ ").strip()
+                it["summary"] = ("✓ " + title) if status == "done" else title
+                return {"id": event_id, "status": status, "summary": it["summary"]}
+        return {"id": event_id, "status": status, "note": "見つかりませんでした"}
     ev = _svc().events().get(calendarId=config.calendar_id, eventId=event_id).execute()
     priv = (ev.get("extendedProperties") or {}).get("private") or {}
     priv["status"] = status

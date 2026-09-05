@@ -91,6 +91,25 @@ app/
 **カレンダーへの権限は IAM ではなく、カレンダー側の共有設定で個別に渡す。**
 共有を外せば、アプリはカレンダーに触れなくなる。
 
+## いちばん速い動かし方（会話画面だけ見たいとき）
+
+GCPプロジェクトも課金も要りません。**AI Studio の APIキー1本**で動きます。
+
+```bash
+cp .env.example .env
+# .env の GOOGLE_API_KEY に https://aistudio.google.com/apikey で取ったキーを入れる
+
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+set -a; source .env; set +a
+uvicorn main:app --reload --port 8080
+```
+
+`http://localhost:8080/kid` を開く。ダミーのやることで会話が始まります。
+「終わった」と言えば消え、`/board` にも反映されます（再起動すると戻ります）。
+
+カレンダーに本当に書き込むのは、下の「本番」の手順に進んでから。
+
 ## セットアップ
 
 ### 1. 設定
