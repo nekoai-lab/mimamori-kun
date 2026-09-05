@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap">
+<script src="/static/theme.js"></script>
 <style>
 :root{
   --paper:#FAF7F0;--surface:#fff;--ink:#1F2422;--ink-2:#5A625F;
@@ -14,12 +15,12 @@
   --warm:#C8961E;--warm-soft:#FBF3DF;--error:#B42318;
   --shadow:0 1px 2px rgba(31,36,34,.05),0 10px 26px -20px rgba(31,36,34,.45);
 }
-@media (prefers-color-scheme:dark){:root{
+:root[data-theme="dark"]{
   --paper:#14110C;--surface:#1E1B15;--ink:#F0ECE2;--ink-2:#B5AE9E;
   --line:#312C22;--line-strong:#453E30;--me:#5FCFC0;--me-ink:#14110C;
   --warm:#E0BB63;--warm-soft:#2C2413;--error:#FF9A91;
   --shadow:0 1px 2px rgba(0,0,0,.5),0 10px 26px -20px rgba(0,0,0,1);
-}}
+}
 *{box-sizing:border-box}
 body{margin:0;background:var(--paper);color:var(--ink);font-family:"Noto Sans JP",system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;font-size:16px;line-height:1.75;-webkit-font-smoothing:antialiased}
 header,footer{border-bottom:1px solid var(--line)}
@@ -50,6 +51,8 @@ footer p{margin:8px 0}
 .nav a{flex:none;font-size:12.5px;text-decoration:none;padding:4px 12px;white-space:nowrap;
  border:1px solid var(--line-strong);border-radius:999px;color:var(--ink-2)}
 .nav a.on{background:var(--me);border-color:var(--me);color:var(--paper);font-weight:700}
+.theme{margin-left:auto;flex:none;font:inherit;font-size:12.5px;padding:4px 12px;white-space:nowrap;
+ border:1px solid var(--line-strong);border-radius:999px;background:transparent;color:var(--ink-2);cursor:pointer}
 a{color:var(--me)}
 :focus-visible{outline:2px solid var(--me);outline-offset:3px}
 #error{color:var(--error)}
@@ -66,6 +69,7 @@ a{color:var(--me)}
     <a href="/board">一覧</a>
     <a href="/kid">やりとり</a>
     <a href="/reward" class="on" aria-current="page">ごほうび</a>
+    <button class="theme" id="theme" type="button">☾ 暗く</button>
   </nav>
 </div></header>
 <main>

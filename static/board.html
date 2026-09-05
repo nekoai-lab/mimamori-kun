@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@700&family=Noto+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="/static/theme.js"></script>
 <style>
 :root{
   --paper:#F6F6F1;--surface:#fff;--surface-2:#FBFBF7;
@@ -18,7 +19,7 @@
   --kidB:#8A5A2B;--kidB-soft:#F4EBDF;
   --shadow:0 1px 2px rgba(25,28,27,.05),0 8px 24px -18px rgba(25,28,27,.3);
 }
-@media (prefers-color-scheme:dark){:root{
+:root[data-theme="dark"]{
   --paper:#101413;--surface:#191E1D;--surface-2:#151A19;
   --ink:#ECEFEB;--ink-2:#AFB9B5;--ink-3:#7E8A86;
   --line:#2A3231;--line-strong:#3A4442;
@@ -27,7 +28,7 @@
   --kidA:#8FBEDD;--kidA-soft:#1B2C38;
   --kidB:#D5AC7C;--kidB-soft:#312619;
   --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -18px rgba(0,0,0,.9);
-}}
+}
 *{box-sizing:border-box}
 body{margin:0;background:var(--paper);color:var(--ink);
  font-family:"Noto Sans JP",system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;
@@ -42,9 +43,11 @@ h1{font-family:"Zen Old Mincho",serif;font-size:19px;margin:0;letter-spacing:.05
 .nav a{flex:none;font-size:12.5px;text-decoration:none;padding:4px 12px;white-space:nowrap;
  border:1px solid var(--line-strong);border-radius:999px;color:var(--ink-2)}
 .nav a.on{background:var(--accent);border-color:var(--accent);color:var(--paper);font-weight:700}
+.theme{margin-left:auto;flex:none;font:inherit;font-size:12.5px;padding:4px 12px;white-space:nowrap;
+ border:1px solid var(--line-strong);border-radius:999px;background:transparent;color:var(--ink-2);cursor:pointer}
 
 .demo{background:#F6E8C6;color:#7A5A10;font-size:12px;text-align:center;padding:5px}
-@media (prefers-color-scheme:dark){.demo{background:#33290F;color:#E0C583}}
+:root[data-theme="dark"] .demo{background:#33290F;color:#E0C583}
 
 .filters{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:16px 0 6px}
 .filters button{font:inherit;font-size:12.5px;padding:4px 13px;border:1px solid var(--line-strong);
@@ -85,7 +88,7 @@ h2.late{color:var(--late-ink)}
  color:var(--ink-3);font-size:13.5px}
 .empty b{display:block;color:var(--accent);font-size:15px;margin-bottom:4px}
 .err{background:#F7E7DF;border:1px solid #B94F2B;color:#963C1E;border-radius:4px;padding:12px 14px;font-size:13.5px;margin-top:18px}
-@media (prefers-color-scheme:dark){.err{background:#33211A;color:#E8926B}}
+:root[data-theme="dark"] .err{background:#33211A;color:#E8926B}
 footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
  font-size:12px;color:var(--ink-3);display:flex;gap:14px;flex-wrap:wrap}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -101,6 +104,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
       <a href="/board" class="on" aria-current="page">一覧</a>
       <a href="/kid">やりとり</a>
       <a href="/reward">ごほうび</a>
+      <button class="theme" id="theme" type="button">☾ 暗く</button>
     </nav>
   </div>
 </header>
