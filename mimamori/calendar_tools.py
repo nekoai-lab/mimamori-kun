@@ -156,28 +156,42 @@ def _demo_state(today: dt.date) -> List[Dict[str, Any]]:
     return _demo_store
 
 
+def _demo_names() -> tuple:
+    """ダミーの持ち主を、MIMAMORI_CHILDREN で設定した呼び名に合わせる。
+
+    呼び名を変えたときにダミーが誰のものでもなくなると、/kid のやることが
+    0件になって会話が始まらない。学齢で対応付け、無ければ並び順で埋める。
+    """
+    names = [c["name"] for c in config.children] or ["上の子", "下の子"]
+    by_level = {c["school_level"]: c["name"] for c in config.children}
+    older = by_level.get("junior_high") or names[0]
+    younger = by_level.get("elementary") or (names[1] if len(names) > 1 else names[0])
+    return older, younger
+
+
 def _demo_items(today: dt.date) -> List[Dict[str, Any]]:
     """GCP を繋がずに画面を確認するためのダミー。MIMAMORI_DEMO=1 で有効。"""
     def d(n):
         return (today + dt.timedelta(days=n)).isoformat()
+    older, younger = _demo_names()
     base = dict(mine=True, link="", description="", time=None)
     return [
-        dict(base, id="d1", summary="下の子｜図工 ペットボトル2本 持参", date=d(0),
-             child="下の子", kind="bring", status="todo", points=2, bring="500mlペットボトル2本、油性ペン"),
-        dict(base, id="d2", summary="下の子｜漢字ドリル p.42", date=d(0),
-             child="下の子", kind="homework", status="doing", points=3, bring=""),
-        dict(base, id="d3", summary="上の子｜三者面談 希望調査票 提出", date=d(1),
-             child="上の子", kind="deadline", status="todo", points=3, bring=""),
-        dict(base, id="d4", summary="上の子｜塾 計算プリント", date=d(0),
-             child="上の子", kind="homework", status="done", points=3, bring=""),
-        dict(base, id="d5", summary="下の子｜社会科見学（清掃工場）", date=d(6), time="08:15",
-             child="下の子", kind="event", status="todo", points=0, bring="お弁当、水筒、しおり"),
-        dict(base, id="d6", summary="上の子｜体育祭 係希望票 提出", date=d(-1),
-             child="上の子", kind="deadline", status="todo", points=3, bring=""),
-        dict(base, id="d7", summary="下の子｜社会科見学 参加同意書 提出", date=d(3),
-             child="下の子", kind="deadline", status="todo", points=3, bring=""),
-        dict(base, id="d8", summary="上の子｜中間テスト 直し 5問", date=d(2),
-             child="上の子", kind="homework", status="todo", points=5, bring=""),
+        dict(base, id="d1", summary=f"{younger}｜図工 ペットボトル2本 持参", date=d(0),
+             child=younger, kind="bring", status="todo", points=2, bring="500mlペットボトル2本、油性ペン"),
+        dict(base, id="d2", summary=f"{younger}｜漢字ドリル p.42", date=d(0),
+             child=younger, kind="homework", status="doing", points=3, bring=""),
+        dict(base, id="d3", summary=f"{older}｜三者面談 希望調査票 提出", date=d(1),
+             child=older, kind="deadline", status="todo", points=3, bring=""),
+        dict(base, id="d4", summary=f"✓ {older}｜塾 計算プリント", date=d(0),
+             child=older, kind="homework", status="done", points=3, bring=""),
+        dict(base, id="d5", summary=f"{younger}｜社会科見学（清掃工場）", date=d(6), time="08:15",
+             child=younger, kind="event", status="todo", points=0, bring="お弁当、水筒、しおり"),
+        dict(base, id="d6", summary=f"{older}｜体育祭 係希望票 提出", date=d(-1),
+             child=older, kind="deadline", status="todo", points=3, bring=""),
+        dict(base, id="d7", summary=f"{younger}｜社会科見学 参加同意書 提出", date=d(3),
+             child=younger, kind="deadline", status="todo", points=3, bring=""),
+        dict(base, id="d8", summary=f"{older}｜中間テスト 直し 5問", date=d(2),
+             child=older, kind="homework", status="todo", points=5, bring=""),
     ]
 
 
@@ -260,7 +274,9 @@ def set_status(event_id: str, status: str) -> Dict[str, Any]:
                 title = it["summary"].lstrip("✓ ").strip()
                 it["summary"] = ("✓ " + title) if status == "done" else title
                 return {"id": event_id, "status": status, "summary": it["summary"]}
-        return {"id": event_id, "status": status, "note": "見つかりませんでした"}
+        # 記録できていないのに done を返すと、子には「終わったね」と伝わり
+        # 親の一覧には残り続ける。できなかったことは、できなかったと返す。
+        return {"id": event_id, "status": "error", "note": "その id のやることが見つかりませんでした"}
     ev = _svc().events().get(calendarId=config.calendar_id, eventId=event_id).execute()
     priv = (ev.get("extendedProperties") or {}).get("private") or {}
     priv["status"] = status
