@@ -94,6 +94,7 @@ app/
 ## いちばん速い動かし方（会話画面だけ見たいとき）
 
 GCPプロジェクトも課金も要りません。**AI Studio の APIキー1本**で動きます。
+必要なのは **Python 3.10 以上**（`python3 -V` で確認。macOS 同梱の 3.9 だと `pip install` が落ちる）。
 
 ```bash
 cp .env.example .env
@@ -147,6 +148,8 @@ Google カレンダー → 対象カレンダーの設定 → 「特定のユー
 
 ## つまずきポイント
 
+- **`No matching distribution found for google-genai`** → `python3` が 3.9 になっている。
+  `google-genai` は 3.10 以上が必要。`python3.13 -m venv .venv` のように版を指定して作り直す
 - **`404 Not Found` on insert** → カレンダーをサービスアカウントに共有できていない
 - **終日予定が1日ずれる** → Calendar API の `end.date` は排他。`calendar_tools._body` で +1 日している
 - **`403 Vertex AI API has not been used`** → `gcloud services enable aiplatform.googleapis.com`
