@@ -34,6 +34,7 @@ header{border-bottom:1px solid var(--line);background:var(--paper);flex:none}
 .hdr{max-width:640px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:10px}
 h1{font-family:"Zen Maru Gothic",sans-serif;font-size:19px;margin:0;letter-spacing:.04em}
 .who{font-size:13px;color:var(--ink-2)}
+.tts{font:inherit;font-size:11px;color:var(--ink-2);background:transparent;border:1px solid var(--line-strong);border-radius:999px;padding:3px 6px;cursor:pointer}
 .who select{font:inherit;font-size:13px;background:transparent;color:var(--ink);
  border:1px solid var(--line-strong);border-radius:999px;padding:3px 10px}
 .pt{margin-left:auto;font-family:"Zen Maru Gothic",sans-serif;font-size:14px;color:var(--warm);
@@ -64,9 +65,11 @@ footer{flex:none;border-top:1px solid var(--line);background:var(--paper)}
 textarea{flex:1;font:inherit;font-size:16px;color:var(--ink);background:var(--surface);
  border:1px solid var(--line-strong);border-radius:23px;padding:11px 16px;resize:none;max-height:130px;line-height:1.6}
 textarea:focus{outline:2px solid var(--me);outline-offset:1px}
+textarea.interim{color:var(--ink-3)}
 .send{flex:none;width:46px;height:46px;border-radius:50%;border:0;background:var(--me);color:var(--me-ink);
  font-size:18px;cursor:pointer}
 .send:disabled{opacity:.35;cursor:default}
+.wait{margin-left:6px;font-size:13px;color:var(--ink-2)}
 input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 .hint{max-width:640px;margin:0 auto;padding:0 16px 10px;font-size:11.5px;color:var(--ink-3);text-align:center}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -76,6 +79,7 @@ input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events
 <header><div class="hdr">
   <h1>みまもりくん</h1>
   <span class="who"><select id="child"></select></span>
+  <button class="tts" id="tts" aria-pressed="true">読み上げ オン</button>
   <span class="pt" id="pt">— pt</span>
 </div></header>
 
@@ -97,6 +101,7 @@ input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events
 const $=s=>document.querySelector(s);
 const thread=$("#thread");
 let child="", history=[], busy=false;
+let stopRecognition=()=>{};
 
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 function scroll(){$("#main").scrollTop=$("#main").scrollHeight;}
@@ -109,15 +114,58 @@ function add(kind,text,html){
   thread.appendChild(d); scroll(); return d;
 }
 function thinking(){
-  const d=add("bot","",'<span class="nm">みまもりくん</span><span class="dots"><span></span><span></span><span></span></span>');
+  const d=add("bot","",'<span class="dots"><span></span><span></span><span></span></span><span class="wait"></span>');
+  const wait=d.querySelector(".wait"), started=Date.now();
+  const timer=setInterval(()=>{
+    const seconds=(Date.now()-started)/1000;
+    wait.textContent=seconds>=10?"もうすこし":seconds>=3?"やることを見てる":"";
+  },250);
+  d.clear=()=>clearInterval(timer);
   return d;
 }
 
+function stopThinking(target){
+  if(!target) return;
+  if(target.clear) target.clear();
+  target.remove();
+}
+
+function setBusy(next){
+  if(next) stopRecognition();
+  busy=next;
+  $("#child").disabled=next;
+  $("#msg").disabled=next;
+  $("#mic").disabled=next;
+  $("#cam").disabled=next;
+  $("#send").disabled=next||!$("#msg").value.trim();
+}
+
+let ttsEnabled=true, voice=null;
+try{ttsEnabled=localStorage.getItem("mimamori_tts")!=="off";}catch(e){}
+function updateTts(){
+  $("#tts").textContent="読み上げ "+(ttsEnabled?"オン":"オフ");
+  $("#tts").setAttribute("aria-pressed",String(ttsEnabled));
+}
+updateTts();
+$("#tts").addEventListener("click",()=>{
+  ttsEnabled=!ttsEnabled; updateTts();
+  try{localStorage.setItem("mimamori_tts",ttsEnabled?"on":"off");}catch(e){}
+  if(!ttsEnabled&&"speechSynthesis" in window) speechSynthesis.cancel();
+});
+function selectVoice(){
+  const jaVoices=speechSynthesis.getVoices().filter(v=>v.lang==="ja-JP");
+  voice=jaVoices.find(v=>/Google|Microsoft Nanami/i.test(v.name))||null;
+}
+if("speechSynthesis" in window){
+  selectVoice();
+  speechSynthesis.addEventListener("voiceschanged",selectVoice);
+}
 function say(text){
-  if(!("speechSynthesis" in window)) return;
+  if(!ttsEnabled||!("speechSynthesis" in window)) return;
   try{
     const u=new SpeechSynthesisUtterance(text.replace(/\n+/g,"。"));
-    u.lang="ja-JP"; u.rate=1.05; u.pitch=1.1;
+    u.lang="ja-JP"; u.rate=0.95; u.pitch=1.0;
+    if(voice) u.voice=voice;
     speechSynthesis.cancel(); speechSynthesis.speak(u);
   }catch(e){}
 }
@@ -127,7 +175,7 @@ async function boot(){
   const sel=$("#child");
   sel.innerHTML=(c.children||[]).map(x=>'<option>'+esc(x.name)+"</option>").join("");
   child=sel.value||"";
-  sel.addEventListener("change",()=>{child=sel.value;history=[];thread.innerHTML="";refreshPoints();open();});
+  sel.addEventListener("change",()=>{stopRecognition();child=sel.value;history=[];thread.innerHTML="";refreshPoints();open();});
   refreshPoints();
   open();
 }
@@ -141,13 +189,19 @@ async function refreshPoints(){
 
 function open(){
   add("sys","おかえり。");
-  send("（画面を開いた）", true);
+  send(null, true);
 }
 
-$("#msg").addEventListener("input",e=>{
-  e.target.style.height="auto";
-  e.target.style.height=Math.min(e.target.scrollHeight,130)+"px";
-  $("#send").disabled=!e.target.value.trim()||busy;
+function updateInput(){
+  const input=$("#msg");
+  input.style.height="auto";
+  input.style.height=Math.min(input.scrollHeight,130)+"px";
+  $("#send").disabled=!input.value.trim()||busy;
+}
+$("#msg").addEventListener("input",()=>{
+  stopRecognition();
+  $("#msg").classList.remove("interim");
+  updateInput();
 });
 $("#msg").addEventListener("keydown",e=>{
   if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();submit();}
@@ -156,29 +210,35 @@ $("#send").addEventListener("click",submit);
 
 function submit(){
   const v=$("#msg").value.trim(); if(!v||busy) return;
-  $("#msg").value=""; $("#msg").style.height="auto"; $("#send").disabled=true;
+  $("#msg").style.height="auto";
   send(v);
 }
 
 async function send(text, hidden){
   if(!hidden) add("me",text);
-  history.push({role:"user",text});
-  busy=true; const t=thinking();
+  const requestHistory=text==null?[]:history.concat({role:"user",text});
+  if(text!=null) history.push({role:"user",text});
+  setBusy(true); const t=thinking();
+  const ac=new AbortController();
+  const timeout=setTimeout(()=>ac.abort(),45000);
   try{
     const res=await fetch("/api/kid/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({child,history})});
+      body:JSON.stringify({child,history:requestHistory}),signal:ac.signal});
     const j=await res.json();
-    t.remove();
+    stopThinking(t);
     if(!res.ok) throw new Error(j.detail||"うまく話せませんでした");
     add("bot",j.text);
     say(j.text);
     history.push({role:"assistant",text:j.text});
     if((j.tools||[]).some(n=>n==="finish_task"||n==="start_task")) refreshPoints();
+    if(!hidden){ $("#msg").value=""; $("#msg").style.height="auto"; }
   }catch(e){
-    t.remove();
-    add("sys","うまくつながらなかった。もう一回ためしてみて。");
+    stopThinking(t);
+    if(e.name==="AbortError") add("sys","時間がかかりすぎた。もう一回送ってみて");
+    else add("sys","うまくつながらなかった。もう一回ためしてみて。");
   }
-  busy=false; $("#send").disabled=!$("#msg").value.trim();
+  clearTimeout(timeout);
+  setBusy(false);
 }
 
 /* ---- おたよりを撮る ---- */
@@ -187,7 +247,8 @@ $("#cam").addEventListener("change",async e=>{
   e.target.value="";
   const url=URL.createObjectURL(f);
   add("shot","",'<img src="'+url+'" alt="撮ったおたより">');
-  busy=true; const t=thinking();
+  setBusy(true); const t=thinking();
+  let registering=false;
   try{
     const fd=new FormData(); fd.append("image",f); fd.append("hint",child+"のぶん");
     const res=await fetch("/api/extract",{method:"POST",body:fd});
@@ -195,20 +256,28 @@ $("#cam").addEventListener("change",async e=>{
     if(!res.ok) throw new Error(j.detail||"読み取れませんでした");
     const keep=(j.items||[]).filter(x=>!x.duplicate_of);
     if(!keep.length){
-      t.remove(); add("bot","ありがとう。これは新しく入れるものはなかったよ。");
-      busy=false; return;
+      stopThinking(t); add("bot","ありがとう。これは新しく入れるものはなかったよ。");
+      return;
     }
+    registering=true;
     const reg=await fetch("/api/register",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({items:keep})});
-    await reg.json();
-    t.remove();
-    add("sys",keep.length+"件を追加しました");
-    busy=false;
-    send("おたよりを撮った。"+keep.map(x=>x.title).join("、")+" が入った。", true);
+    const registered=await reg.json();
+    stopThinking(t);
+    const added=(registered.results||[]).filter(x=>x.status==="ok");
+    if(!reg.ok||added.length<keep.length) add("sys","登録できなかったものがある。おうちの人に見てもらってね。");
+    if(!reg.ok||!added.length) return;
+    add("sys","追加しました\n"+added.map(x=>"・"+String(x.title||"").replace(/^[^｜]*｜/,"").trim()).join("\n"));
+    await send("おたよりを撮った。"+added.map(x=>x.title).join("、")+" が入った。", true);
   }catch(err){
-    t.remove();
-    add("bot","うーん、うまく読めなかった。ちょっと暗いかも。もう一回撮れる？");
-    busy=false;
+    stopThinking(t);
+    if(registering) add("sys","登録できたか確認できなかった。おうちの人に見てもらってね。");
+    else{
+      const retry=add("bot","",esc("うーん、うまく読めなかった。ちょっと暗いかも。もう一回撮れる？")+'<br><button type="button">もう一回撮る</button>');
+      retry.querySelector("button").addEventListener("click",()=>{if(!busy) $("#cam").click();});
+    }
+  }finally{
+    setBusy(false);
   }
 });
 
@@ -218,21 +287,41 @@ const mic=$("#mic");
 if(!SR){ mic.style.display="none"; }
 else{
   let rec=null, on=false;
+  stopRecognition=()=>{
+    if(rec){
+      rec.onstart=rec.onresult=rec.onerror=rec.onend=null;
+      if(on) rec.abort();
+    }
+    on=false;mic.classList.remove("rec");mic.setAttribute("aria-pressed","false");
+    $("#msg").classList.remove("interim");
+  };
   mic.addEventListener("click",()=>{
+    if(busy) return;
     if(on){ rec && rec.stop(); return; }
     rec=new SR(); rec.lang="ja-JP"; rec.interimResults=true; rec.continuous=false;
     rec.onstart=()=>{on=true;mic.classList.add("rec");mic.setAttribute("aria-pressed","true");};
     rec.onresult=ev=>{
-      let s=""; for(const r of ev.results) s+=r[0].transcript;
-      $("#msg").value=s; $("#send").disabled=!s.trim()||busy;
+      if(busy) return;
+      let s="", interim=false;
+      for(const r of ev.results){s+=r[0].transcript;if(!r.isFinal) interim=true;}
+      $("#msg").value=s;
+      updateInput();
+      $("#msg").classList.toggle("interim",interim);
     };
-    rec.onerror=()=>{};
+    rec.onerror=ev=>{
+      if(ev.error==="not-allowed"||ev.error==="service-not-allowed") add("sys","マイクが使えない。文字で書いてみて");
+      else if(ev.error==="no-speech") add("sys","聞こえなかった。もう一回押して話して");
+    };
     rec.onend=()=>{
       on=false;mic.classList.remove("rec");mic.setAttribute("aria-pressed","false");
-      if($("#msg").value.trim()) submit();
+      $("#msg").classList.remove("interim");
     };
     try{ speechSynthesis.cancel(); }catch(e){}
-    rec.start();
+    add("sys","マイクの許可が出たら、許可して話してね");
+    try{on=true;rec.start();}catch(e){
+      on=false;mic.classList.remove("rec");mic.setAttribute("aria-pressed","false");
+      add("sys","マイクが使えない。文字で書いてみて");
+    }
   });
 }
 
