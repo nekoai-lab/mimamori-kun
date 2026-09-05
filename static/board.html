@@ -38,8 +38,9 @@ header{position:sticky;top:0;z-index:10;background:var(--paper);border-bottom:1p
 .hdr{max-width:860px;margin:0 auto;padding:13px 18px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
 h1{font-family:"Zen Old Mincho",serif;font-size:19px;margin:0;letter-spacing:.05em}
 .date{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink-3);letter-spacing:.06em}
-.nav{margin-left:auto;display:flex;gap:6px}
-.nav a{font-size:12.5px;text-decoration:none;padding:4px 12px;border:1px solid var(--line-strong);border-radius:999px;color:var(--ink-2)}
+.nav{flex-basis:100%;display:flex;gap:6px;overflow-x:auto}
+.nav a{flex:none;font-size:12.5px;text-decoration:none;padding:4px 12px;white-space:nowrap;
+ border:1px solid var(--line-strong);border-radius:999px;color:var(--ink-2)}
 .nav a.on{background:var(--accent);border-color:var(--accent);color:var(--paper);font-weight:700}
 
 .demo{background:#F6E8C6;color:#7A5A10;font-size:12px;text-align:center;padding:5px}
@@ -95,9 +96,11 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
   <div class="hdr">
     <h1>みまもりくん</h1>
     <span class="date" id="today"></span>
-    <nav class="nav">
+    <nav class="nav" aria-label="画面を切り替える">
       <a href="/">撮る</a>
-      <a href="/board" class="on">一覧</a>
+      <a href="/board" class="on" aria-current="page">一覧</a>
+      <a href="/kid">やりとり</a>
+      <a href="/reward">ごほうび</a>
     </nav>
   </div>
 </header>

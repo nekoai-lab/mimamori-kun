@@ -45,7 +45,11 @@ th,td{padding:6px 0;border-bottom:1px solid var(--line);text-align:left}
 th{font-weight:500}td{text-align:right}
 .note,footer{font-size:13px;color:var(--ink-2)}
 footer{border-top:1px solid var(--line);border-bottom:0}
-footer p{margin:8px 0}nav{display:flex;gap:24px}
+footer p{margin:8px 0}
+.nav{flex-basis:100%;display:flex;gap:6px;overflow-x:auto}
+.nav a{flex:none;font-size:12.5px;text-decoration:none;padding:4px 12px;white-space:nowrap;
+ border:1px solid var(--line-strong);border-radius:999px;color:var(--ink-2)}
+.nav a.on{background:var(--me);border-color:var(--me);color:var(--paper);font-weight:700}
 a{color:var(--me)}
 :focus-visible{outline:2px solid var(--me);outline-offset:3px}
 #error{color:var(--error)}
@@ -57,6 +61,12 @@ a{color:var(--me)}
   <h1>みまもりくん</h1>
   <select id="child" aria-label="子ども" disabled></select>
   <span class="pt"><b id="balance">—</b> pt</span>
+  <nav class="nav" aria-label="画面を切り替える">
+    <a href="/">撮る</a>
+    <a href="/board">一覧</a>
+    <a href="/kid">やりとり</a>
+    <a href="/reward" class="on" aria-current="page">ごほうび</a>
+  </nav>
 </div></header>
 <main>
   <p id="status" role="status"></p>
@@ -76,7 +86,6 @@ a{color:var(--me)}
   </section>
 </main>
 <footer>
-  <nav aria-label="ほかの画面"><a href="/kid">やりとり</a><a href="/board">ボード</a></nav>
   <p>交換はおうちの人と相談して決めます</p>
 </footer>
 <script>
