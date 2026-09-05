@@ -37,7 +37,7 @@ h1{font-family:"Zen Maru Gothic",sans-serif;font-size:19px;margin:0;letter-spaci
 .tts{font:inherit;font-size:11px;color:var(--ink-2);background:transparent;border:1px solid var(--line-strong);border-radius:999px;padding:3px 6px;cursor:pointer}
 .who select{font:inherit;font-size:13px;background:transparent;color:var(--ink);
  border:1px solid var(--line-strong);border-radius:999px;padding:3px 10px}
-.pt{margin-left:auto;font-family:"Zen Maru Gothic",sans-serif;font-size:14px;color:var(--warm);
+.pt{text-decoration:none;margin-left:auto;font-family:"Zen Maru Gothic",sans-serif;font-size:14px;color:var(--warm);
  background:var(--warm-soft);border-radius:999px;padding:4px 13px;font-weight:700}
 
 main{flex:1;overflow-y:auto}
@@ -80,7 +80,7 @@ input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events
   <h1>みまもりくん</h1>
   <span class="who"><select id="child"></select></span>
   <button class="tts" id="tts" aria-pressed="true">読み上げ オン</button>
-  <span class="pt" id="pt">— pt</span>
+  <a class="pt" id="pt" href="/reward" title="ポイントと交換">— pt</a>
 </div></header>
 
 <main id="main"><div class="thread" id="thread"></div></main>
