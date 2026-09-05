@@ -76,6 +76,7 @@ h2.late{color:var(--late-ink)}
 .meta{font-size:12px;color:var(--ink-3);margin-top:2px;display:flex;gap:9px;flex-wrap:wrap;align-items:center}
 .kind{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.08em;padding:1px 6px;
  border:1px solid var(--line-strong);border-radius:2px}
+.doing{color:var(--accent);font-weight:700}
 .bring{font-size:12px;color:var(--ink-2);margin-top:3px}
 .bring b{color:var(--ink-3);font-weight:400}
 .acts{flex:none;display:flex;gap:5px;align-items:center}
@@ -185,9 +186,12 @@ $(".filters").addEventListener("click",e=>{
 });
 
 function group(items){
-  const g={late:[],today:[],tomorrow:[],week:[],later:[],done:[]};
+  const g={late:[],today:[],tomorrow:[],week:[],later:[],plan:[],done:[]};
   for(const it of items){
     if(it.status==="done"){g.done.push(it);continue;}
+    // 行事は行くだけで、チェックして消すものがない。
+    // やることに混ぜると、提出物と同じ重みに見えてしまう。
+    if(it.kind==="event"){g.plan.push(it);continue;}
     if(it.days_left<0)g.late.push(it);
     else if(it.days_left===0)g.today.push(it);
     else if(it.days_left===1)g.tomorrow.push(it);
@@ -219,6 +223,10 @@ function render(){
     h+='<h2'+(late?' class="late"':'')+'>'+label+'<span class="cnt">'+g[k].length+"</span></h2>";
     h+='<div class="list">'+g[k].map(rowHtml).join("")+"</div>";
   }
+  if(g.plan.length){
+    h+='<h2>予定<span class="cnt">'+g.plan.length+"</span></h2>";
+    h+='<div class="list">'+g.plan.map(rowHtml).join("")+"</div>";
+  }
   if(showDone&&g.done.length){
     h+='<h2>済<span class="cnt">'+g.done.length+"</span></h2>";
     h+='<div class="list">'+g.done.map(rowHtml).join("")+"</div>";
@@ -238,14 +246,15 @@ function rowHtml(it){
         +"<span>"+fmt(it.date)+(it.time?" "+esc(it.time):"")+"</span>"
         +'<span class="kind">'+esc(KIND[it.kind]||it.kind||"—")+"</span>"
         +(late?'<span style="color:var(--late-ink);font-weight:700">'+Math.abs(it.days_left)+"日超過</span>":"")
+        +(it.status==="doing"?'<span class="doing">やってる</span>':"")
         +(it.points?'<span>'+it.points+"pt</span>":"")
       +"</div>"
       +(it.bring?'<div class="bring"><b>持ち物:</b> '+esc(it.bring)+"</div>":"")
     +"</div>"
-    +'<div class="acts">'
-      +'<button data-status="doing" data-id="'+esc(it.id)+'" aria-pressed="'+(it.status==="doing")+'">やってる</button>'
+    // 「やってる」は子が /kid で言うこと。親は見るだけで、代わりに申告しない。
+    +(it.kind==="event"?"":'<div class="acts">'
       +'<button data-status="done" data-id="'+esc(it.id)+'" aria-pressed="'+(it.status==="done")+'">済</button>'
-    +"</div>"
+    +"</div>")
   +"</div>";
 }
 
