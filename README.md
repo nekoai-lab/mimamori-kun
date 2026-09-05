@@ -31,6 +31,41 @@
 
 `/board` と `/kid` は `MIMAMORI_DEMO=1` を付けるとダミーのタスクで動く（`/kid` の会話は Gemini が必要）。
 
+## いまどこまで動くか（2026-09-05 時点）
+
+| | 状態 |
+|---|---|
+| `/kid` の会話 | **動く。** 今日のやることを聞かれ、「終わった」と言うと `/board` から外れる |
+| 先回り（3〜7日先の行事を自分で聞く） | **動く。** 1回の会話で1つだけ |
+| 態度の禁止事項 | **会話ログで確認済み。** 答えを4回求めても言わない／数を答えない／評価しない／責めない |
+| `/board` のやること一覧 | **動く。** 遅れているものが最上部 |
+| `/` のおたより抽出 → 承認 → 登録 | 実装済み。`samples/` の2枚での通し確認は未 |
+| `/reward` の交換画面 | **未作成。** `static/reward.html` を置けば表示される |
+| 交換レートの保存 | **未実装。** `points.set_rewards` が `NotImplementedError` |
+| 本物のカレンダーへの書き込み | 実装済み。今日は `MIMAMORI_DEMO=1` で繋いでいない |
+
+## 画面と API の契約
+
+画面は自分の口だけを叩く。口の形を変えるときは、使っている画面の持ち主に声をかける。
+
+| 画面 | 叩く口 |
+|---|---|
+| `/`（index.html） | `/api/config` `/api/extract` `/api/register` |
+| `/kid`（kid.html） | `/api/config` `/api/extract` `/api/register` `/api/tasks` `/api/kid/chat` |
+| `/board`（board.html） | `/api/config` `/api/tasks` `/api/status` |
+| `/reward`（未作成） | `/api/points` `/api/rewards` ← **この2つはまだ誰も使っていない。空いている** |
+
+`mimamori/points.py` は、この5つのシグネチャを保てば `main.py` と繋がる。中身は作り替えてよい。
+
+```python
+balance(child) -> int
+history(child, limit=30) -> list[dict]
+get_rewards() -> list[dict]
+set_rewards(rewards) -> dict     # 未実装。NotImplementedError なら 501 が返る
+points_for(kind, fixed_count=0) -> int
+RULES: dict                      # calendar_tools._points_for と値を揃えること
+```
+
 ## 台帳は Google カレンダー
 
 新しいDBは作らない。予定の `extendedProperties.private` に
@@ -50,9 +85,16 @@
 
 - 答えを言わない。ヒントは「場所」と「やり方」まで
 - 残りを数えない。「あと3つ」ではなく「1つ終わったね」
+- 数を聞かれても答えないが、**黙って話を変えない。**
+  「数は数えないことにしてる」と言って、次の1つだけ示す（無視されたと思わせるほうが害になる）
 - 評価しない。「えらい」ではなく「終わったね」
+- 責めない。期限を過ぎていても「まだ残ってる。今日やっちゃう？」
 - 質問は1つずつ。同じことは2回まで
 - 秘密を持たない。親も見られることを画面にも明示
+
+**この態度は決定事項。変えるときは相談する。**
+UIの文言もこれに合わせる。理由は「漏れる→怒られる→子が自信をなくす」の連鎖を解こうとしているため。
+ここで催促を強めると、怒る役をアプリに移しただけになる。
 
 ## 構成
 
@@ -65,18 +107,28 @@
 | 実行環境 | Cloud Run |
 
 ```
-app/
-├── main.py                  FastAPI（/api/extract, /api/register）
+mimamori-kun/
+├── main.py                  FastAPI。画面と API の入口
 ├── mimamori/
 │   ├── config.py            環境変数
 │   ├── schema.py            抽出結果の型
-│   ├── calendar_tools.py    list_events / create_events
-│   └── agent.py             ADK エージェントと実行
-├── static/index.html        撮る → 確認 → 登録 の1画面
+│   ├── calendar_tools.py    カレンダーの読み書き（台帳）
+│   ├── agent.py             おたよりを読むエージェント
+│   ├── kid_agent.py         子どもと話すエージェント（★⑤）
+│   └── points.py            ポイントと交換        ← 共同開発者
+├── static/
+│   ├── index.html           撮る → 確認 → 登録（親）
+│   ├── board.html           やること一覧（親）
+│   ├── kid.html             会話画面（子）        ← 共同開発者
+│   └── reward.html          交換画面              ← 共同開発者・未作成
 ├── samples/                 テスト用のダミーおたより
+├── docs/分担.md             担当・決定事項・動作確認済みの版
 ├── Dockerfile
 └── deploy.sh
 ```
+
+**誰がどのファイルを持つかは [`docs/分担.md`](docs/分担.md) にある。**
+表にないファイルを触るときは先に一声かける。PRは回さず main に直コミット、push 前に `git pull --rebase`。
 
 ## GCP プロジェクトは分ける
 
@@ -154,6 +206,37 @@ Google カレンダー → 対象カレンダーの設定 → 「特定のユー
 - **終日予定が1日ずれる** → Calendar API の `end.date` は排他。`calendar_tools._body` で +1 日している
 - **`403 Vertex AI API has not been used`** → `gcloud services enable aiplatform.googleapis.com`
 - **ADK のバージョン差** → `agent.py` の `InMemoryRunner` / `run_async` のシグネチャが版で変わることがある
+
+## 今後の進め方
+
+### 次にやること（上から順に）
+
+1. **共同開発者** — `static/reward.html` を作る。`/api/points?child=名前` と `/api/rewards` は
+   すでに動いているので、fetch するだけで残高・履歴・交換候補が返る。`main.py` はファイルの有無を
+   リクエストごとに見るので、置いた瞬間から `/reward` に出る（再起動不要）
+2. **共同開発者** — `points.set_rewards` を実装する。保存先の案は `mimamori/points.py` の
+   TODO に3つ書いてある（環境変数のまま／カレンダーに設定用の予定を1つ作る／Firestore）。
+   今日は環境変数のままで十分
+3. **奈緒美** — `/kid` を素で触って、崩れたところを会話ログで渡す。
+   台本ではない言い方（言い直す、話が飛ぶ、無言）で崩れ方が変わる
+4. `samples/` の2枚で `/` の通し（抽出 → 重複照会 → 承認 → 登録）を確認する
+
+### 決めていない判断が2つある
+
+- **「2回言って動かなければ引く」を件単位にするか、会話単位にするか。**
+  いまは件単位で、断られた用件からは引くが別の用件では声をかけ得る。会話単位にすると確実に止まる
+  代わりに、伴走の核である先回りがその会話では効かなくなる。態度の決定事項なので相談して決める
+- **`/kid` からの登録に承認を挟むか。**
+  いまの `kid.html` は `/api/extract` の直後に `/api/register` を呼んでいて、親が見る段階がない。
+  上に書いた「処置は承認」と食い違っている。外から来た画像を LLM に読ませる経路なので、
+  インジェクションの入口が書き込みに直結している状態
+
+### そのあと（今日はやらない）
+
+- Cloud Run へのデプロイ
+- 本物の Google カレンダー接続（`MIMAMORI_DEMO` を 0 にして、カレンダーをサービスアカウントに共有）
+- 実物のおたよりでの検証
+- LINE通知
 
 ## 今日やらなかったこと
 
