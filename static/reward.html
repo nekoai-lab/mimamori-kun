@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>みまもりくん</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap">
+<style>
+:root{
+  --paper:#FAF7F0;--surface:#fff;--ink:#1F2422;--ink-2:#5A625F;
+  --line:#E4E0D5;--line-strong:#CFC9B9;--me:#0F6B62;--me-ink:#fff;
+  --warm:#C8961E;--warm-soft:#FBF3DF;--error:#B42318;
+  --shadow:0 1px 2px rgba(31,36,34,.05),0 10px 26px -20px rgba(31,36,34,.45);
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#14110C;--surface:#1E1B15;--ink:#F0ECE2;--ink-2:#B5AE9E;
+  --line:#312C22;--line-strong:#453E30;--me:#5FCFC0;--me-ink:#14110C;
+  --warm:#E0BB63;--warm-soft:#2C2413;--error:#FF9A91;
+  --shadow:0 1px 2px rgba(0,0,0,.5),0 10px 26px -20px rgba(0,0,0,1);
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:"Noto Sans JP",system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;font-size:16px;line-height:1.75;-webkit-font-smoothing:antialiased}
+header,footer{border-bottom:1px solid var(--line)}
+.hdr,main,footer{max-width:640px;margin:0 auto;padding:16px}
+.hdr{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+h1{font-family:"Zen Maru Gothic",sans-serif;font-size:19px;margin:0;letter-spacing:.04em}
+select{max-width:100%;font:inherit;font-size:14px;background:var(--surface);color:var(--ink);border:1px solid var(--line-strong);border-radius:999px;padding:4px 10px}
+.pt{margin-left:auto;color:var(--warm);background:var(--warm-soft);border-radius:999px;padding:4px 13px;white-space:nowrap}
+section{margin-bottom:28px}
+h2{font-size:17px;margin:0 0 12px}
+.cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.card{padding:16px;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:var(--shadow);overflow-wrap:anywhere}
+.card h3{margin:0 0 8px;font-size:16px;font-weight:500}
+.card.unavailable{opacity:.6}
+.badge{display:inline-block;margin-left:10px;padding:2px 8px;border-radius:999px;background:var(--me);color:var(--me-ink);font-size:12px}
+.history{list-style:none;padding:0;margin:0}
+.history li{display:flex;align-items:baseline;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.date{color:var(--ink-2);font-size:14px;white-space:nowrap}
+.title{flex:1;overflow-wrap:anywhere;min-width:0}
+.points{white-space:nowrap}
+table{font-size:14px;border-collapse:collapse;width:100%}
+th,td{padding:6px 0;border-bottom:1px solid var(--line);text-align:left}
+th{font-weight:500}td{text-align:right}
+.note,footer{font-size:13px;color:var(--ink-2)}
+footer{border-top:1px solid var(--line);border-bottom:0}
+footer p{margin:8px 0}nav{display:flex;gap:24px}
+a{color:var(--me)}
+:focus-visible{outline:2px solid var(--me);outline-offset:3px}
+#error{color:var(--error)}
+#status{color:var(--ink-2);font-size:14px}
+</style>
+</head>
+<body>
+<header><div class="hdr">
+  <h1>みまもりくん</h1>
+  <select id="child" aria-label="子ども" disabled></select>
+  <span class="pt"><b id="balance">—</b> pt</span>
+</div></header>
+<main>
+  <p id="status" role="status"></p>
+  <p id="error" role="alert" hidden></p>
+  <section aria-labelledby="rewards-heading">
+    <h2 id="rewards-heading">交換できるもの</h2>
+    <div id="rewards" class="cards"></div>
+  </section>
+  <section aria-labelledby="history-heading">
+    <h2 id="history-heading">たまった記録</h2>
+    <ul id="history" class="history"></ul>
+  </section>
+  <section aria-labelledby="rules-heading">
+    <h2 id="rules-heading">ポイントのきまり</h2>
+    <table aria-labelledby="rules-heading"><tbody id="rules"></tbody></table>
+    <p class="note">テストは点数ではなく、直した問題の数につきます</p>
+  </section>
+</main>
+<footer>
+  <nav aria-label="ほかの画面"><a href="/kid">やりとり</a><a href="/board">ボード</a></nav>
+  <p>交換はおうちの人と相談して決めます</p>
+</footer>
+<script>
+const $=s=>document.querySelector(s);
+let requestId=0;
+function element(tag,text,className){
+  const node=document.createElement(tag);
+  if(text!==undefined) node.textContent=text;
+  if(className) node.className=className;
+  return node;
+}
+async function get(url){
+  const response=await fetch(url,{cache:"no-store"});
+  if(!response.ok) throw new Error("読み込み失敗");
+  return response.json();
+}
+function render(data,rewards){
+  $("#balance").textContent=data.balance;
+  for(const reward of rewards){
+    const available=data.balance>=reward.points;
+    const card=element("article",undefined,"card"+(available?"":" unavailable"));
+    card.appendChild(element("h3",reward.label));
+    card.appendChild(element("span",reward.points+" pt","points"));
+    if(available) card.appendChild(element("span","交換できる","badge"));
+    $("#rewards").appendChild(card);
+  }
+  if(!rewards.length) $("#rewards").appendChild(element("p","交換できるものはまだありません"));
+  const history=[...data.history].sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  for(const entry of history){
+    const row=element("li");
+    const parts=String(entry.date).match(/^\d{4}-(\d{2})-(\d{2})/);
+    row.appendChild(element("span",parts?Number(parts[1])+"/"+Number(parts[2]):entry.date,"date"));
+    row.appendChild(element("span",entry.title,"title"));
+    row.appendChild(element("span","+"+entry.points+" pt","points"));
+    $("#history").appendChild(row);
+  }
+  if(!history.length) $("#history").appendChild(element("li","まだ記録はありません"));
+  for(const [key,label] of Object.entries({homework:"宿題",deadline:"提出物",bring:"持ち物",event:"行事"})){
+    const row=element("tr");
+    const heading=element("th",label);
+    heading.scope="row";
+    row.appendChild(heading);
+    row.appendChild(element("td",data.rules[key]+" pt"));
+    $("#rules").appendChild(row);
+  }
+}
+async function refresh(){
+  const id=++requestId;
+  const selected=$("#child").value;
+  $("#error").hidden=true;
+  $("#status").textContent="読み込み中";
+  $("#balance").textContent="—";
+  for(const target of ["#rewards","#history","#rules"]) $(target).replaceChildren();
+  try{
+    const [config,data,rewards]=await Promise.all([
+      get("/api/config"),
+      get("/api/points?child="+encodeURIComponent(selected)),
+      get("/api/rewards")
+    ]);
+    if(id!==requestId) return;
+    setChildren(config.children,selected);
+    if($("#child").value!==selected) return refresh();
+    render(data,rewards.rewards);
+  }catch(error){
+    if(id!==requestId) return;
+    $("#error").textContent="読み込めませんでした。もう一度画面を開いてください。";
+    $("#error").hidden=false;
+  }finally{
+    if(id===requestId) $("#status").textContent="";
+  }
+}
+function setChildren(children,selected){
+  if(!children.length) throw new Error("子ども未登録");
+  $("#child").replaceChildren();
+  for(const child of children){
+    const option=element("option",child.name);
+    option.value=child.name;
+    $("#child").appendChild(option);
+  }
+  if(children.some(child=>child.name===selected)) $("#child").value=selected;
+  $("#child").disabled=false;
+}
+async function boot(){
+  $("#status").textContent="読み込み中";
+  try{
+    const config=await get("/api/config");
+    setChildren(config.children,"");
+    await refresh();
+  }catch(error){
+    $("#status").textContent="";
+    $("#error").textContent="読み込めませんでした。もう一度画面を開いてください。";
+    $("#error").hidden=false;
+  }
+}
+$("#child").addEventListener("change",refresh);
+boot();
+</script>
+</body>
+</html>
