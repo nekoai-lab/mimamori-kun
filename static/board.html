@@ -257,6 +257,12 @@ async function onStatus(e){
 }
 
 load();
+
+// 子が /kid で終わらせたものを、こちらに戻ってきた時点で反映する。
+// 手でリロードしないと消えないと、消えたことに気づけない。
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) load();
+});
 </script>
 </body>
 </html>
