@@ -116,6 +116,10 @@ def _raw(start_date: str, end_date: str) -> List[Dict[str, Any]]:
     return out
 
 
+# 何日前まで遡って「遅れている」を拾うか。前向きの窓（今日+14日）と対称にする。
+# ここが 0 だと、昨日期限の提出物がそもそも取れず、遅れている欄が必ず空になる。
+OVERDUE_DAYS = 14
+
 # 同じ日のものをどの順で見せるか。取り返しがつかないものを上に置く。
 # 提出物はその日を過ぎたら終わり。持ち物はその日の朝まで。
 # 宿題は遅れても出せる。行事は行くだけで、やることがない。
@@ -126,11 +130,15 @@ def list_tasks(days: int = 14) -> Dict[str, Any]:
     """ダッシュボード用。今日から days 日ぶんを、子ども別・状態別に整えて返す。"""
     today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
     end = today + dt.timedelta(days=days)
+    start = today - dt.timedelta(days=OVERDUE_DAYS)
 
     if DEMO:
         items = _demo_state(today)
     else:
-        items = [e for e in _raw(today.isoformat(), end.isoformat()) if e["mine"]]
+        items = [e for e in _raw(start.isoformat(), end.isoformat()) if e["mine"]]
+        # 過去まで遡るのは、やり残しを見つけるため。済んだものまで持ってくると
+        # ポイント合計が膨らみ、「済」も伸びる。過去は未完了だけ拾う。
+        items = [e for e in items if e["date"] >= today.isoformat() or e["status"] != "done"]
 
     for e in items:
         d = dt.date.fromisoformat(e["date"])
