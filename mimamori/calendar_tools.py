@@ -116,6 +116,12 @@ def _raw(start_date: str, end_date: str) -> List[Dict[str, Any]]:
     return out
 
 
+# 同じ日のものをどの順で見せるか。取り返しがつかないものを上に置く。
+# 提出物はその日を過ぎたら終わり。持ち物はその日の朝まで。
+# 宿題は遅れても出せる。行事は行くだけで、やることがない。
+_KIND_ORDER = {"deadline": 0, "bring": 1, "homework": 2, "event": 3}
+
+
 def list_tasks(days: int = 14) -> Dict[str, Any]:
     """ダッシュボード用。今日から days 日ぶんを、子ども別・状態別に整えて返す。"""
     today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
@@ -141,7 +147,10 @@ def list_tasks(days: int = 14) -> Dict[str, Any]:
     return {
         "today": today.isoformat(),
         "children": [c["name"] for c in config.children],
-        "items": sorted(items, key=lambda x: (x["status"] == "done", x["date"], x["summary"])),
+        "items": sorted(
+            items,
+            key=lambda x: (x["status"] == "done", x["date"], _KIND_ORDER.get(x["kind"], 9), x["summary"]),
+        ),
         "points": points,
     }
 
