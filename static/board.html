@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>みまもりくん — 一覧</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@700&family=Noto+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --paper:#F6F6F1;--surface:#fff;--surface-2:#FBFBF7;
+  --ink:#191C1B;--ink-2:#4A524F;--ink-3:#7C8783;
+  --line:#DCDED6;--line-strong:#C3C8BF;
+  --accent:#0F6B62;--accent-soft:#E2F0ED;
+  --late:#B3402015;--late-line:#B94F2B;--late-ink:#963C1E;
+  --kidA:#2F6690;--kidA-soft:#E3EDF4;
+  --kidB:#8A5A2B;--kidB-soft:#F4EBDF;
+  --shadow:0 1px 2px rgba(25,28,27,.05),0 8px 24px -18px rgba(25,28,27,.3);
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#101413;--surface:#191E1D;--surface-2:#151A19;
+  --ink:#ECEFEB;--ink-2:#AFB9B5;--ink-3:#7E8A86;
+  --line:#2A3231;--line-strong:#3A4442;
+  --accent:#5FCFC0;--accent-soft:#14302C;
+  --late:#B9502B20;--late-line:#E8926B;--late-ink:#E8926B;
+  --kidA:#8FBEDD;--kidA-soft:#1B2C38;
+  --kidB:#D5AC7C;--kidB-soft:#312619;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -18px rgba(0,0,0,.9);
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+ font-family:"Noto Sans JP",system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;
+ font-size:15px;line-height:1.7;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.wrap{max-width:860px;margin:0 auto;padding:0 18px 90px}
+header{position:sticky;top:0;z-index:10;background:var(--paper);border-bottom:1px solid var(--line)}
+.hdr{max-width:860px;margin:0 auto;padding:13px 18px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+h1{font-family:"Zen Old Mincho",serif;font-size:19px;margin:0;letter-spacing:.05em}
+.date{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink-3);letter-spacing:.06em}
+.nav{margin-left:auto;display:flex;gap:6px}
+.nav a{font-size:12.5px;text-decoration:none;padding:4px 12px;border:1px solid var(--line-strong);border-radius:999px;color:var(--ink-2)}
+.nav a.on{background:var(--accent);border-color:var(--accent);color:var(--paper);font-weight:700}
+
+.demo{background:#F6E8C6;color:#7A5A10;font-size:12px;text-align:center;padding:5px}
+@media (prefers-color-scheme:dark){.demo{background:#33290F;color:#E0C583}}
+
+.filters{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:16px 0 6px}
+.filters button{font:inherit;font-size:12.5px;padding:4px 13px;border:1px solid var(--line-strong);
+ background:transparent;color:var(--ink-2);border-radius:999px;cursor:pointer}
+.filters button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink);font-weight:700}
+.pts{margin-left:auto;display:flex;gap:8px;font-size:12.5px;color:var(--ink-2);align-items:center}
+.pt{border:1px solid var(--line);border-radius:999px;padding:3px 11px;background:var(--surface)}
+.pt b{font-family:"IBM Plex Mono",monospace;font-size:13px}
+
+h2{font-family:"Zen Old Mincho",serif;font-size:15px;margin:22px 0 8px;letter-spacing:.04em;
+ display:flex;align-items:baseline;gap:9px}
+h2 .cnt{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3);font-weight:400}
+h2.late{color:var(--late-ink)}
+
+.list{display:flex;flex-direction:column;gap:7px}
+.row{background:var(--surface);border:1px solid var(--line);border-radius:4px;box-shadow:var(--shadow);
+ padding:10px 13px;display:flex;gap:11px;align-items:flex-start}
+.row.is-late{background:var(--late);border-color:var(--late-line)}
+.row.is-done{opacity:.5}
+.chip{flex:none;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;margin-top:2px;white-space:nowrap}
+.k0{background:var(--kidA-soft);color:var(--kidA)}
+.k1{background:var(--kidB-soft);color:var(--kidB)}
+.main{flex:1;min-width:0}
+.ttl{font-weight:700;font-size:14.5px;line-height:1.5}
+.row.is-done .ttl{text-decoration:line-through}
+.meta{font-size:12px;color:var(--ink-3);margin-top:2px;display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+.kind{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.08em;padding:1px 6px;
+ border:1px solid var(--line-strong);border-radius:2px}
+.bring{font-size:12px;color:var(--ink-2);margin-top:3px}
+.bring b{color:var(--ink-3);font-weight:400}
+.acts{flex:none;display:flex;gap:5px;align-items:center}
+.acts button{font:inherit;font-size:11.5px;padding:4px 10px;border-radius:3px;cursor:pointer;
+ border:1px solid var(--line-strong);background:transparent;color:var(--ink-2)}
+.acts button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--paper);font-weight:700}
+.acts button:disabled{opacity:.4;cursor:default}
+
+.empty{border:1px dashed var(--line-strong);border-radius:4px;padding:26px 18px;text-align:center;
+ color:var(--ink-3);font-size:13.5px}
+.empty b{display:block;color:var(--accent);font-size:15px;margin-bottom:4px}
+.err{background:#F7E7DF;border:1px solid #B94F2B;color:#963C1E;border-radius:4px;padding:12px 14px;font-size:13.5px;margin-top:18px}
+@media (prefers-color-scheme:dark){.err{background:#33211A;color:#E8926B}}
+footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
+ font-size:12px;color:var(--ink-3);display:flex;gap:14px;flex-wrap:wrap}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <div class="hdr">
+    <h1>みまもりくん</h1>
+    <span class="date" id="today"></span>
+    <nav class="nav">
+      <a href="/">撮る</a>
+      <a href="/board" class="on">一覧</a>
+    </nav>
+  </div>
+</header>
+<div id="demo"></div>
+
+<div class="wrap">
+  <div class="filters">
+    <button data-f="all" aria-pressed="true">全員</button>
+    <span id="kidbtns"></span>
+    <button data-f="done" aria-pressed="false">済も表示</button>
+    <span class="pts" id="pts"></span>
+  </div>
+
+  <div id="body"></div>
+
+  <footer>
+    <a href="https://calendar.google.com/" target="_blank" rel="noopener">Google カレンダーで開く</a>
+    <span id="meta"></span>
+  </footer>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const KIND={event:"行事",deadline:"提出",homework:"宿題",bring:"持ち物"};
+let data=null, filter="all", showDone=false;
+
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+function fmt(iso){
+  // 端末のタイムゾーンに引きずられないよう、文字列のまま扱う
+  const [y,m,dd]=iso.split("-").map(Number);
+  const w="日月火水木金土"[new Date(Date.UTC(y,m-1,dd)).getUTCDay()];
+  return m+"/"+dd+"（"+w+"）";
+}
+
+async function load(){
+  try{
+    const [t,c]=await Promise.all([
+      fetch("/api/tasks").then(r=>r.json()),
+      fetch("/api/config").then(r=>r.json()).catch(()=>({}))
+    ]);
+    if(t.detail) throw new Error(t.detail);
+    data=t;
+    $("#today").textContent=fmt(t.today);
+    if(c.calendar_id) $("#meta").textContent="反映先: "+c.calendar_id;
+    if(c.service_account==="(デモモード)"){
+      $("#demo").innerHTML='<div class="demo">デモモードです。ダミーのタスクを表示しています（MIMAMORI_DEMO=1）</div>';
+    }
+    renderKidButtons();
+    render();
+  }catch(e){
+    $("#body").innerHTML='<div class="err">'+esc(e.message||"読み込みに失敗しました")+"</div>";
+  }
+}
+
+function renderKidButtons(){
+  $("#kidbtns").innerHTML=data.children.map((n,i)=>
+    '<button data-f="kid:'+esc(n)+'" aria-pressed="false">'+esc(n)+"</button>").join("");
+  document.querySelectorAll(".filters button").forEach(b=>{
+    b.addEventListener("click",()=>{
+      if(b.dataset.f==="done"){
+        showDone=!showDone; b.setAttribute("aria-pressed",String(showDone)); render(); return;
+      }
+      filter=b.dataset.f;
+      document.querySelectorAll('.filters button:not([data-f="done"])').forEach(x=>
+        x.setAttribute("aria-pressed",String(x.dataset.f===filter)));
+      render();
+    });
+  });
+}
+
+function group(items){
+  const g={late:[],today:[],tomorrow:[],week:[],later:[],done:[]};
+  for(const it of items){
+    if(it.status==="done"){g.done.push(it);continue;}
+    if(it.days_left<0)g.late.push(it);
+    else if(it.days_left===0)g.today.push(it);
+    else if(it.days_left===1)g.tomorrow.push(it);
+    else if(it.days_left<=7)g.week.push(it);
+    else g.later.push(it);
+  }
+  return g;
+}
+
+function render(){
+  let items=data.items;
+  if(filter.startsWith("kid:")) items=items.filter(i=>i.child===filter.slice(4));
+
+  $("#pts").innerHTML=data.children.map(n=>
+    '<span class="pt">'+esc(n)+' <b>'+(data.points[n]||0)+"</b>pt</span>").join("");
+
+  const g=group(items);
+  const secs=[
+    ["late","遅れている",true],["today","今日",false],["tomorrow","明日",false],
+    ["week","今週",false],["later","その先",false]
+  ];
+  let h="";
+  const open=g.late.length+g.today.length+g.tomorrow.length+g.week.length+g.later.length;
+  if(open===0){
+    h+='<div class="empty"><b>抜けはありません</b>確認しなくて大丈夫です。</div>';
+  }
+  for(const [k,label,late] of secs){
+    if(!g[k].length) continue;
+    h+='<h2'+(late?' class="late"':'')+'>'+label+'<span class="cnt">'+g[k].length+"</span></h2>";
+    h+='<div class="list">'+g[k].map(rowHtml).join("")+"</div>";
+  }
+  if(showDone&&g.done.length){
+    h+='<h2>済<span class="cnt">'+g.done.length+"</span></h2>";
+    h+='<div class="list">'+g.done.map(rowHtml).join("")+"</div>";
+  }
+  $("#body").innerHTML=h;
+  document.querySelectorAll("[data-status]").forEach(b=>b.addEventListener("click",onStatus));
+}
+
+function rowHtml(it){
+  const ki=data.children.indexOf(it.child);
+  const late=it.days_left<0&&it.status!=="done";
+  return '<div class="row'+(late?" is-late":"")+(it.status==="done"?" is-done":"")+'" data-id="'+esc(it.id)+'">'
+    +'<span class="chip k'+(ki===0?0:1)+'">'+esc(it.child||"？")+"</span>"
+    +'<div class="main">'
+      +'<div class="ttl">'+esc(it.summary.replace(/^✓\s*/,"").replace(/^[^｜]*｜/,""))+"</div>"
+      +'<div class="meta">'
+        +"<span>"+fmt(it.date)+(it.time?" "+esc(it.time):"")+"</span>"
+        +'<span class="kind">'+esc(KIND[it.kind]||it.kind||"—")+"</span>"
+        +(late?'<span style="color:var(--late-ink);font-weight:700">'+Math.abs(it.days_left)+"日超過</span>":"")
+        +(it.points?'<span>'+it.points+"pt</span>":"")
+      +"</div>"
+      +(it.bring?'<div class="bring"><b>持ち物:</b> '+esc(it.bring)+"</div>":"")
+    +"</div>"
+    +'<div class="acts">'
+      +'<button data-status="doing" data-id="'+esc(it.id)+'" aria-pressed="'+(it.status==="doing")+'">やってる</button>'
+      +'<button data-status="done" data-id="'+esc(it.id)+'" aria-pressed="'+(it.status==="done")+'">済</button>'
+    +"</div>"
+  +"</div>";
+}
+
+async function onStatus(e){
+  const btn=e.currentTarget;
+  const id=btn.dataset.id;
+  const it=data.items.find(x=>x.id===id);
+  if(!it) return;
+  const next=(it.status===btn.dataset.status)?"todo":btn.dataset.status;
+  btn.disabled=true;
+  try{
+    const res=await fetch("/api/status",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({event_id:id,status:next})});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.detail||"更新に失敗しました");
+    it.status=next;
+    if(next==="done") data.points[it.child]=(data.points[it.child]||0)+it.points;
+    else if(btn.dataset.status==="done") data.points[it.child]=Math.max(0,(data.points[it.child]||0)-it.points);
+    render();
+  }catch(err){
+    btn.disabled=false;
+    alert(err.message);
+  }
+}
+
+load();
+</script>
+</body>
+</html>

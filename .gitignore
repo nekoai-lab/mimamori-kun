@@ -1,0 +1,17 @@
+# 環境
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# OS / エディタ
+.DS_Store
+.idea/
+.vscode/
+
+# 認証情報は絶対に入れない
+*.json.key
+service-account*.json
+credentials*.json

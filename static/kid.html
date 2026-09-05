@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>みまもりくん</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap">
+<style>
+:root{
+  --paper:#FAF7F0;--surface:#fff;--ink:#1F2422;--ink-2:#5A625F;--ink-3:#8B938F;
+  --line:#E4E0D5;--line-strong:#CFC9B9;
+  --me:#0F6B62;--me-ink:#fff;
+  --bot:#fff;--bot-line:#D9CFAE;--bot-name:#9A7B23;
+  --warm:#C8961E;--warm-soft:#FBF3DF;
+  --shadow:0 1px 2px rgba(31,36,34,.05),0 10px 26px -20px rgba(31,36,34,.45);
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#14110C;--surface:#1E1B15;--ink:#F0ECE2;--ink-2:#B5AE9E;--ink-3:#867F70;
+  --line:#312C22;--line-strong:#453E30;
+  --me:#5FCFC0;--me-ink:#14110C;
+  --bot:#221E17;--bot-line:#4A4030;--bot-name:#D9BE7A;
+  --warm:#E0BB63;--warm-soft:#2C2413;
+  --shadow:0 1px 2px rgba(0,0,0,.5),0 10px 26px -20px rgba(0,0,0,1);
+}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--paper);color:var(--ink);
+ font-family:"Noto Sans JP",system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;
+ font-size:16px;line-height:1.75;display:flex;flex-direction:column;-webkit-font-smoothing:antialiased}
+
+header{border-bottom:1px solid var(--line);background:var(--paper);flex:none}
+.hdr{max-width:640px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:10px}
+h1{font-family:"Zen Maru Gothic",sans-serif;font-size:19px;margin:0;letter-spacing:.04em}
+.who{font-size:13px;color:var(--ink-2)}
+.who select{font:inherit;font-size:13px;background:transparent;color:var(--ink);
+ border:1px solid var(--line-strong);border-radius:999px;padding:3px 10px}
+.pt{margin-left:auto;font-family:"Zen Maru Gothic",sans-serif;font-size:14px;color:var(--warm);
+ background:var(--warm-soft);border-radius:999px;padding:4px 13px;font-weight:700}
+
+main{flex:1;overflow-y:auto}
+.thread{max-width:640px;margin:0 auto;padding:20px 16px 8px;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:84%;padding:11px 15px;border-radius:16px;white-space:pre-wrap;word-break:break-word}
+.msg.bot{background:var(--bot);border:1px solid var(--bot-line);align-self:flex-start;border-bottom-left-radius:5px;box-shadow:var(--shadow)}
+.msg.bot .nm{display:block;font-family:"Zen Maru Gothic",sans-serif;font-size:11.5px;color:var(--bot-name);
+ letter-spacing:.08em;margin-bottom:3px}
+.msg.me{background:var(--me);color:var(--me-ink);align-self:flex-end;border-bottom-right-radius:5px;font-weight:500}
+.msg.shot{padding:6px;background:var(--surface);border:1px solid var(--line)}
+.msg.shot img{display:block;max-width:200px;border-radius:11px}
+.msg.sys{align-self:center;background:transparent;font-size:12.5px;color:var(--ink-3);text-align:center;max-width:100%}
+.dots span{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ink-3);margin-right:3px;
+ animation:bl 1.2s infinite}
+.dots span:nth-child(2){animation-delay:.2s}.dots span:nth-child(3){animation-delay:.4s}
+@keyframes bl{0%,60%,100%{opacity:.25}30%{opacity:1}}
+
+footer{flex:none;border-top:1px solid var(--line);background:var(--paper)}
+.bar{max-width:640px;margin:0 auto;padding:10px 16px 16px;display:flex;gap:8px;align-items:flex-end}
+.icon{flex:none;width:46px;height:46px;border-radius:50%;border:1px solid var(--line-strong);
+ background:var(--surface);color:var(--ink-2);font-size:20px;cursor:pointer;display:grid;place-items:center}
+.icon:active{transform:scale(.95)}
+.icon.rec{background:var(--me);border-color:var(--me);color:var(--me-ink);animation:pulse 1.4s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(15,107,98,.4)}50%{box-shadow:0 0 0 9px rgba(15,107,98,0)}}
+textarea{flex:1;font:inherit;font-size:16px;color:var(--ink);background:var(--surface);
+ border:1px solid var(--line-strong);border-radius:23px;padding:11px 16px;resize:none;max-height:130px;line-height:1.6}
+textarea:focus{outline:2px solid var(--me);outline-offset:1px}
+.send{flex:none;width:46px;height:46px;border-radius:50%;border:0;background:var(--me);color:var(--me-ink);
+ font-size:18px;cursor:pointer}
+.send:disabled{opacity:.35;cursor:default}
+input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.hint{max-width:640px;margin:0 auto;padding:0 16px 10px;font-size:11.5px;color:var(--ink-3);text-align:center}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<header><div class="hdr">
+  <h1>みまもりくん</h1>
+  <span class="who"><select id="child"></select></span>
+  <span class="pt" id="pt">— pt</span>
+</div></header>
+
+<main id="main"><div class="thread" id="thread"></div></main>
+
+<footer>
+  <div class="bar">
+    <label class="icon" for="cam" title="おたよりを撮る">📷
+      <input type="file" id="cam" accept="image/*" capture="environment">
+    </label>
+    <button class="icon" id="mic" title="声で話す" aria-pressed="false">🎤</button>
+    <textarea id="msg" rows="1" placeholder="ここに書く"></textarea>
+    <button class="send" id="send" disabled>↑</button>
+  </div>
+  <div class="hint">やりとりはおうちの人も見られます</div>
+</footer>
+
+<script>
+const $=s=>document.querySelector(s);
+const thread=$("#thread");
+let child="", history=[], busy=false;
+
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function scroll(){$("#main").scrollTop=$("#main").scrollHeight;}
+
+function add(kind,text,html){
+  const d=document.createElement("div");
+  d.className="msg "+kind;
+  if(kind==="bot") d.innerHTML='<span class="nm">みまもりくん</span>'+(html||esc(text));
+  else d.innerHTML=html||esc(text);
+  thread.appendChild(d); scroll(); return d;
+}
+function thinking(){
+  const d=add("bot","",'<span class="nm">みまもりくん</span><span class="dots"><span></span><span></span><span></span></span>');
+  return d;
+}
+
+function say(text){
+  if(!("speechSynthesis" in window)) return;
+  try{
+    const u=new SpeechSynthesisUtterance(text.replace(/\n+/g,"。"));
+    u.lang="ja-JP"; u.rate=1.05; u.pitch=1.1;
+    speechSynthesis.cancel(); speechSynthesis.speak(u);
+  }catch(e){}
+}
+
+async function boot(){
+  const c=await fetch("/api/config").then(r=>r.json()).catch(()=>({children:[]}));
+  const sel=$("#child");
+  sel.innerHTML=(c.children||[]).map(x=>'<option>'+esc(x.name)+"</option>").join("");
+  child=sel.value||"";
+  sel.addEventListener("change",()=>{child=sel.value;history=[];thread.innerHTML="";refreshPoints();open();});
+  refreshPoints();
+  open();
+}
+
+async function refreshPoints(){
+  try{
+    const t=await fetch("/api/tasks").then(r=>r.json());
+    $("#pt").textContent=(t.points[child]||0)+" pt";
+  }catch(e){ $("#pt").textContent="— pt"; }
+}
+
+function open(){
+  add("sys","おかえり。");
+  send("（画面を開いた）", true);
+}
+
+$("#msg").addEventListener("input",e=>{
+  e.target.style.height="auto";
+  e.target.style.height=Math.min(e.target.scrollHeight,130)+"px";
+  $("#send").disabled=!e.target.value.trim()||busy;
+});
+$("#msg").addEventListener("keydown",e=>{
+  if(e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();submit();}
+});
+$("#send").addEventListener("click",submit);
+
+function submit(){
+  const v=$("#msg").value.trim(); if(!v||busy) return;
+  $("#msg").value=""; $("#msg").style.height="auto"; $("#send").disabled=true;
+  send(v);
+}
+
+async function send(text, hidden){
+  if(!hidden) add("me",text);
+  history.push({role:"user",text});
+  busy=true; const t=thinking();
+  try{
+    const res=await fetch("/api/kid/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({child,history})});
+    const j=await res.json();
+    t.remove();
+    if(!res.ok) throw new Error(j.detail||"うまく話せませんでした");
+    add("bot",j.text);
+    say(j.text);
+    history.push({role:"assistant",text:j.text});
+    if((j.tools||[]).some(n=>n==="finish_task"||n==="start_task")) refreshPoints();
+  }catch(e){
+    t.remove();
+    add("sys","うまくつながらなかった。もう一回ためしてみて。");
+  }
+  busy=false; $("#send").disabled=!$("#msg").value.trim();
+}
+
+/* ---- おたよりを撮る ---- */
+$("#cam").addEventListener("change",async e=>{
+  const f=e.target.files[0]; if(!f||busy) return;
+  e.target.value="";
+  const url=URL.createObjectURL(f);
+  add("shot","",'<img src="'+url+'" alt="撮ったおたより">');
+  busy=true; const t=thinking();
+  try{
+    const fd=new FormData(); fd.append("image",f); fd.append("hint",child+"のぶん");
+    const res=await fetch("/api/extract",{method:"POST",body:fd});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.detail||"読み取れませんでした");
+    const keep=(j.items||[]).filter(x=>!x.duplicate_of);
+    if(!keep.length){
+      t.remove(); add("bot","ありがとう。これは新しく入れるものはなかったよ。");
+      busy=false; return;
+    }
+    const reg=await fetch("/api/register",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({items:keep})});
+    await reg.json();
+    t.remove();
+    add("sys",keep.length+"件を追加しました");
+    busy=false;
+    send("おたよりを撮った。"+keep.map(x=>x.title).join("、")+" が入った。", true);
+  }catch(err){
+    t.remove();
+    add("bot","うーん、うまく読めなかった。ちょっと暗いかも。もう一回撮れる？");
+    busy=false;
+  }
+});
+
+/* ---- 声で話す ---- */
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+const mic=$("#mic");
+if(!SR){ mic.style.display="none"; }
+else{
+  let rec=null, on=false;
+  mic.addEventListener("click",()=>{
+    if(on){ rec && rec.stop(); return; }
+    rec=new SR(); rec.lang="ja-JP"; rec.interimResults=true; rec.continuous=false;
+    rec.onstart=()=>{on=true;mic.classList.add("rec");mic.setAttribute("aria-pressed","true");};
+    rec.onresult=ev=>{
+      let s=""; for(const r of ev.results) s+=r[0].transcript;
+      $("#msg").value=s; $("#send").disabled=!s.trim()||busy;
+    };
+    rec.onerror=()=>{};
+    rec.onend=()=>{
+      on=false;mic.classList.remove("rec");mic.setAttribute("aria-pressed","false");
+      if($("#msg").value.trim()) submit();
+    };
+    try{ speechSynthesis.cancel(); }catch(e){}
+    rec.start();
+  });
+}
+
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>みまもりくん</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@700&family=Noto+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --paper:#F6F6F1;--surface:#fff;--surface-2:#FBFBF7;
+  --ink:#191C1B;--ink-2:#4A524F;--ink-3:#7C8783;
+  --line:#DCDED6;--line-strong:#C3C8BF;
+  --accent:#0F6B62;--accent-soft:#E2F0ED;
+  --warn:#B94F2B;--warn-soft:#F7E7DF;
+  --shadow:0 1px 2px rgba(25,28,27,.05),0 8px 24px -16px rgba(25,28,27,.25);
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#101413;--surface:#191E1D;--surface-2:#151A19;
+  --ink:#ECEFEB;--ink-2:#AFB9B5;--ink-3:#7E8A86;
+  --line:#2A3231;--line-strong:#3A4442;
+  --accent:#5FCFC0;--accent-soft:#14302C;
+  --warn:#E8926B;--warn-soft:#33211A;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -16px rgba(0,0,0,.8);
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:"Noto Sans JP",system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;
+  font-size:15px;line-height:1.75;-webkit-font-smoothing:antialiased}
+.wrap{max-width:720px;margin:0 auto;padding:0 18px 80px}
+header{border-bottom:1px solid var(--line);margin-bottom:24px;background:var(--paper)}
+.hdr{max-width:720px;margin:0 auto;padding:16px 18px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+h1{font-family:"Zen Old Mincho",serif;font-size:21px;margin:0;letter-spacing:.04em}
+.tag{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3);letter-spacing:.08em}
+.lead{color:var(--ink-2);font-size:14px;margin:0 0 20px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:5px;box-shadow:var(--shadow);padding:18px}
+label.file{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+  border:2px dashed var(--line-strong);border-radius:5px;padding:32px 18px;cursor:pointer;
+  background:var(--surface-2);text-align:center;transition:border-color .15s,background .15s}
+label.file:hover,label.file:focus-within{border-color:var(--accent);background:var(--accent-soft)}
+label.file .big{font-size:15px;font-weight:700}
+label.file .sm{font-size:12.5px;color:var(--ink-3)}
+input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+#preview{display:none;margin-top:14px;border:1px solid var(--line);border-radius:4px;max-width:100%}
+.hintwrap{margin-top:14px}
+.hintwrap label{display:block;font-size:12.5px;font-weight:700;color:var(--ink-2);margin-bottom:5px}
+input[type=text],textarea{width:100%;font:inherit;color:var(--ink);background:var(--surface);
+  border:1px solid var(--line);border-radius:3px;padding:8px 10px}
+input:focus,textarea:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.btn{font:inherit;font-weight:700;font-size:14.5px;border-radius:4px;padding:12px 22px;cursor:pointer;border:1px solid transparent}
+.btn.primary{background:var(--accent);color:var(--paper);border-color:var(--accent)}
+.btn.primary:disabled{opacity:.45;cursor:not-allowed}
+.btn.ghost{background:transparent;color:var(--ink-2);border-color:var(--line-strong)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:16px}
+.spinner{width:15px;height:15px;border:2px solid var(--accent-soft);border-top-color:var(--accent);
+  border-radius:50%;animation:spin .8s linear infinite;display:inline-block;vertical-align:-2px}
+@keyframes spin{to{transform:rotate(360deg)}}
+h2{font-family:"Zen Old Mincho",serif;font-size:19px;margin:32px 0 6px;letter-spacing:.03em}
+.summary{color:var(--ink-2);font-size:14px;margin:0 0 14px}
+.trace{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink-3);
+  background:var(--surface-2);border:1px solid var(--line);border-radius:4px;padding:10px 12px;margin-bottom:16px}
+.trace div+div{margin-top:3px}
+.items{display:flex;flex-direction:column;gap:12px}
+.item{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);
+  border-radius:0 4px 4px 0;box-shadow:var(--shadow);padding:14px}
+.item.dup{border-left-color:var(--line-strong);opacity:.72}
+.item.review{border-left-color:var(--warn)}
+.item-head{display:flex;gap:10px;align-items:flex-start}
+.item-head input[type=checkbox]{margin-top:6px;width:17px;height:17px;accent-color:var(--accent);flex:none}
+.item-title{flex:1;font-weight:700;font-size:15px;border:0;background:transparent;padding:2px 0;color:var(--ink)}
+.badges{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 0 27px}
+.badge{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.06em;padding:2px 7px;border-radius:2px}
+.b-kind{background:var(--accent-soft);color:var(--accent)}
+.b-warn{background:var(--warn-soft);color:var(--warn)}
+.b-dim{background:var(--surface-2);color:var(--ink-3);border:1px solid var(--line)}
+.fields{display:grid;grid-template-columns:1fr;gap:10px;margin:12px 0 0 27px}
+@media(min-width:520px){.fields{grid-template-columns:150px 110px 1fr}}
+.fields label{font-size:11.5px;color:var(--ink-3);display:block;margin-bottom:3px}
+.src{margin:10px 0 0 27px;font-size:12.5px;color:var(--ink-3);border-left:2px solid var(--line);padding-left:10px}
+.err{background:var(--warn-soft);border:1px solid var(--warn);color:var(--warn);
+  border-radius:4px;padding:12px 14px;font-size:13.5px;margin-top:16px}
+.ok{background:var(--accent-soft);border:1px solid var(--accent);color:var(--accent);
+  border-radius:4px;padding:12px 14px;font-size:13.5px;margin-top:16px}
+.ok a{color:inherit}
+footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);
+  font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3);line-height:1.9}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<header><div class="hdr">
+  <h1>みまもりくん</h1>
+  <span class="tag">SCHOOL NOTICE → CALENDAR</span>
+</div></header>
+
+<div class="wrap">
+  <p class="lead">ランドセルから出てきたプリントを撮るだけ。日付・持ち物・提出期限を読み取って、
+  重複を確かめてから Google カレンダーに並べます。<strong>登録はあなたが確認してから。</strong></p>
+
+  <div class="panel">
+    <label class="file" for="file">
+      <span class="big">📷 おたよりを撮る / 選ぶ</span>
+      <span class="sm">プリント、連絡帳、学校アプリのスクリーンショット</span>
+      <input type="file" id="file" accept="image/*" capture="environment">
+    </label>
+    <img id="preview" alt="選択したおたより">
+    <div class="hintwrap">
+      <label for="hint">補足メモ（任意）</label>
+      <input type="text" id="hint" placeholder="例：下の子のぶん / 4月に配られた古いプリント">
+    </div>
+    <div class="row">
+      <button class="btn primary" id="go" disabled>読み取る</button>
+      <span id="note" class="tag"></span>
+    </div>
+  </div>
+
+  <div id="result"></div>
+
+  <footer id="meta"></footer>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let picked = null, extraction = null;
+
+fetch("/api/config").then(r=>r.json()).then(c=>{
+  $("#meta").innerHTML =
+    "CALENDAR  " + esc(c.calendar_id) + "<br>" +
+    "MODEL     " + esc(c.model) + "<br>" +
+    "AGENT SA  " + esc(c.service_account) + "<br>" +
+    "CHILDREN  " + c.children.map(x=>esc(x.name)+"/"+esc(x.school_level)).join("  ");
+}).catch(()=>{});
+
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+$("#file").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if(!f) return;
+  picked = f;
+  const img = $("#preview");
+  img.src = URL.createObjectURL(f);
+  img.style.display = "block";
+  $("#go").disabled = false;
+  $("#note").textContent = f.name;
+});
+
+$("#go").addEventListener("click", async () => {
+  if(!picked) return;
+  $("#go").disabled = true;
+  $("#note").innerHTML = '<span class="spinner"></span> 読み取り中（カレンダー照会を含むので20秒ほど）';
+  $("#result").innerHTML = "";
+  const fd = new FormData();
+  fd.append("image", picked);
+  fd.append("hint", $("#hint").value);
+  try{
+    const res = await fetch("/api/extract", {method:"POST", body:fd});
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.detail || "読み取りに失敗しました");
+    extraction = data;
+    render(data);
+    $("#note").textContent = "";
+  }catch(err){
+    $("#result").innerHTML = '<div class="err">' + esc(err.message) + "</div>";
+    $("#note").textContent = "";
+  }
+  $("#go").disabled = false;
+});
+
+function render(d){
+  let h = "<h2>登録候補</h2>";
+  h += '<p class="summary">' + esc(d.summary) + "</p>";
+  if(d.trace && d.trace.length){
+    h += '<div class="trace">' + d.trace.map(t=>"<div>› "+esc(t)+"</div>").join("") + "</div>";
+  }
+  if(!d.items.length){
+    h += '<div class="err">カレンダーに載せるものは見つかりませんでした。</div>';
+    $("#result").innerHTML = h; return;
+  }
+  const KIND = {event:"行事", deadline:"提出期限", homework:"宿題", bring:"持ち物"};
+  h += '<div class="items">';
+  d.items.forEach(it => {
+    const cls = it.duplicate_of ? "dup" : (it.needs_review ? "review" : "");
+    h += '<div class="item ' + cls + '" data-id="' + it.id + '">'
+      + '<div class="item-head">'
+        + '<input type="checkbox" data-f="selected"' + (it.selected ? " checked" : "") + ' aria-label="登録する">'
+        + '<input class="item-title" data-f="title" value="' + esc(it.title) + '">'
+      + "</div>"
+      + '<div class="badges">'
+        + '<span class="badge b-kind">' + esc(KIND[it.kind] || it.kind) + "</span>"
+        + '<span class="badge b-dim">' + esc(it.child) + "</span>"
+        + (it.duplicate_of ? '<span class="badge b-dim">重複の可能性: ' + esc(it.duplicate_of) + "</span>" : "")
+        + (it.needs_review ? '<span class="badge b-warn">要確認</span>' : "")
+        + '<span class="badge b-dim">確度 ' + Math.round((it.confidence||0)*100) + "%</span>"
+      + "</div>"
+      + '<div class="fields">'
+        + '<div><label>日付</label><input type="date" data-f="date" value="' + esc(it.date) + '"></div>'
+        + '<div><label>開始時刻</label><input type="text" data-f="time_start" placeholder="終日" value="' + esc(it.time_start||"") + '"></div>'
+        + '<div><label>持ち物・補足</label><input type="text" data-f="note" value="' + esc([...(it.bring||[]), it.note].filter(Boolean).join(" / ")) + '"></div>'
+      + "</div>"
+      + (it.source_text ? '<div class="src">' + esc(it.source_text) + "</div>" : "")
+    + "</div>";
+  });
+  h += "</div>";
+  h += '<div class="row"><button class="btn primary" id="reg">カレンダーに登録する</button>'
+     + '<button class="btn ghost" id="all">全部チェック</button><span id="regnote" class="tag"></span></div>';
+  $("#result").innerHTML = h;
+
+  $("#all").addEventListener("click", () => {
+    document.querySelectorAll('.item input[data-f="selected"]').forEach(c => c.checked = true);
+  });
+  $("#reg").addEventListener("click", doRegister);
+}
+
+function collect(){
+  const out = [];
+  document.querySelectorAll(".item").forEach(el => {
+    const src = extraction.items.find(x => x.id === el.dataset.id);
+    if(!el.querySelector('[data-f="selected"]').checked) return;
+    const note = el.querySelector('[data-f="note"]').value;
+    out.push(Object.assign({}, src, {
+      title: el.querySelector('[data-f="title"]').value,
+      date: el.querySelector('[data-f="date"]').value,
+      time_start: el.querySelector('[data-f="time_start"]').value || null,
+      bring: [],
+      note: note
+    }));
+  });
+  return out;
+}
+
+async function doRegister(){
+  const items = collect();
+  if(!items.length){ $("#regnote").textContent = "チェックが入っていません"; return; }
+  $("#reg").disabled = true;
+  $("#regnote").innerHTML = '<span class="spinner"></span> 登録中';
+  try{
+    const res = await fetch("/api/register", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({items})
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.detail || "登録に失敗しました");
+    const ok = data.results.filter(r=>r.status==="ok");
+    const ng = data.results.filter(r=>r.status!=="ok");
+    let h = '<div class="ok">' + ok.length + " 件をカレンダーに登録しました。<br>"
+          + ok.map(r=>'・<a href="'+esc(r.link)+'" target="_blank" rel="noopener">'+esc(r.title)+"</a>").join("<br>")
+          + "</div>";
+    if(ng.length) h += '<div class="err">' + ng.length + " 件が失敗しました。<br>"
+          + ng.map(r=>"・"+esc(r.title)+" — "+esc(r.error)).join("<br>") + "</div>";
+    $("#regnote").textContent = "";
+    $("#result").insertAdjacentHTML("beforeend", h);
+  }catch(err){
+    $("#regnote").textContent = "";
+    $("#result").insertAdjacentHTML("beforeend", '<div class="err">'+esc(err.message)+"</div>");
+  }
+  $("#reg").disabled = false;
+}
+</script>
+</body>
+</html>
