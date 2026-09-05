@@ -163,18 +163,26 @@ async function load(){
 function renderKidButtons(){
   $("#kidbtns").innerHTML=data.children.map((n,i)=>
     '<button data-f="kid:'+esc(n)+'" aria-pressed="false">'+esc(n)+"</button>").join("");
-  document.querySelectorAll(".filters button").forEach(b=>{
-    b.addEventListener("click",()=>{
-      if(b.dataset.f==="done"){
-        showDone=!showDone; b.setAttribute("aria-pressed",String(showDone)); render(); return;
-      }
-      filter=b.dataset.f;
-      document.querySelectorAll('.filters button:not([data-f="done"])').forEach(x=>
-        x.setAttribute("aria-pressed",String(x.dataset.f===filter)));
-      render();
-    });
-  });
+  markFilter();
 }
+
+function markFilter(){
+  document.querySelectorAll('.filters button:not([data-f="done"])').forEach(x=>
+    x.setAttribute("aria-pressed",String(x.dataset.f===filter)));
+  $('[data-f="done"]').setAttribute("aria-pressed",String(showDone));
+}
+
+// load() はタブに戻るたびに走る。そのたびにボタンへリスナーを貼ると
+// 二重三重に付いて、1回のクリックで2回反転する＝押しても効かなくなる。
+// 貼るのは親に一度だけ。
+$(".filters").addEventListener("click",e=>{
+  const b=e.target.closest("button");
+  if(!b||!b.dataset.f) return;
+  if(b.dataset.f==="done") showDone=!showDone;
+  else filter=b.dataset.f;
+  markFilter();
+  render();
+});
 
 function group(items){
   const g={late:[],today:[],tomorrow:[],week:[],later:[],done:[]};
