@@ -1,10 +1,12 @@
 """みまもりくん — FastAPI エントリポイント。Cloud Run で動かす。"""
 from __future__ import annotations
 
+import os
+
 from typing import Any, Dict, List
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -12,6 +14,7 @@ from mimamori.agent import read_otayori
 from mimamori.kid_agent import talk
 from mimamori.calendar_tools import create_events, list_tasks, service_account_email, set_status
 from mimamori.config import config
+from mimamori import points as points_mod
 
 app = FastAPI(title="みまもりくん")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -29,6 +32,19 @@ def index():
 def kid():
     """子どもの画面。撮る／話す／終わらせる。"""
     return FileResponse("static/kid.html")
+
+
+@app.get("/reward")
+def reward():
+    """ポイントと交換の画面。※共同開発者が作成中。"""
+    path = "static/reward.html"
+    if not os.path.exists(path):
+        return HTMLResponse(
+            "<p style='font-family:sans-serif;padding:2rem'>この画面はまだありません。"
+            "<code>static/reward.html</code> を作ると表示されます。</p>",
+            status_code=200,
+        )
+    return FileResponse(path)
 
 
 @app.get("/board")
@@ -113,6 +129,39 @@ async def kid_chat(req: KidChatRequest):
         return await talk(req.child, req.history)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"うまく話せませんでした: {e}") from e
+
+
+@app.get("/api/points")
+def api_points(child: str):
+    """残高と履歴。共同開発者の points.py を呼ぶだけ。"""
+    try:
+        return {
+            "child": child,
+            "balance": points_mod.balance(child),
+            "history": points_mod.history(child),
+            "rules": points_mod.RULES,
+        }
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"ポイントの取得に失敗しました: {e}") from e
+
+
+@app.get("/api/rewards")
+def api_rewards():
+    return {"rewards": points_mod.get_rewards()}
+
+
+class RewardsRequest(BaseModel):
+    rewards: List[Dict[str, Any]]
+
+
+@app.post("/api/rewards")
+def api_set_rewards(req: RewardsRequest):
+    try:
+        return points_mod.set_rewards(req.rewards)
+    except NotImplementedError as e:
+        raise HTTPException(501, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"交換レートの保存に失敗しました: {e}") from e
 
 
 @app.get("/healthz")
