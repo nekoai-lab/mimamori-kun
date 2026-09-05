@@ -64,19 +64,17 @@ def list_events(start_date: str, end_date: str) -> List[Dict[str, Any]]:
         end_date: 期間の終了日 YYYY-MM-DD（この日を含む）
 
     Returns:
-        件名・日付だけに絞った予定のリスト
+        件名・日付だけに絞った予定のリスト。
+        id は返さない。重複を伝えるときは件名で言うこと（id では人が読めない）。
     """
     if DEMO:
         today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
         return [
-            {"summary": e["summary"], "date": e["date"], "id": e["id"]}
+            {"summary": e["summary"], "date": e["date"]}
             for e in _demo_state(today)
             if start_date <= e["date"] <= end_date
         ]
-    return [
-        {"summary": e["summary"], "date": e["date"], "id": e["id"]}
-        for e in _raw(start_date, end_date)
-    ]
+    return [{"summary": e["summary"], "date": e["date"]} for e in _raw(start_date, end_date)]
 
 
 def _raw(start_date: str, end_date: str) -> List[Dict[str, Any]]:
