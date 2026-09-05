@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import uuid
 from typing import Any, Dict, List, Optional
 
 from .config import config
@@ -246,12 +247,43 @@ def _points_for(item: Dict[str, Any]) -> int:
     return {"homework": 3, "deadline": 3, "bring": 2, "event": 0}.get(item.get("kind", ""), 1)
 
 
+def _demo_add(item: Dict[str, Any]) -> None:
+    """デモ台帳に足す。
+
+    ここで足さないと、撮ったおたよりが一覧にも会話にも出てこない。
+    画面には「追加しました」と出るのに、みまもりくんは元のダミーの話を続ける。
+    """
+    today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
+    _demo_state(today)          # 台帳がまだ無ければ作らせる
+    bring = item.get("bring")
+    _demo_store.append(
+        {
+            "id": "x" + uuid.uuid4().hex[:7],
+            "summary": item["title"],
+            "date": item["date"],
+            "child": item.get("child", ""),
+            "kind": item.get("kind", ""),
+            "status": "todo",
+            "points": _points_for(item),
+            "bring": "、".join(bring) if isinstance(bring, list) else (bring or ""),
+            "mine": True,
+            "link": "",
+            "description": item.get("note", "") or "",
+            "time": item.get("time_start"),
+        }
+    )
+
+
 def create_events(items: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     """確定した項目をカレンダーに登録する。ユーザーの承認後にだけ呼ぶ。"""
     results = []
     for item in items:
         if DEMO:
-            results.append({"title": item["title"], "status": "ok", "link": ""})
+            try:
+                _demo_add(item)
+                results.append({"title": item["title"], "status": "ok", "link": ""})
+            except Exception as e:  # noqa: BLE001
+                results.append({"title": item.get("title", "?"), "status": "error", "error": str(e)})
             continue
         try:
             ev = _svc().events().insert(calendarId=config.calendar_id, body=_body(item)).execute()
