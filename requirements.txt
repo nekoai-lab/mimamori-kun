@@ -1,8 +1,10 @@
+# 2026-09-05 にこの組み合わせで動作確認済み。
+# google-adk は版によって Runner のシグネチャが変わるので固定しておく。
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 python-multipart==0.0.20
-google-adk>=1.0.0
-google-genai>=1.0.0
-google-api-python-client>=2.150.0
-google-auth>=2.35.0
-pydantic>=2.9.0
+google-adk==1.3.0
+google-genai==2.22.0
+google-api-python-client==2.200.0
+google-auth==2.41.1
+pydantic==2.12.4
