@@ -157,6 +157,22 @@ def register(req: RegisterRequest):
     return {"results": results, "notice": notice}
 
 
+@app.post("/api/notify/test")
+def api_notify_test():
+    """送り先が本当に届くかを、1本だけ投げて確かめる。"""
+    cfg = notify_mod.configured()
+    if not cfg["enabled"]:
+        raise HTTPException(400, "送り先が設定されていません。MIMAMORI_NOTIFY_WEBHOOK を入れてください。")
+    row = notify_mod.add("test", "みまもりくん、つながりました",
+                         "ここに、子どもが入れたものの知らせが届きます。")
+    return {"sent": True, "style": cfg["style"], "notice": row}
+
+
+@app.get("/api/notify/config")
+def api_notify_config():
+    return notify_mod.configured()
+
+
 @app.get("/api/notices")
 def api_notices(unseen: bool = False):
     return {"items": notify_mod.notices(unseen_only=unseen)}

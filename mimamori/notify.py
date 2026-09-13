@@ -71,19 +71,58 @@ def mark_seen(notice_id: str = "") -> int:
     return n
 
 
+def _style(url: str) -> str:
+    """送り先に合わせた形にする。既定は URL から見分ける。"""
+    forced = os.getenv("MIMAMORI_NOTIFY_STYLE", "auto").strip().lower()
+    if forced in ("discord", "slack", "plain"):
+        return forced
+    if "discord.com/api/webhooks" in url or "discordapp.com/api/webhooks" in url:
+        return "discord"
+    if "hooks.slack.com" in url:
+        return "slack"
+    return "plain"
+
+
+COLOR = {"kid_added": 0x0F6B62, "test": 0x8A5AA8}
+
+
+def _lines(row: Dict[str, Any]) -> str:
+    out = []
+    if row.get("body"):
+        out.append(row["body"])
+    for i in row.get("items", [])[:10]:
+        title = str(i.get("title", "")).split("｜")[-1]
+        date = i.get("date", "")
+        out.append("・" + title + (f"（{date[5:]}）" if date else ""))
+    return "\n".join(out)
+
+
+def _payload(row: Dict[str, Any], style: str) -> Dict[str, Any]:
+    text = row["title"] + ("\n" + _lines(row) if _lines(row) else "")
+    if style == "discord":
+        # Discord は embed にすると、題と中身が分かれて読みやすい。
+        return {
+            "username": "みまもりくん",
+            "embeds": [
+                {
+                    "title": row["title"],
+                    "description": _lines(row) or None,
+                    "color": COLOR.get(row.get("kind", ""), 0x4A524F),
+                    "footer": {"text": "みまもりくん ／ 違っていたら一覧から消せます"},
+                }
+            ],
+        }
+    if style == "slack":
+        return {"text": text}
+    return {"text": text, "message": text, "content": text, "title": row["title"]}
+
+
 def _push(row: Dict[str, Any]) -> None:
     """設定されていれば、親のスマホに届く先へ1本投げる。失敗しても黙って続ける。"""
     url = os.getenv("MIMAMORI_NOTIFY_WEBHOOK", "").strip()
     if not url:
         return
-    lines = [row["title"]]
-    if row.get("body"):
-        lines.append(row["body"])
-    for i in row.get("items", [])[:8]:
-        lines.append("・" + i["title"] + "（" + i["date"] + "）")
-    text = "\n".join(lines)
-    # Slack / Google Chat / Discord / Pushover のどれでも拾える形にしておく
-    payload = {"text": text, "message": text, "content": text, "title": row["title"]}
+    payload = _payload(row, _style(url))
     try:
         req = urllib.request.Request(
             url,
@@ -95,3 +134,9 @@ def _push(row: Dict[str, Any]) -> None:
     except Exception:  # noqa: BLE001
         # 知らせが届かないことより、登録が止まることのほうが困る。
         pass
+
+
+def configured() -> Dict[str, Any]:
+    """送り先が設定されているか。画面で「まだ繋がっていません」と言うために使う。"""
+    url = os.getenv("MIMAMORI_NOTIFY_WEBHOOK", "").strip()
+    return {"enabled": bool(url), "style": _style(url) if url else ""}
