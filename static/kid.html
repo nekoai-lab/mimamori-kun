@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap">
 <script src="/static/theme.js"></script>
+<script src="/static/who.js" defer></script>
 <style>
 :root{
   --paper:#FAF7F0;--surface:#fff;--ink:#1F2422;--ink-2:#5A625F;--ink-3:#8B938F;
@@ -88,6 +89,20 @@ h1,.tts,.pt,.who select{white-space:nowrap}
   .pt{font-size:13px;padding:3px 9px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* だれが つかう？（who.js） */
+#who-back{position:fixed;inset:0;z-index:60;display:grid;place-items:center;
+  background:var(--bg,#fff);padding:24px}
+#who-box{width:100%;max-width:420px;text-align:center}
+#who-q{font-size:20px;font-weight:700;margin:0 0 20px}
+#who-list{display:grid;gap:14px}
+.who-pick{display:flex;align-items:center;gap:16px;width:100%;padding:18px 20px;
+  border:2px solid var(--who-color);border-radius:16px;background:transparent;
+  color:inherit;font:inherit;font-size:20px;font-weight:700;cursor:pointer;text-align:left}
+.who-pick:hover,.who-pick:focus-visible{background:color-mix(in srgb,var(--who-color) 12%,transparent)}
+.who-face{display:grid;place-items:center;width:52px;height:52px;flex:none;border-radius:50%;
+  background:var(--who-color);color:#fff;font-size:24px}
+@media (prefers-reduced-motion:no-preference){.who-pick{transition:background .15s}}
 </style>
 </head>
 <body>

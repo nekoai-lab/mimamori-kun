@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@700&family=Noto+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <script src="/static/theme.js"></script>
+<script src="/static/who.js" defer></script>
 <style>
 :root{
   --paper:#F6F6F1;--surface:#fff;--surface-2:#FBFBF7;
@@ -109,6 +110,20 @@ h2.wait{color:var(--accent)}
 footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
  font-size:12px;color:var(--ink-3);display:flex;gap:14px;flex-wrap:wrap}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* だれが つかう？（who.js） */
+#who-back{position:fixed;inset:0;z-index:60;display:grid;place-items:center;
+  background:var(--bg,#fff);padding:24px}
+#who-box{width:100%;max-width:420px;text-align:center}
+#who-q{font-size:20px;font-weight:700;margin:0 0 20px}
+#who-list{display:grid;gap:14px}
+.who-pick{display:flex;align-items:center;gap:16px;width:100%;padding:18px 20px;
+  border:2px solid var(--who-color);border-radius:16px;background:transparent;
+  color:inherit;font:inherit;font-size:20px;font-weight:700;cursor:pointer;text-align:left}
+.who-pick:hover,.who-pick:focus-visible{background:color-mix(in srgb,var(--who-color) 12%,transparent)}
+.who-face{display:grid;place-items:center;width:52px;height:52px;flex:none;border-radius:50%;
+  background:var(--who-color);color:#fff;font-size:24px}
+@media (prefers-reduced-motion:no-preference){.who-pick{transition:background .15s}}
 </style>
 </head>
 <body>
