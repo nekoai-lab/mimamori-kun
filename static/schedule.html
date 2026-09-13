@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>みまもりくん — 予定表</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@700&family=Noto+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="/static/theme.js"></script>
+<script src="/static/who.js" defer></script>
+<style>
+:root{
+  --paper:#F6F6F1;--surface:#fff;--surface-2:#FBFBF7;
+  --ink:#191C1B;--ink-2:#4A524F;--ink-3:#7C8783;
+  --line:#DCDED6;--line-strong:#C3C8BF;
+  --accent:#0F6B62;--accent-soft:#E2F0ED;
+  --late:#B3402015;--late-line:#B94F2B;--late-ink:#963C1E;
+  --kidA:#2F6690;--kidA-soft:#E3EDF4;
+  --kidB:#8A5A2B;--kidB-soft:#F4EBDF;
+  --shadow:0 1px 2px rgba(25,28,27,.05),0 8px 24px -18px rgba(25,28,27,.3);
+}
+:root[data-theme="dark"]{
+  --paper:#101413;--surface:#191E1D;--surface-2:#151A19;
+  --ink:#ECEFEB;--ink-2:#AFB9B5;--ink-3:#7E8A86;
+  --line:#2A3231;--line-strong:#3A4442;
+  --accent:#5FCFC0;--accent-soft:#14302C;
+  --late:#B9502B20;--late-line:#E8926B;--late-ink:#E8926B;
+  --kidA:#8FBEDD;--kidA-soft:#1B2C38;
+  --kidB:#D5AC7C;--kidB-soft:#312619;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -18px rgba(0,0,0,.9);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+ font-family:"Noto Sans JP",system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;
+ font-size:15px;line-height:1.7;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.wrap{max-width:860px;margin:0 auto;padding:0 18px 90px}
+header{position:sticky;top:0;z-index:10;background:var(--paper);border-bottom:1px solid var(--line)}
+.hdr{max-width:860px;margin:0 auto;padding:13px 18px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+h1{font-family:"Zen Old Mincho",serif;font-size:19px;margin:0;letter-spacing:.05em}
+.date{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink-3);letter-spacing:.06em}
+.nav{flex-basis:100%;display:flex;gap:6px;overflow-x:auto}
+.nav a{flex:none;font-size:12.5px;text-decoration:none;padding:4px 12px;white-space:nowrap;
+ border:1px solid var(--line-strong);border-radius:999px;color:var(--ink-2)}
+.nav a.on{background:var(--accent);border-color:var(--accent);color:var(--paper);font-weight:700}
+.theme{margin-left:auto;flex:none;font:inherit;font-size:12.5px;padding:4px 12px;white-space:nowrap;
+ border:1px solid var(--line-strong);border-radius:999px;background:transparent;color:var(--ink-2);cursor:pointer}
+
+.demo{background:#F6E8C6;color:#7A5A10;font-size:12px;text-align:center;padding:5px}
+:root[data-theme="dark"] .demo{background:#33290F;color:#E0C583}
+
+</style>
+</head>
+<body>
+<header>
+  <div class="hdr">
+    <h1>みまもりくん</h1>
+    <span class="date" id="today"></span>
+    <nav class="nav" aria-label="画面を切り替える">
+      <a href="/">撮る</a>
+      <a href="/board">一覧</a>
+      <a href="/schedule" class="on" aria-current="page">予定表</a>
+      <a href="/kid">やりとり</a>
+      <a href="/reward">ごほうび</a>
+      <button class="theme" id="theme" type="button">☾ 暗く</button>
+    </nav>
+  </div>
+</header>
+<div id="demo"></div>
+<!-- 予定表。年間予定を入れたあと、それを見る場所。 -->
+<style>
+/* 予定表 */
+.mbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px 0 0}
+.mbar button{font:inherit;font-size:13.5px;padding:6px 13px;cursor:pointer;background:var(--surface);
+ color:var(--ink);border:1px solid var(--line-strong);border-radius:9px}
+.mbar .ym{font-family:"Zen Old Mincho",serif;font-size:19px;min-width:9em;text-align:center}
+.mbar .sp{flex:1}
+.kids{display:flex;gap:6px;flex-wrap:wrap}
+.kids button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+
+.cal{width:100%;border-collapse:collapse;margin:12px 0 0;table-layout:fixed}
+.cal th{font-size:12px;font-weight:500;color:var(--ink-3);padding:6px 0;border-bottom:1px solid var(--line)}
+.cal th.sat{color:var(--kidA)} .cal th.sun{color:var(--late-line)}
+.cal td{vertical-align:top;border:1px solid var(--line);height:92px;padding:3px 4px;background:var(--surface)}
+.cal td.off{background:var(--surface-2)}
+.cal td.blank{background:transparent;border-color:transparent}
+.cal td.today{outline:2px solid var(--accent);outline-offset:-2px}
+.cal td.past .d{color:var(--ink-3)}
+.cal .d{font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.cal td.sun .d{color:var(--late-line)} .cal td.sat .d{color:var(--kidA)}
+.cal button.day{all:unset;display:block;width:100%;cursor:pointer}
+.cal button.day:focus-visible{outline:2px solid var(--accent)}
+.ev{display:block;font-size:11px;line-height:1.45;margin:2px 0 0;padding:1px 4px;border-radius:5px;
+ white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+ background:var(--kidA-soft);color:var(--kidA);border:1px solid transparent}
+.ev.b{background:var(--kidB-soft);color:var(--kidB)}
+.ev.done{opacity:.5;text-decoration:line-through}
+.ev.more{background:none;color:var(--ink-3);border:0;padding-left:0}
+
+.pick{margin:16px 0 0;padding:12px 14px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.pick h2{font-family:"Zen Old Mincho",serif;font-size:16px;margin:0 0 8px}
+.pick ul{margin:0;padding-left:1.1em}
+.pick li{margin:3px 0}
+.pick .k{font-size:11.5px;color:var(--ink-3);margin-left:6px}
+.empty{color:var(--ink-3);font-size:13.5px}
+.note{font-size:12.5px;color:var(--ink-3);margin:10px 0 0}
+@media (max-width:560px){
+  .cal td{height:auto;min-height:58px}
+  .ev{font-size:10px}
+}
+</style>
+
+<div class="wrap">
+  <div class="mbar">
+    <button type="button" id="prev" aria-label="前の月">◀</button>
+    <span class="ym" id="ym"></span>
+    <button type="button" id="next" aria-label="次の月">▶</button>
+    <button type="button" id="now">今月</button>
+    <span class="sp"></span>
+    <span class="kids" id="kids"></span>
+  </div>
+
+  <table class="cal" id="cal" aria-label="月の予定表"><thead><tr>
+    <th class="sun">日</th><th>月</th><th>火</th><th>水</th><th>木</th><th>金</th><th class="sat">土</th>
+  </tr></thead><tbody id="grid"></tbody></table>
+
+  <div class="pick" id="pick" hidden></div>
+  <p class="note" id="note"></p>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const KIND={event:"行事",deadline:"提出",homework:"宿題",bring:"持ち物"};
+let ym=null, data=null, who="", picked="";
+
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function shortTitle(s){ s=String(s||"").replace("✓",""); return s.includes("｜")?s.split("｜")[1]:s; }
+
+function thisMonth(){ const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); }
+function shift(ym,n){
+  let [y,m]=ym.split("-").map(Number); m+=n;
+  while(m<1){m+=12;y--;} while(m>12){m-=12;y++;}
+  return y+"-"+String(m).padStart(2,"0");
+}
+
+async function load(){
+  $("#note").textContent="読んでいます…";
+  try{
+    const r=await fetch("/api/schedule?ym="+encodeURIComponent(ym)+(who?"&child="+encodeURIComponent(who):""));
+    const j=await r.json();
+    if(!r.ok) throw new Error(j.detail||"予定を取れませんでした");
+    data=j; render();
+  }catch(err){ $("#note").textContent=err.message; }
+}
+
+function renderKids(){
+  const names=(data&&data.children)||[];
+  $("#kids").innerHTML='<button type="button" data-w="" aria-pressed="'+(who==="")+'">全員</button>'
+    +names.map(n=>'<button type="button" data-w="'+esc(n)+'" aria-pressed="'+(who===n)+'">'+esc(n)+"</button>").join("");
+}
+
+function byDate(){
+  const m={};
+  for(const it of data.items){ (m[it.date]=m[it.date]||[]).push(it); }
+  return m;
+}
+
+function render(){
+  renderKids();
+  const [y,mo]=data.ym.split("-").map(Number);
+  $("#ym").textContent=y+"年"+mo+"月";
+  const first=new Date(Date.UTC(y,mo-1,1)), lastDay=new Date(Date.UTC(y,mo,0)).getUTCDate();
+  const lead=first.getUTCDay();                      // 日曜始まり
+  const map=byDate(), kidIndex={};
+  (data.children||[]).forEach((n,i)=>kidIndex[n]=i);
+
+  let h="", cell=0;
+  const open=()=>{ if(cell%7===0) h+="<tr>"; };
+  const close=()=>{ cell++; if(cell%7===0) h+="</tr>"; };
+  for(let i=0;i<lead;i++){ open(); h+='<td class="blank"></td>'; close(); }
+  for(let d=1;d<=lastDay;d++){
+    open();
+    const iso=y+"-"+String(mo).padStart(2,"0")+"-"+String(d).padStart(2,"0");
+    const wd=new Date(Date.UTC(y,mo-1,d)).getUTCDay();
+    const list=map[iso]||[];
+    const cls=["day"];
+    const tdcls=[];
+    if(wd===0) tdcls.push("sun","off"); else if(wd===6) tdcls.push("sat","off");
+    if(iso===data.today) tdcls.push("today");
+    else if(iso<data.today) tdcls.push("past");
+    h+='<td class="'+tdcls.join(" ")+'">'
+      +'<button type="button" class="day" data-d="'+iso+'" aria-label="'+mo+'月'+d+'日 '+list.length+'件">'
+      +'<span class="d">'+d+"</span>";
+    for(const it of list.slice(0,3)){
+      const b=(kidIndex[it.child]||0)%2===1?" b":"";
+      h+='<span class="ev'+b+(it.status==="done"?" done":"")+'">'+esc(shortTitle(it.summary))+"</span>";
+    }
+    if(list.length>3) h+='<span class="ev more">ほか'+(list.length-3)+"件</span>";
+    h+="</button></td>";
+    close();
+  }
+  while(cell%7!==0){ open(); h+='<td class="blank"></td>'; close(); }
+  $("#grid").innerHTML=h;
+
+  $("#note").textContent="この月に入っているもの "+data.items.length+"件";
+  if(picked) showDay(picked);
+}
+
+function showDay(iso){
+  picked=iso;
+  const list=byDate()[iso]||[];
+  const [y,m,d]=iso.split("-").map(Number);
+  const w="日月火水木金土"[new Date(Date.UTC(y,m-1,d)).getUTCDay()];
+  let h="<h2>"+m+"月"+d+"日（"+w+"）</h2>";
+  if(!list.length) h+='<p class="empty">この日に入っているものはありません。</p>';
+  else h+="<ul>"+list.map(it=>"<li>"+esc(shortTitle(it.summary))
+      +'<span class="k">'+esc(it.child)+"・"+(KIND[it.kind]||it.kind||"")
+      +(it.status==="done"?"・済":"")+(it.points?"・"+it.points+"pt":"")+"</span></li>").join("")+"</ul>";
+  $("#pick").innerHTML=h; $("#pick").hidden=false;
+}
+
+$("#prev").addEventListener("click",()=>{ ym=shift(ym,-1); picked=""; $("#pick").hidden=true; load(); });
+$("#next").addEventListener("click",()=>{ ym=shift(ym,1); picked=""; $("#pick").hidden=true; load(); });
+$("#now").addEventListener("click",()=>{ ym=thisMonth(); picked=""; $("#pick").hidden=true; load(); });
+$("#kids").addEventListener("click",e=>{
+  const b=e.target.closest("button[data-w]"); if(!b) return;
+  who=b.dataset.w; load();
+});
+$("#grid").addEventListener("click",e=>{
+  const b=e.target.closest(".day"); if(!b) return;
+  showDay(b.dataset.d);
+});
+
+ym=thisMonth();
+load();
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden) load(); });
+</script>
+
+</body>
+</html>

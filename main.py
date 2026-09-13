@@ -65,6 +65,12 @@ def reward():
     return FileResponse(path)
 
 
+@app.get("/schedule")
+def schedule():
+    """予定表。月ごとに、入っているものを見る場所。"""
+    return FileResponse("static/schedule.html")
+
+
 @app.get("/board")
 def board():
     """親のダッシュボード。タスク一覧と予定を見る場所。"""
@@ -381,6 +387,42 @@ def api_year_plan_move(req: MoveRequest):
         raise HTTPException(400, f"日付の形が違います: {e}") from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"日にちを直せませんでした: {e}") from e
+
+
+@app.get("/api/schedule")
+def api_schedule(ym: str = "", child: str = ""):
+    """1か月ぶんの予定。**年間予定を入れたあと、それを見る場所がないと意味がない。**
+
+    /api/tasks は「これからの14日」しか返さない（やることの一覧なので、それでいい）。
+    予定表は過去も未来も、月の単位で見る。
+    """
+    today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
+    try:
+        y, m = (int(x) for x in (ym or today.strftime("%Y-%m")).split("-"))
+        first = dt.date(y, m, 1)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, "月の指定は YYYY-MM の形で書いてください。") from e
+    last = dt.date(y + (m == 12), (m % 12) + 1, 1) - dt.timedelta(days=1)
+
+    try:
+        items = list_raw(first.isoformat(), last.isoformat())
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"予定を取れませんでした: {e}") from e
+
+    items = [i for i in items if i.get("status") != "rejected"]
+    if child:
+        items = [i for i in items if i.get("child") == child]
+    for i in items:
+        i["days_left"] = (dt.date.fromisoformat(i["date"]) - today).days
+
+    return {
+        "ym": first.strftime("%Y-%m"),
+        "first": first.isoformat(),
+        "last": last.isoformat(),
+        "today": today.isoformat(),
+        "children": [c["name"] for c in config.children],
+        "items": sorted(items, key=lambda x: (x["date"], x.get("child", ""), x.get("summary", ""))),
+    }
 
 
 @app.get("/healthz")
