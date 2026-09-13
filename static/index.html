@@ -109,6 +109,30 @@ footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);
 .who-face{display:grid;place-items:center;width:52px;height:52px;flex:none;border-radius:50%;
   background:var(--who-color);color:#fff;font-size:24px}
 @media (prefers-reduced-motion:no-preference){.who-pick{transition:background .15s}}
+
+/* 手で入力する（目標：10タップ・20秒） */
+.quick{margin:16px 0 0}
+.qtoggle{font:inherit;font-size:13.5px;padding:7px 15px;cursor:pointer;background:var(--surface,#fff);
+ color:inherit;border:1px solid var(--line-strong,#c3c8bf);border-radius:999px}
+.qbox{margin:10px 0 0;padding:14px;border:1px solid var(--line,#dcded6);border-radius:12px;background:var(--surface,#fff)}
+.qbox[hidden]{display:none}
+.qrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px}
+.qrow > .lab{font-size:12.5px;color:var(--ink-3,#7c8783);width:4.4em;flex:none;white-space:nowrap}
+.qrow button{font:inherit;font-size:14px;padding:9px 14px;cursor:pointer;background:var(--surface-2,#fbfbf7);
+ color:inherit;border:1px solid var(--line-strong,#c3c8bf);border-radius:10px;min-height:42px}
+.qrow button[aria-pressed="true"]{background:var(--accent,#0f6b62);color:#fff;border-color:var(--accent,#0f6b62);font-weight:700}
+.qrow input[type=text]{flex:1;min-width:170px;font:inherit;font-size:15px;padding:10px 12px;
+ color:inherit;background:var(--surface-2,#fbfbf7);border:1px solid var(--line-strong,#c3c8bf);border-radius:10px}
+.qrow input[type=date]{font:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--line-strong,#c3c8bf);
+ border-radius:10px;background:var(--surface-2,#fbfbf7);color:inherit}
+.qgo{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0 0}
+.qgo .add{font:inherit;font-size:15px;font-weight:700;padding:11px 22px;cursor:pointer;min-height:46px;
+ background:var(--accent,#0f6b62);color:#fff;border:1px solid var(--accent,#0f6b62);border-radius:10px}
+.qgo .same{font:inherit;font-size:14px;padding:10px 16px;cursor:pointer;min-height:44px;
+ background:var(--surface-2,#fbfbf7);color:inherit;border:1px solid var(--line-strong,#c3c8bf);border-radius:10px}
+.qgo button:disabled{opacity:.45;cursor:default}
+.qnote{font-size:13px;color:var(--ink-3,#7c8783);border:0;background:none;padding:0}
+.qnote.ok{color:var(--accent,#0f6b62);font-weight:700}
 </style>
 </head>
 <body>
@@ -146,6 +170,33 @@ footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);
     </div>
   </div>
 
+  <div class="quick">
+    <button type="button" class="qtoggle" id="qtoggle" aria-expanded="false">✍️ 手で入力する（パソコンを開けなかった日）</button>
+    <div class="qbox" id="qbox" hidden>
+      <div class="qrow" id="qchild"><span class="lab">だれ</span></div>
+      <div class="qrow" id="qsubj"><span class="lab">きょうか</span></div>
+      <div class="qrow" id="qwhen"><span class="lab">いつ</span>
+        <button type="button" data-o="0" aria-pressed="true">きょう</button>
+        <button type="button" data-o="1" aria-pressed="false">あした</button>
+        <button type="button" data-o="2" aria-pressed="false">あさって</button>
+        <input type="date" id="qdate" aria-label="日付を選ぶ">
+      </div>
+      <div class="qrow" id="qkind"><span class="lab">なに</span>
+        <button type="button" data-k="homework" aria-pressed="true">しゅくだい</button>
+        <button type="button" data-k="deadline" aria-pressed="false">ていしゅつ</button>
+        <button type="button" data-k="bring" aria-pressed="false">もちもの</button>
+      </div>
+      <div class="qrow"><span class="lab">やること</span>
+        <input type="text" id="qtitle" placeholder="例：ドリル p.12（空でもOK）" enterkeyhint="done">
+      </div>
+      <div class="qgo">
+        <button type="button" class="add" id="qadd">追加する</button>
+        <button type="button" class="same" id="qsame">昨日と同じ</button>
+        <span class="qnote" id="qnote"></span>
+      </div>
+    </div>
+  </div>
+
   <div id="result"></div>
 
   <footer id="meta"></footer>
@@ -156,6 +207,7 @@ const $ = s => document.querySelector(s);
 let picked = null, extraction = null;
 
 fetch("/api/config").then(r=>r.json()).then(c=>{
+  qSetup(c.children);
   $("#meta").innerHTML =
     "CALENDAR  " + esc(c.calendar_id) + "<br>" +
     "MODEL     " + esc(c.model) + "<br>" +
@@ -192,7 +244,14 @@ $("#go").addEventListener("click", async () => {
     render(data);
     $("#note").textContent = "";
   }catch(err){
-    $("#result").innerHTML = '<div class="err">' + esc(err.message) + "</div>";
+    $("#result").innerHTML = '<div class="err">' + esc(err.message) +
+      ' <button type="button" class="qtoggle" id="qfall">手で入力する</button></div>';
+    $("#qfall").addEventListener("click", () => {
+      $("#qbox").hidden = false;
+      $("#qtoggle").setAttribute("aria-expanded", "true");
+      $("#qbox").scrollIntoView({block: "center"});
+      $("#qtitle").focus();
+    });
     $("#note").textContent = "";
   }
   $("#go").disabled = false;
@@ -287,6 +346,120 @@ async function doRegister(){
   }
   $("#reg").disabled = false;
 }
+
+// ---- 手で入力する ---------------------------------------------------------
+// 学校のパソコンを開けない日がある。そこで止まると習慣が切れる（NF-O1）。
+// **タイトル1行以外はすべてボタン**にして、5タップで1件入る形にする。
+const QSUBJ = {
+  elementary: ["こくご", "さんすう", "えいご", "せいかつ", "その他"],
+  junior_high: ["国語", "数学", "英語", "社会", "理科", "その他"],
+  unknown: ["国語", "算数", "英語", "その他"],
+};
+let qChildren = [], qSubj = "", qChild = "", qOffset = 0, qKind = "homework", qDate = "";
+
+function qPress(row, el){
+  row.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b === el)));
+}
+function qDateISO(){
+  if (qDate) return qDate;
+  const d = new Date(); d.setDate(d.getDate() + qOffset);
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+function qLevel(name){
+  const c = qChildren.find(x => x.name === name);
+  return (c && c.school_level) || "unknown";
+}
+function qRenderSubjects(){
+  const list = QSUBJ[qLevel(qChild)] || QSUBJ.unknown;
+  if (!list.includes(qSubj)) qSubj = list[0];
+  $("#qsubj").innerHTML = '<span class="lab">きょうか</span>' + list.map(x =>
+    '<button type="button" data-s="' + esc(x) + '" aria-pressed="' + (x === qSubj) + '">' + esc(x) + "</button>").join("");
+}
+function qSetup(children){
+  qChildren = children || [];
+  qChild = (localStorage.getItem("mimamori-child") || (qChildren[0] && qChildren[0].name) || "");
+  if (!qChildren.some(c => c.name === qChild)) qChild = (qChildren[0] && qChildren[0].name) || "";
+  $("#qchild").innerHTML = '<span class="lab">だれ</span>' + qChildren.map(c =>
+    '<button type="button" data-c="' + esc(c.name) + '" aria-pressed="' + (c.name === qChild) + '">' + esc(c.name) + "</button>").join("");
+  qRenderSubjects();
+}
+
+$("#qtoggle").addEventListener("click", () => {
+  const box = $("#qbox"), open = box.hidden;
+  box.hidden = !open;
+  $("#qtoggle").setAttribute("aria-expanded", String(open));
+});
+$("#qsubj").addEventListener("click", e => {
+  const b = e.target.closest("button[data-s]"); if (!b) return;
+  qSubj = b.dataset.s; qPress($("#qsubj"), b);
+});
+$("#qchild").addEventListener("click", e => {
+  const b = e.target.closest("button[data-c]"); if (!b) return;
+  qChild = b.dataset.c; qPress($("#qchild"), b);
+  try { localStorage.setItem("mimamori-child", qChild); } catch (err) {}
+  qRenderSubjects();
+});
+$("#qwhen").addEventListener("click", e => {
+  const b = e.target.closest("button[data-o]"); if (!b) return;
+  qOffset = +b.dataset.o; qDate = ""; $("#qdate").value = ""; qPress($("#qwhen"), b);
+});
+$("#qdate").addEventListener("change", e => {
+  qDate = e.target.value;
+  $("#qwhen").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", "false"));
+});
+$("#qkind").addEventListener("click", e => {
+  const b = e.target.closest("button[data-k]"); if (!b) return;
+  qKind = b.dataset.k; qPress($("#qkind"), b);
+});
+
+async function qPost(items){
+  const res = await fetch("/api/register", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({items: items, pending: false})
+  });
+  const j = await res.json();
+  if (!res.ok) throw new Error(j.detail || "登録できませんでした");
+  return j;
+}
+
+$("#qadd").addEventListener("click", async () => {
+  if (!qChild) { $("#qnote").textContent = "だれのぶんか選んでください"; return; }
+  const extra = $("#qtitle").value.trim();
+  // やることが空でも入る。「算数の宿題」だけで足りる日がある。
+  const title = qChild + "｜" + qSubj + (extra ? " " + extra : "");
+  const btn = $("#qadd"); btn.disabled = true; $("#qnote").textContent = "入れています…";
+  try {
+    await qPost([{title: title, child: qChild, kind: qKind, date: qDateISO(), note: "手で入力"}]);
+    $("#qnote").className = "qnote ok";
+    $("#qnote").textContent = "入れました：" + title.split("｜")[1];
+    $("#qtitle").value = "";            // 続けて打てるように、教科と日付は残す
+  } catch (err) {
+    $("#qnote").className = "qnote"; $("#qnote").textContent = err.message;
+  }
+  btn.disabled = false;
+});
+
+$("#qsame").addEventListener("click", async () => {
+  if (!qChild) { $("#qnote").textContent = "だれのぶんか選んでください"; return; }
+  const btn = $("#qsame"); btn.disabled = true; $("#qnote").className = "qnote";
+  $("#qnote").textContent = "昨日のぶんを見ています…";
+  try {
+    const res = await fetch("/api/quick/repeat", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({child: qChild})
+    });
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.detail || "できませんでした");
+    if (j.created.length) {
+      $("#qnote").className = "qnote ok";
+      $("#qnote").textContent = j.created.length + "件 入れました：" +
+        j.created.map(t => t.split("｜")[1]).join("、");
+    } else {
+      $("#qnote").textContent = j.note || "入れるものがありませんでした";
+    }
+  } catch (err) { $("#qnote").textContent = err.message; }
+  btn.disabled = false;
+});
 </script>
 </body>
 </html>

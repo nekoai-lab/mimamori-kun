@@ -389,6 +389,57 @@ def api_year_plan_move(req: MoveRequest):
         raise HTTPException(500, f"日にちを直せませんでした: {e}") from e
 
 
+class RepeatRequest(BaseModel):
+    child: str
+
+
+@app.post("/api/quick/repeat")
+def api_quick_repeat(req: RepeatRequest):
+    """「昨日と同じ」。昨日その子に出ていた宿題・持ち物を、今日ぶんとして作る。
+
+    公文のような定期ぶんは A-5 が並べる。こちらは**学校の宿題**用。
+    毎日ほぼ同じ（音読・漢字ドリル・計算）なので、打ち直させない。
+    """
+    if not req.child:
+        raise HTTPException(400, "だれのぶんかが分かりません。")
+    today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
+    yest = today - dt.timedelta(days=1)
+    try:
+        rows = list_raw(yest.isoformat(), today.isoformat())
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"昨日のぶんを取れませんでした: {e}") from e
+
+    have = {_key(r.get("summary", "")) for r in rows if r["date"] == today.isoformat()}
+    items, skipped = [], 0
+    for r in rows:
+        if r["date"] != yest.isoformat() or r.get("child") != req.child:
+            continue
+        if r.get("kind") not in ("homework", "bring"):
+            continue
+        title = (r.get("summary") or "").replace("✓", "").strip()
+        if _key(title) in have:
+            skipped += 1
+            continue
+        have.add(_key(title))
+        items.append(
+            {
+                "title": title,
+                "child": req.child,
+                "kind": r.get("kind", "homework"),
+                "date": today.isoformat(),
+                "note": "昨日と同じぶん",
+            }
+        )
+    if not items:
+        return {"created": [], "skipped": skipped,
+                "note": "昨日のぶんが見つかりませんでした。" if not skipped else "もう入っています。"}
+    results = create_events(items, "todo")
+    return {
+        "created": [r["title"] for r in results if r.get("status") == "ok"],
+        "skipped": skipped,
+    }
+
+
 @app.get("/api/schedule")
 def api_schedule(ym: str = "", child: str = ""):
     """1か月ぶんの予定。**年間予定を入れたあと、それを見る場所がないと意味がない。**
