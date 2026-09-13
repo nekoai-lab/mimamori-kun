@@ -88,6 +88,32 @@ h1,.tts,.pt,.who select{white-space:nowrap}
   .tts{font-size:10px;padding:3px 5px}
   .pt{font-size:13px;padding:3px 9px}
 }
+
+/* 週の台紙（★5つ・日曜に戻る） */
+#board{margin:10px 14px 0;padding:10px 12px;border:1px solid var(--line,#dcded6);border-radius:14px;
+ background:var(--surface,#fff);display:flex;align-items:center;gap:10px}
+#board[hidden]{display:none}
+#board .lbl{font-size:12.5px;color:var(--ink-3,#7c8783);flex:none}
+#board .slots{display:flex;gap:6px;font-size:22px;line-height:1}
+#board .s{filter:grayscale(1);opacity:.28}
+#board .s.on{filter:none;opacity:1}
+@media (prefers-reduced-motion:no-preference){
+  #board .s{transition:opacity .25s,filter .25s,transform .25s}
+  #board .s.pop{transform:scale(1.35)}
+}
+#board .cnt{margin-left:auto;font-size:12.5px;color:var(--ink-3,#7c8783);font-variant-numeric:tabular-nums}
+#board.full{border-color:var(--accent,#0f6b62);background:var(--accent-soft,#e2f0ed)}
+
+/* 紙吹雪 */
+#confetti{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:50}
+#confetti i{position:absolute;top:-14px;width:9px;height:14px;border-radius:2px;display:block}
+@media (prefers-reduced-motion:no-preference){
+  #confetti i{animation:fall 1.9s linear forwards}
+  @keyframes fall{
+    0%{transform:translateY(-10px) rotate(0deg);opacity:1}
+    100%{transform:translateY(105vh) rotate(540deg);opacity:.9}
+  }
+}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 /* だれが つかう？（who.js） */
@@ -142,6 +168,7 @@ h1,.tts,.pt,.who select{white-space:nowrap}
 
 <main id="main">
   <section id="today" aria-label="きょうのやること"></section>
+  <section id="board" aria-label="こんしゅうの だいし" hidden></section>
   <div class="thread" id="thread"></div>
 </main>
 
@@ -235,8 +262,9 @@ async function boot(){
   const sel=$("#child");
   sel.innerHTML=(c.children||[]).map(x=>'<option>'+esc(x.name)+"</option>").join("");
   child=sel.value||"";
-  sel.addEventListener("change",()=>{stopRecognition();child=sel.value;history=[];thread.innerHTML="";refreshPoints();loadCards();open();});
+  sel.addEventListener("change",()=>{stopRecognition();child=sel.value;history=[];thread.innerHTML="";boardDone=-1;refreshPoints();loadCards();loadBoard();open();});
   refreshPoints();
+  loadBoard();
   loadCards();
   open();
 }
@@ -315,6 +343,66 @@ async function finishCard(item,el){
   add("bot",line);
   say(line);
   refreshPoints();
+  loadBoard();
+}
+
+// ------------------------------------------------------------ 週の台紙
+//
+// ★5つで1枚。**日曜に戻る**（週は日曜はじまり）。
+// ここでも「あと2つ」とは言わない。済んだ数だけを見せる（A-7の態度ルール）。
+// 5つ目が埋まったときだけ紙吹雪。毎回出すと、出たこと自体がうれしくなくなる。
+
+const STAR_ON="⭐", STAR_OFF="☆";
+let boardDone=-1;
+
+async function loadBoard(){
+  const box=$("#board");
+  if(!child){ box.hidden=true; boardDone=-1; return; }
+  let w=null;
+  try{ w=await fetch("/api/week?child="+encodeURIComponent(child)).then(r=>r.json()); }
+  catch(e){ box.hidden=true; return; }
+  if(w.detail){ box.hidden=true; return; }
+
+  const filled=Math.min(w.done,w.goal);
+  const grew=boardDone>=0 && w.done>boardDone;
+  const justFull=grew && w.done>=w.goal && boardDone<w.goal;
+
+  box.hidden=false;
+  box.classList.toggle("full", w.done>=w.goal);
+  let h='<span class="lbl">こんしゅう</span><span class="slots" aria-hidden="true">';
+  for(let i=0;i<w.goal;i++){
+    h+='<span class="s'+(i<filled?" on":"")+(grew&&i===filled-1?" pop":"")+'">'
+      +(i<filled?STAR_ON:STAR_OFF)+"</span>";
+  }
+  h+='</span><span class="cnt">'+w.done+"つ</span>";
+  box.innerHTML=h;
+  box.setAttribute("aria-label","こんしゅう "+w.done+"つ おわった");
+  if(grew) setTimeout(()=>box.querySelectorAll(".pop").forEach(e=>e.classList.remove("pop")),300);
+
+  boardDone=w.done;
+  if(justFull){
+    confetti();
+    const line="だいしが いっぱいになったよ！";
+    add("bot",line); say(line);
+  }
+}
+
+function confetti(){
+  const COLORS=["#0F6B62","#C2614A","#3F8A6E","#8A5AA8","#D6A63C"];
+  const wrap=document.createElement("div");
+  wrap.id="confetti";
+  const quiet=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const n=quiet?0:34;
+  for(let i=0;i<n;i++){
+    const bit=document.createElement("i");
+    bit.style.left=Math.random()*100+"vw";
+    bit.style.background=COLORS[i%COLORS.length];
+    bit.style.animationDelay=(Math.random()*0.5).toFixed(2)+"s";
+    bit.style.animationDuration=(1.5+Math.random()*0.9).toFixed(2)+"s";
+    wrap.appendChild(bit);
+  }
+  document.body.appendChild(wrap);
+  setTimeout(()=>wrap.remove(),3000);
 }
 
 function open(){
@@ -360,7 +448,7 @@ async function send(text, hidden){
     add("bot",j.text);
     say(j.text);
     history.push({role:"assistant",text:j.text});
-    if((j.tools||[]).some(n=>n==="finish_task"||n==="start_task")){ refreshPoints(); loadCards(); }
+    if((j.tools||[]).some(n=>n==="finish_task"||n==="start_task")){ refreshPoints(); loadCards(); loadBoard(); }
     if(!hidden){ $("#msg").value=""; $("#msg").style.height="auto"; }
   }catch(e){
     stopThinking(t);

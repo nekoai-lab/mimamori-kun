@@ -169,6 +169,38 @@ async def kid_chat(req: KidChatRequest):
         raise HTTPException(500, f"うまく話せませんでした: {e}") from e
 
 
+WEEK_GOAL = 5          # 週の台紙。★5つで1枚
+
+
+@app.get("/api/week")
+def api_week(child: str):
+    """今週の台紙。**日曜に戻る**（週は日曜はじまり）。
+
+    `/api/tasks` は過去の「済」を落とす（やることの一覧なので、それでいい）。
+    台紙は済んだ数を数えるものなので、カレンダーから直接読む。
+    """
+    if not child:
+        raise HTTPException(400, "だれのぶんかが分かりません。")
+    today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
+    start = today - dt.timedelta(days=(today.weekday() + 1) % 7)   # 直近の日曜
+    end = start + dt.timedelta(days=6)                              # その週の土曜まで
+    # 明日ぶんを今日やることもある。週のうちなら数える。
+    try:
+        rows = list_raw(start.isoformat(), end.isoformat())
+    except Exception:  # noqa: BLE001
+        rows = []
+    done = [r for r in rows if r.get("child") == child and r.get("status") == "done"]
+    return {
+        "child": child,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "today": today.isoformat(),
+        "done": len(done),
+        "goal": WEEK_GOAL,
+        "full": len(done) >= WEEK_GOAL,
+    }
+
+
 @app.get("/api/points")
 def api_points(child: str):
     """残高と履歴。共同開発者の points.py を呼ぶだけ。"""
