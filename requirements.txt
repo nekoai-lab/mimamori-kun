@@ -8,3 +8,6 @@ google-genai==1.75.0
 google-api-python-client==2.200.0
 google-auth==2.57.1
 pydantic==2.13.5
+# 親が送ってくる写真は iPhone の HEIC。JPEG に直してから読ませる。
+Pillow==12.2.0
+pillow-heif==1.7.0

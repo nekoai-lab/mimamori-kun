@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import os
+import re
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -11,11 +12,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from mimamori.agent import read_otayori
+from mimamori import images as images_mod
 from mimamori.kid_agent import talk
-from mimamori.calendar_tools import create_events, list_tasks, service_account_email, set_status
+from mimamori.calendar_tools import create_events, list_events, list_tasks, service_account_email, set_status
 from mimamori.config import config
 from mimamori import points as points_mod
 from mimamori import recurring as recurring_mod
+from mimamori import year_plan as year_plan_mod
 
 app = FastAPI(title="みまもりくん")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -71,8 +74,13 @@ async def extract(image: UploadFile = File(...), hint: str = Form("")):
         raise HTTPException(400, "画像が空です。")
     if len(data) > MAX_BYTES:
         raise HTTPException(413, "画像が大きすぎます。12MB 以下にしてください。")
+    # iPhone の写真は HEIC で来る。ここで JPEG に直す。直せないものは理由を返す。
     try:
-        result = await read_otayori(data, image.content_type or "image/jpeg", hint)
+        data, content_type = images_mod.normalize(data, image.content_type or "")
+    except ValueError as e:
+        raise HTTPException(415, str(e)) from e
+    try:
+        result = await read_otayori(data, content_type, hint)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"読み取りに失敗しました: {e}") from e
     return JSONResponse(result)
@@ -194,6 +202,84 @@ def api_set_recurring(req: RecurringRequest):
         raise HTTPException(500, f"保存に失敗しました: {e}") from e
     saved["today"] = recurring_mod.ensure()
     return saved
+
+
+class YearPlanRequest(BaseModel):
+    """年間行事予定の貼り付け。PDFが落とせない学校があるので、テキストでも受ける。"""
+    text: str
+    child: str = ""
+    fiscal_year: Optional[int] = None
+    levels: List[str] = ["family"]
+    confirm: bool = False          # 資料が怪しいと分かったうえで入れる、の意思表示
+
+
+def _year_plan_rows(req: YearPlanRequest):
+    rows = year_plan_mod.parse(req.text, req.fiscal_year)
+    if not rows:
+        raise HTTPException(400, "日付のある行が見つかりませんでした。「4月」「1日 (水) 始業式」の形で貼ってください。")
+    return rows
+
+
+@app.post("/api/year_plan/check")
+def api_year_plan_check(req: YearPlanRequest):
+    """**入れる前に、資料そのものを確かめる。** ここで止めるのが仕事。"""
+    rows = _year_plan_rows(req)
+    child = req.child or (config.children[-1]["name"] if config.children else "")
+    items = year_plan_mod.to_items(rows, child, tuple(req.levels))
+    return {
+        "check": year_plan_mod.check(rows),
+        "counts": year_plan_mod.summarize(rows),
+        "child": child,
+        "will_add": len(items),
+        "preview": items[:10],
+    }
+
+
+@app.post("/api/year_plan/register")
+def api_year_plan_register(req: YearPlanRequest):
+    """確かめたうえで入れる。すでにある予定は作らない。件名が同じで日付が違うものは作らず、報告する。"""
+    rows = _year_plan_rows(req)
+    report = year_plan_mod.check(rows)
+    if not report["ok"] and not req.confirm:
+        raise HTTPException(409, "資料の日付が確かめられません。内容を見てから「それでも入れる」を押してください。")
+
+    child = req.child or (config.children[-1]["name"] if config.children else "")
+    items = year_plan_mod.to_items(rows, child, tuple(req.levels))
+    if not items:
+        return {"created": 0, "skipped": 0, "moved": [], "note": "入れるものがありませんでした。"}
+    if len(items) > 400:
+        raise HTTPException(400, "一度に入れられるのは400件までです。")
+
+    dates = sorted(i["date"] for i in items)
+    try:
+        existing = list_events(dates[0], dates[-1])
+    except Exception:  # noqa: BLE001
+        existing = []
+    by_date = {(e["date"], re.sub(r"\s", "", e["summary"])) for e in existing}
+    titles = {}
+    for e in existing:
+        titles.setdefault(re.sub(r"\s", "", e["summary"]), e["date"])
+
+    fresh, skipped, moved = [], 0, []
+    for it in items:
+        key = re.sub(r"\s", "", it["title"])
+        if (it["date"], key) in by_date:
+            skipped += 1
+            continue
+        if key in titles:
+            moved.append({"title": it["title"], "before": titles[key], "after": it["date"]})
+            continue
+        fresh.append(it)
+
+    results = create_events(fresh, "todo") if fresh else []
+    ok = [r for r in results if r.get("status") == "ok"]
+    return {
+        "created": len(ok),
+        "skipped": skipped,
+        "moved": moved,
+        "errors": [r for r in results if r.get("status") != "ok"][:5],
+        "check": report,
+    }
 
 
 @app.get("/healthz")

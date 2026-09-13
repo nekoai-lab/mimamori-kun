@@ -94,6 +94,21 @@ h1{font-family:"Zen Old Mincho",serif;font-size:19px;margin:0;letter-spacing:.05
 .recfoot .prim{font:inherit;font-size:13px;font-weight:700;padding:7px 16px;cursor:pointer;
  background:var(--accent);color:#fff;border:1px solid var(--accent);border-radius:9px}
 .recfoot .prim:disabled{opacity:.45;cursor:default}
+/* 年間予定のまとめ入れ */
+.yp{margin:10px 0 0;padding:12px 14px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.yp[hidden]{display:none}
+.yp textarea{width:100%;min-height:130px;font:inherit;font-size:13px;line-height:1.6;color:var(--ink);
+ background:var(--surface-2);border:1px solid var(--line-strong);border-radius:9px;padding:9px 11px;resize:vertical}
+.ypbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:9px 0 0}
+.ypbar select,.ypbar button{font:inherit;font-size:13px;padding:7px 13px;cursor:pointer;
+ background:var(--surface);color:var(--ink);border:1px solid var(--line-strong);border-radius:9px}
+.ypbar .prim{font-weight:700;background:var(--accent);color:#fff;border-color:var(--accent)}
+.ypbar .prim:disabled{opacity:.45;cursor:default}
+.ypout{margin:10px 0 0;font-size:13px;line-height:1.75}
+.ypout .ng{padding:9px 11px;border-radius:9px;background:var(--late);border:1px solid var(--late-line);color:var(--late-ink)}
+.ypout .okbox{padding:9px 11px;border-radius:9px;background:var(--accent-soft);border:1px solid var(--accent)}
+.ypout ul{margin:7px 0 0;padding-left:1.2em}
+.ypout .ex{font-size:12.5px;color:var(--ink-3)}
 
 h2{font-family:"Zen Old Mincho",serif;font-size:15px;margin:22px 0 8px;letter-spacing:.04em;
  display:flex;align-items:baseline;gap:9px}
@@ -202,6 +217,23 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
       <button type="button" class="prim" id="recsave">保存する</button>
       <span class="addnote" id="recnote"></span>
     </div>
+  </div>
+
+  <button class="addtoggle" id="yptoggle" type="button" aria-expanded="false">年間予定をまとめて入れる</button>
+  <div class="yp" id="yp" hidden>
+    <p class="recnote">学校からの年間行事予定を、そのまま貼ってください（PDFが落とせないときは、文字にして貼れば大丈夫）。
+      <strong>入れる前に、日付と曜日が合っているかをこちらで確かめます。</strong></p>
+    <textarea id="yptext" placeholder="4月&#10;8日 (水) 委員会、一斉下校訓練 13:45下校&#10;14日 (火) 保護者会&#10;…"></textarea>
+    <div class="ypbar">
+      <select id="ypchild" aria-label="どの子"></select>
+      <select id="yplevel" aria-label="入れる範囲">
+        <option value="family">家に関わるものだけ（保護者会・行事・下校時刻）</option>
+        <option value="family,school">校内のこと（委員会・検診）も入れる</option>
+      </select>
+      <button type="button" id="ypcheck">確かめる</button>
+      <button type="button" class="prim" id="ypgo" disabled>入れる</button>
+    </div>
+    <div class="ypout" id="ypout"></div>
   </div>
 
   <div id="body"></div>
@@ -496,6 +528,80 @@ $("#recsave").addEventListener("click",async()=>{
     renderRec();
     load();
   }catch(err){ $("#recnote").textContent=err.message; }
+  btn.disabled=false;
+});
+
+// ---- 年間予定のまとめ入れ --------------------------------------------------
+// 144行の紙を、そのまま信じてカレンダーに流し込まない。
+// 実物で、曜日が全行ずれている資料に当たった。確かめてから入れる。
+let ypOk=false;
+
+function ypBody(confirm){
+  return JSON.stringify({
+    text:$("#yptext").value,
+    child:$("#ypchild").value,
+    levels:$("#yplevel").value.split(","),
+    confirm:!!confirm
+  });
+}
+
+function ypChildren(){
+  const sel=$("#ypchild");
+  if(sel.options.length) return;
+  const names=(data&&data.children)||[];
+  sel.innerHTML=names.map(n=>'<option>'+esc(n)+'</option>').join("");
+  if(names.length>1) sel.selectedIndex=names.length-1;   // 小学校のほうが行事が多い
+}
+
+$("#yptoggle").addEventListener("click",()=>{
+  const box=$("#yp"), open=box.hidden;
+  box.hidden=!open;
+  $("#yptoggle").setAttribute("aria-expanded",String(open));
+  if(open) ypChildren();
+});
+
+$("#ypcheck").addEventListener("click",async()=>{
+  const btn=$("#ypcheck"); btn.disabled=true; $("#ypout").textContent="確かめています…";
+  try{
+    const res=await fetch("/api/year_plan/check",{method:"POST",headers:{"Content-Type":"application/json"},body:ypBody()});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.detail||"確かめられませんでした");
+    ypOk=j.check.ok;
+    $("#ypgo").disabled=false;
+    $("#ypgo").textContent=ypOk?"入れる":"それでも入れる";
+    let h='<div class="'+(ypOk?"okbox":"ng")+'">'
+      +'<strong>'+(ypOk?"確かめました。":"この資料は、そのままでは入れられません。")+'</strong>'
+      +'<ul>'+j.check.notes.map(n=>"<li>"+esc(n).replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>")+"</li>").join("")+'</ul></div>';
+    if(j.check.examples.length){
+      h+='<p class="ex">例: '+j.check.examples.map(e=>esc(e.date)+" は資料が「"+esc(e.label)+"」、実際は「"+esc(e.real)+"」（"+esc(e.title)+"）").join(" ／ ")+'</p>';
+    }
+    h+='<p>読めた行 '+j.check.dated+'件 ／ 入れる候補 <strong>'+j.will_add+'件</strong>'
+      +'（家に関わる '+j.counts.family+' ・ 校内 '+j.counts.school+' ・ 休み '+j.counts.holiday+'）</p>';
+    if(j.preview.length){
+      h+='<p class="ex">はじめの数件: '+j.preview.slice(0,5).map(p=>esc(p.date)+" "+esc(p.title)).join(" ／ ")+'</p>';
+    }
+    $("#ypout").innerHTML=h;
+  }catch(err){ $("#ypout").innerHTML='<div class="ng">'+esc(err.message)+'</div>'; }
+  btn.disabled=false;
+});
+
+$("#ypgo").addEventListener("click",async()=>{
+  if(!ypOk && !window.confirm("日付が確かめられていません。入れたあとに直すのは大変です。それでも入れますか？")) return;
+  const btn=$("#ypgo"); btn.disabled=true;
+  try{
+    const res=await fetch("/api/year_plan/register",{method:"POST",headers:{"Content-Type":"application/json"},body:ypBody(true)});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.detail||"入れられませんでした");
+    let h='<div class="okbox"><strong>'+j.created+'件 入れました。</strong>';
+    if(j.skipped) h+=' すでにあった '+j.skipped+'件は作りませんでした。';
+    h+='</div>';
+    if(j.moved&&j.moved.length){
+      h+='<p><strong>日にちが変わったかもしれないもの（入れていません）:</strong></p><ul>'
+        +j.moved.slice(0,10).map(m=>"<li>"+esc(m.title)+"："+esc(m.before)+" → "+esc(m.after)+"</li>").join("")+"</ul>";
+    }
+    $("#ypout").innerHTML=h;
+    load();
+  }catch(err){ $("#ypout").innerHTML='<div class="ng">'+esc(err.message)+'</div>'; }
   btn.disabled=false;
 });
 

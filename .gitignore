@@ -19,6 +19,9 @@ credentials*.json
 # 実物のプリント・画面写真（学校名や氏名が写るもの）は公開しない
 samples/real/
 *.heic
+*.HEIC
+# 実物の置き場（学校名・氏名が写る）。公開リポには入れない
+asetts/
 
 # 開発用のローカル台帳
 .data/
