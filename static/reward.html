@@ -37,6 +37,31 @@ h2{font-size:17px;margin:0 0 12px}
 .card h3{margin:0 0 8px;font-size:16px;font-weight:500}
 .card.unavailable{opacity:.6}
 .badge{display:inline-block;margin-left:10px;padding:2px 8px;border-radius:999px;background:var(--me);color:var(--me-ink);font-size:12px}
+.card .ask{margin:10px 0 0;font:inherit;font-size:14px;font-weight:700;padding:8px 16px;cursor:pointer;
+ background:var(--me);color:var(--me-ink);border:1px solid var(--me);border-radius:10px}
+.card .ask:disabled{opacity:.45;cursor:default}
+.card .pace{display:block;margin:6px 0 0;font-size:12.5px;color:var(--ink-2)}
+/* もうしこみの状況 */
+.reqs{list-style:none;padding:0;margin:0}
+.reqs li{display:flex;gap:9px;align-items:center;flex-wrap:wrap;padding:9px 0;border-top:1px solid var(--line)}
+.reqs li:first-child{border-top:0}
+.reqs .st{font-size:12px;padding:2px 9px;border-radius:999px;border:1px solid var(--line-strong);color:var(--ink-2)}
+.reqs .st.requested{background:var(--warm-soft);color:var(--warm);border-color:var(--warm)}
+.reqs .st.approved{background:var(--me);color:var(--me-ink);border-color:var(--me)}
+.reqs .st.handed{opacity:.6}
+.reqs .st.rejected{color:var(--error);border-color:var(--error)}
+.reqs .lb{flex:1;min-width:140px}
+.reqs .note{width:100%;font-size:12.5px;color:var(--ink-2)}
+.reqs button{font:inherit;font-size:12.5px;padding:4px 11px;cursor:pointer;border-radius:9px;
+ border:1px solid var(--line-strong);background:var(--surface);color:var(--ink)}
+.parent{margin-top:10px;padding:12px 14px;border:1px dashed var(--line-strong);border-radius:14px}
+.parent[hidden]{display:none}
+.parent .row{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:0 0 9px}
+.parent input{font:inherit;font-size:14px;padding:7px 10px;width:110px;border:1px solid var(--line-strong);
+ border-radius:9px;background:var(--surface);color:var(--ink)}
+.parent .lab{font-size:12.5px;color:var(--ink-2)}
+.toggle{font:inherit;font-size:13px;padding:5px 13px;cursor:pointer;border:1px solid var(--line-strong);
+ border-radius:999px;background:var(--surface);color:var(--ink-2)}
 .history{list-style:none;padding:0;margin:0}
 .history li{display:flex;align-items:baseline;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
 .date{color:var(--ink-2);font-size:14px;white-space:nowrap}
@@ -96,6 +121,24 @@ a{color:var(--me)}
     <h2 id="rewards-heading">交換できるもの</h2>
     <div id="rewards" class="cards"></div>
   </section>
+  <section aria-label="もうしこみ">
+    <h2>もうしこみ</h2>
+    <ul id="reqs" class="reqs"></ul>
+    <button type="button" class="toggle" id="ptoggle" aria-expanded="false">おうちの人がきめる</button>
+    <div class="parent" id="parent" hidden>
+      <div class="row">
+        <span class="lab">1か月に使えるお金</span>
+        <input type="number" id="capyen" min="0" step="100"><span class="lab">円（0＝きめない）</span>
+      </div>
+      <div class="row">
+        <span class="lab">1か月の回数</span>
+        <input type="number" id="capcount" min="0" step="1"><span class="lab">回（0＝きめない）</span>
+        <span class="lab" id="capnote"></span>
+      </div>
+      <p class="lab" id="left"></p>
+    </div>
+  </section>
+
   <section aria-labelledby="history-heading">
     <h2 id="history-heading">たまった記録</h2>
     <ul id="history" class="history"></ul>
@@ -131,6 +174,18 @@ function render(data,rewards){
     card.appendChild(element("h3",reward.label));
     card.appendChild(element("span",reward.points+" pt","points"));
     if(available) card.appendChild(element("span","交換できる","badge"));
+    // 申し込むのは子。買って渡すのは人（D-44）。アプリはお金に触らない。
+    const ask=element("button","もうしこむ","ask");
+    ask.type="button";
+    ask.disabled=!available;
+    ask.addEventListener("click",()=>askFor(reward));
+    card.appendChild(ask);
+    if(!available){
+      // 「あと◯pt」ではなく「今のペースだと約◯日」。数えさせるより、見通しを出す。
+      const pace=element("span","","pace");
+      pace.dataset.cost=reward.points;
+      card.appendChild(pace);
+    }
     $("#rewards").appendChild(card);
   }
   if(!rewards.length) $("#rewards").appendChild(element("p","交換できるものはまだありません"));
@@ -153,6 +208,104 @@ function render(data,rewards){
     $("#rules").appendChild(row);
   }
 }
+// ---- もうしこみ ------------------------------------------------------------
+const ST={requested:"もうしこみ",approved:"OK",handed:"わたした",rejected:"なし"};
+
+async function askFor(reward){
+  const child=$("#child").value;
+  const yen=Number(reward.yen||0);
+  try{
+    const res=await fetch("/api/redeem",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({child:child,label:reward.label,cost:reward.points,yen:yen})});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.detail||"もうしこめませんでした");
+    refresh();
+  }catch(err){
+    $("#error").textContent=err.message; $("#error").hidden=false;
+  }
+}
+
+async function loadRequests(){
+  const child=$("#child").value;
+  let j=null;
+  try{ j=await get("/api/redeem?child="+encodeURIComponent(child)); }catch(e){ return; }
+  const parentOpen=$("#parent").getAttribute("data-open")==="1";
+  $("#reqs").replaceChildren();
+  if(!j.items.length){
+    $("#reqs").appendChild(element("li","まだありません"));
+  }
+  for(const r of j.items.slice(0,8)){
+    const li=element("li");
+    li.appendChild(element("span",ST[r.status]||r.status,"st "+r.status));
+    li.appendChild(element("span",r.label+"（"+r.cost+"pt）","lb"));
+    if(parentOpen && (r.status==="requested"||r.status==="approved")){
+      if(r.status==="requested"){
+        const ok=element("button","OK"); ok.type="button";
+        ok.addEventListener("click",()=>decide("approve",r.id));
+        li.appendChild(ok);
+      }
+      const hand=element("button","わたした"); hand.type="button";
+      hand.addEventListener("click",()=>decide("hand",r.id));
+      li.appendChild(hand);
+      const no=element("button","ちがう"); no.type="button";
+      no.addEventListener("click",()=>{
+        const note=window.prompt("理由を書いてください（子どもに伝わります）");
+        if(note && note.trim()) decide("reject",r.id,note.trim());
+      });
+      li.appendChild(no);
+    }
+    if(r.note) li.appendChild(element("span","・"+r.note,"note"));
+    $("#reqs").appendChild(li);
+  }
+  const rem=j.remaining||{};
+  const bits=[];
+  if(rem.yen_left!=null) bits.push("今月あと "+rem.yen_left+"円");
+  if(rem.count_left!=null) bits.push("あと "+rem.count_left+"回");
+  $("#left").textContent=bits.join("／");
+  if(rem.cap){ $("#capyen").value=rem.cap.yen; $("#capcount").value=rem.cap.count; }
+}
+
+async function decide(what,id,note){
+  try{
+    const res=await fetch("/api/redeem/"+what,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id:id,note:note||""})});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.detail||"できませんでした");
+    refresh();
+  }catch(err){ $("#error").textContent=err.message; $("#error").hidden=false; }
+}
+
+async function loadPace(){
+  const child=$("#child").value;
+  for(const el of document.querySelectorAll(".pace")){
+    const cost=el.dataset.cost;
+    try{
+      const j=await get("/api/redeem/pace?child="+encodeURIComponent(child)+"&cost="+cost);
+      el.textContent = j.days==null ? "" : (j.days===0 ? "" : "今のペースだと 約"+j.days+"日");
+    }catch(e){}
+  }
+}
+
+$("#ptoggle").addEventListener("click",()=>{
+  const box=$("#parent"), open=box.hidden;
+  box.hidden=!open;
+  box.setAttribute("data-open", open?"1":"0");
+  $("#ptoggle").setAttribute("aria-expanded",String(open));
+  loadRequests();
+});
+
+async function saveCap(){
+  try{
+    const res=await fetch("/api/redeem/cap",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({yen:Number($("#capyen").value||0),count:Number($("#capcount").value||0)})});
+    if(!res.ok) throw new Error("きめられませんでした");
+    $("#capnote").textContent="きめました";
+    loadRequests();
+  }catch(err){ $("#capnote").textContent=err.message; }
+}
+$("#capyen").addEventListener("change",saveCap);
+$("#capcount").addEventListener("change",saveCap);
+
 async function refresh(){
   const id=++requestId;
   const selected=$("#child").value;
@@ -170,6 +323,8 @@ async function refresh(){
     setChildren(config.children,selected);
     if($("#child").value!==selected) return refresh();
     render(data,rewards.rewards);
+    loadRequests();
+    loadPace();
   }catch(error){
     if(id!==requestId) return;
     $("#error").textContent="読み込めませんでした。もう一度画面を開いてください。";

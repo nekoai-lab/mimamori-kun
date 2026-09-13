@@ -27,6 +27,7 @@ from mimamori.calendar_tools import (
 from mimamori.config import config
 from mimamori import notify as notify_mod
 from mimamori import points as points_mod
+from mimamori import redeem as redeem_mod
 from mimamori import recurring as recurring_mod
 from mimamori import study as study_mod
 from mimamori import year_plan as year_plan_mod
@@ -742,6 +743,93 @@ class RangeRequest(BaseModel):
 def api_study_range(req: RangeRequest):
     """「ワーク p.42-78」→ 37ページ。読めなければ null を返す（人に聞く）。"""
     return {"parsed": study_mod.parse_range(req.text)}
+
+
+# ---------------------------------------------------------------- ごほうび（E系）
+
+@app.get("/api/redeem")
+def api_redeem_list(child: str = "", status: str = ""):
+    return {
+        "items": redeem_mod.requests(child=child, status=status),
+        "remaining": redeem_mod.remaining(child),
+        "labels": redeem_mod.LABEL,
+    }
+
+
+class RedeemRequest(BaseModel):
+    child: str
+    label: str
+    cost: int
+    yen: int = 0
+
+
+@app.post("/api/redeem")
+def api_redeem_request(req: RedeemRequest):
+    """子が申し込む。**ここでポイントを引く**（断られたら戻る）。"""
+    try:
+        row = redeem_mod.request(req.child, req.label, req.cost, req.yen)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    try:
+        notify_mod.add("redeem", f"{req.child}が「{req.label}」を申しこみました",
+                       f"{req.cost}pt" + (f"／{req.yen}円" if req.yen else ""))
+    except Exception:  # noqa: BLE001
+        pass
+    return {"request": row, "balance": points_mod.balance(req.child)}
+
+
+class RedeemDecision(BaseModel):
+    id: str
+    note: str = ""
+
+
+@app.post("/api/redeem/approve")
+def api_redeem_approve(req: RedeemDecision):
+    try:
+        return {"request": redeem_mod.approve(req.id, req.note)}
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.post("/api/redeem/reject")
+def api_redeem_reject(req: RedeemDecision):
+    """断る。**理由が要る**（子どもに伝わる）。引いたポイントは戻す。"""
+    try:
+        row = redeem_mod.reject(req.id, req.note)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"request": row, "balance": points_mod.balance(row["child"])}
+
+
+@app.post("/api/redeem/hand")
+def api_redeem_hand(req: RedeemDecision):
+    try:
+        return {"request": redeem_mod.hand(req.id)}
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+class CapRequest(BaseModel):
+    yen: Optional[int] = None
+    count: Optional[int] = None
+
+
+@app.post("/api/redeem/cap")
+def api_redeem_cap(req: CapRequest):
+    return redeem_mod.set_cap(req.yen, req.count)
+
+
+@app.get("/api/redeem/pace")
+def api_redeem_pace(child: str, cost: int = 0):
+    """「今のペースだと約◯日」。分からないときは言わない。"""
+    if not child:
+        raise HTTPException(400, "だれのぶんかが分かりません。")
+    return {
+        "child": child,
+        "balance": points_mod.balance(child),
+        "per_day": round(redeem_mod.pace(child), 1),
+        "days": redeem_mod.days_to(child, cost) if cost else None,
+    }
 
 
 @app.get("/healthz")
