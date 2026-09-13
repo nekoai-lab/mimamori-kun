@@ -632,9 +632,12 @@ $("#cam").addEventListener("change",async e=>{
     const res=await fetch("/api/extract",{method:"POST",body:fd});
     const j=await res.json();
     if(!res.ok) throw new Error(j.detail||"読み取れませんでした");
-    const keep=(j.items||[]).filter(x=>!x.duplicate_of);
+    // すでにあるもの（完全一致）はサーバ側で外れている（D-1）。
+    // 追記・日程変更は duplicate_of が付くが、**これは親に見せるべきもの**なので落とさない。
+    const keep=(j.items||[]).filter(x=>x.branch!=="same");
     if(!keep.length){
-      stopThinking(t); add("bot","ありがとう。これは新しく入れるものはなかったよ。");
+      stopThinking(t);
+      add("bot", j.skipped ? "ありがとう。もう入っているものだったよ。" : "ありがとう。これは新しく入れるものはなかったよ。");
       return;
     }
     registering=true;
