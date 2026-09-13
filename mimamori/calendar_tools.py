@@ -77,6 +77,18 @@ def list_events(start_date: str, end_date: str) -> List[Dict[str, Any]]:
     return [{"summary": e["summary"], "date": e["date"]} for e in _raw(start_date, end_date)]
 
 
+def list_raw(start_date: str, end_date: str) -> List[Dict[str, Any]]:
+    """id を含めて既存予定を返す。**アプリ内部用**（エージェントのツールではない）。
+
+    list_events は件名と日付しか返さない（id を出すとモデルが人に読めない文字列を喋るため）。
+    日付を直す・差し替えるには id が要るので、内部からはこちらを使う。
+    """
+    if DEMO:
+        today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
+        return [e for e in _demo_state(today) if start_date <= e["date"] <= end_date]
+    return [e for e in _raw(start_date, end_date) if e["mine"]]
+
+
 def _raw(start_date: str, end_date: str) -> List[Dict[str, Any]]:
     tmin = f"{start_date}T00:00:00+09:00"
     tmax = (dt.date.fromisoformat(end_date) + dt.timedelta(days=1)).isoformat() + "T00:00:00+09:00"
@@ -109,6 +121,7 @@ def _raw(start_date: str, end_date: str) -> List[Dict[str, Any]]:
                 "child": priv.get("child", ""),
                 "kind": priv.get("kind", ""),
                 "status": priv.get("status", "todo"),
+                "batch": priv.get("batch", ""),
                 "points": int(priv.get("points", 0) or 0),
                 "bring": priv.get("bring", ""),
             }
@@ -251,6 +264,8 @@ def _body(item: Dict[str, Any], status: str = "todo") -> Dict[str, Any]:
                 "status": status,
                 "points": str(_points_for(item)),
                 "bring": ("、".join(item["bring"]) if isinstance(item.get("bring"), list) else (item.get("bring") or "")),
+                # どの取り込みで入ったか（版）。改訂版との差分を出すときに使う。
+                "batch": item.get("batch", ""),
             }
         },
         "reminders": {
@@ -284,6 +299,7 @@ def _demo_add(item: Dict[str, Any], status: str = "todo") -> None:
             "status": status,
             "points": _points_for(item),
             "bring": "、".join(bring) if isinstance(bring, list) else (bring or ""),
+            "batch": item.get("batch", ""),
             "mine": True,
             "link": "",
             "description": item.get("note", "") or "",
@@ -342,3 +358,32 @@ def set_status(event_id: str, status: str) -> Dict[str, Any]:
     body = {"summary": summary, "extendedProperties": {"private": priv}}
     ev = _svc().events().patch(calendarId=config.calendar_id, eventId=event_id, body=body).execute()
     return {"id": event_id, "status": status, "summary": ev.get("summary", "")}
+
+
+def move_event(event_id: str, new_date: str) -> Dict[str, Any]:
+    """予定の日にちを直す。**消して作り直さない。**
+
+    作り直すと id が変わり、ポイント台帳の ref_id が迷子になる。
+    改訂版の予定表で日程がずれたときは、この道を通る。
+    """
+    dt.date.fromisoformat(new_date)          # 形が違えばここで落とす
+    if DEMO:
+        for it in _demo_store:
+            if it["id"] == event_id:
+                it["date"] = new_date
+                return {"id": event_id, "date": new_date, "summary": it["summary"]}
+        return {"id": event_id, "status": "error", "note": "その id の予定が見つかりませんでした"}
+    ev = _svc().events().get(calendarId=config.calendar_id, eventId=event_id).execute()
+    st = ev.get("start", {})
+    if st.get("dateTime"):
+        t0 = st["dateTime"][11:]
+        t1 = (ev.get("end", {}).get("dateTime") or st["dateTime"])[11:]
+        body = {
+            "start": {"dateTime": f"{new_date}T{t0}", "timeZone": config.timezone},
+            "end": {"dateTime": f"{new_date}T{t1}", "timeZone": config.timezone},
+        }
+    else:
+        end = (dt.date.fromisoformat(new_date) + dt.timedelta(days=1)).isoformat()
+        body = {"start": {"date": new_date}, "end": {"date": end}}
+    ev = _svc().events().patch(calendarId=config.calendar_id, eventId=event_id, body=body).execute()
+    return {"id": event_id, "date": new_date, "summary": ev.get("summary", "")}

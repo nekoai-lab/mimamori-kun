@@ -109,6 +109,10 @@ h1{font-family:"Zen Old Mincho",serif;font-size:19px;margin:0;letter-spacing:.05
 .ypout .okbox{padding:9px 11px;border-radius:9px;background:var(--accent-soft);border:1px solid var(--accent)}
 .ypout ul{margin:7px 0 0;padding-left:1.2em}
 .ypout .ex{font-size:12.5px;color:var(--ink-3)}
+.ypout li{margin:3px 0}
+.ypout .mv{font:inherit;font-size:12px;margin-left:6px;padding:2px 9px;cursor:pointer;
+ background:var(--surface);color:var(--ink);border:1px solid var(--line-strong);border-radius:7px}
+.ypout .mv:disabled{opacity:.5;cursor:default}
 .ypfile{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 9px}
 .ypfile input[type=file]{font:inherit;font-size:12.5px;max-width:100%}
 .ypfile button{font:inherit;font-size:13px;padding:7px 13px;cursor:pointer;background:var(--surface);
@@ -614,6 +618,21 @@ $("#ypcheck").addEventListener("click",async()=>{
   btn.disabled=false;
 });
 
+// 改訂版で日にちが変わったものを、1件ずつ直す。まとめて直さないのは、
+// 改訂版の読み取りのほうが間違っていることがあるから。押した人が見て決める。
+$("#ypout").addEventListener("click",async e=>{
+  const btn=e.target.closest(".mv"); if(!btn) return;
+  btn.disabled=true; btn.textContent="直しています…";
+  try{
+    const res=await fetch("/api/year_plan/move",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({event_id:btn.dataset.id,date:btn.dataset.date})});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.detail||"直せませんでした");
+    btn.replaceWith(document.createTextNode("直しました"));
+    load();
+  }catch(err){ btn.disabled=false; btn.textContent="この日に直す"; alert(err.message); }
+});
+
 $("#ypgo").addEventListener("click",async()=>{
   if(!ypOk && !window.confirm("日付が確かめられていません。入れたあとに直すのは大変です。それでも入れますか？")) return;
   const btn=$("#ypgo"); btn.disabled=true;
@@ -625,8 +644,10 @@ $("#ypgo").addEventListener("click",async()=>{
     if(j.skipped) h+=' すでにあった '+j.skipped+'件は作りませんでした。';
     h+='</div>';
     if(j.moved&&j.moved.length){
-      h+='<p><strong>日にちが変わったかもしれないもの（入れていません）:</strong></p><ul>'
-        +j.moved.slice(0,10).map(m=>"<li>"+esc(m.title)+"："+esc(m.before)+" → "+esc(m.after)+"</li>").join("")+"</ul>";
+      h+='<p><strong>日にちが変わったかもしれないもの:</strong> 1件ずつ見て、直すものだけ押してください。</p><ul id="ypmoved">'
+        +j.moved.slice(0,20).map(m=>'<li>'+esc(m.title)+"："+esc(m.before)+" → "+esc(m.after)
+          +(m.event_id?' <button type="button" class="mv" data-id="'+esc(m.event_id)+'" data-date="'+esc(m.after)+'">この日に直す</button>':"")
+          +'</li>').join("")+"</ul>";
     }
     $("#ypout").innerHTML=h;
     load();

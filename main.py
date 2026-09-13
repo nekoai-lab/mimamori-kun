@@ -1,6 +1,7 @@
 """みまもりくん — FastAPI エントリポイント。Cloud Run で動かす。"""
 from __future__ import annotations
 
+import datetime as dt
 import os
 import re
 
@@ -14,11 +15,24 @@ from pydantic import BaseModel
 from mimamori.agent import read_otayori, read_year_plan
 from mimamori import images as images_mod
 from mimamori.kid_agent import talk
-from mimamori.calendar_tools import create_events, list_events, list_tasks, service_account_email, set_status
+from mimamori.calendar_tools import (
+    create_events,
+    list_events,
+    list_raw,
+    list_tasks,
+    move_event,
+    service_account_email,
+    set_status,
+)
 from mimamori.config import config
 from mimamori import points as points_mod
 from mimamori import recurring as recurring_mod
 from mimamori import year_plan as year_plan_mod
+
+def _key(title: str) -> str:
+    """件名の比べ方。空白と ✓ の違いで別物にしない。"""
+    return re.sub(r"\s", "", (title or "").replace("✓", ""))
+
 
 app = FastAPI(title="みまもりくん")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -300,24 +314,35 @@ def api_year_plan_register(req: YearPlanRequest):
 
     dates = sorted(i["date"] for i in items)
     try:
-        existing = list_events(dates[0], dates[-1])
+        existing = list_raw(dates[0], dates[-1])
     except Exception:  # noqa: BLE001
         existing = []
-    by_date = {(e["date"], re.sub(r"\s", "", e["summary"])) for e in existing}
-    titles = {}
+    by_date = {(e["date"], _key(e.get("summary", ""))) for e in existing}
+    titles: Dict[str, Dict[str, str]] = {}
     for e in existing:
-        titles.setdefault(re.sub(r"\s", "", e["summary"]), e["date"])
+        titles.setdefault(_key(e.get("summary", "")), {"date": e["date"], "id": e.get("id", "")})
+
+    # 版。改訂版を入れたときに「どの取り込みで入ったか」を予定に残す。
+    batch = "yp-" + dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).strftime("%Y%m%d-%H%M")
 
     fresh, skipped, moved = [], 0, []
     for it in items:
-        key = re.sub(r"\s", "", it["title"])
+        key = _key(it["title"])
         if (it["date"], key) in by_date:
             skipped += 1
             continue
         if key in titles:
-            moved.append({"title": it["title"], "before": titles[key], "after": it["date"]})
+            # 同じ行事が別の日に入っている。**勝手に直さず、勝手に増やさない。**
+            moved.append(
+                {
+                    "title": it["title"],
+                    "before": titles[key]["date"],
+                    "after": it["date"],
+                    "event_id": titles[key]["id"],
+                }
+            )
             continue
-        fresh.append(it)
+        fresh.append(dict(it, batch=batch))
 
     results = create_events(fresh, "todo") if fresh else []
     ok = [r for r in results if r.get("status") == "ok"]
@@ -325,9 +350,37 @@ def api_year_plan_register(req: YearPlanRequest):
         "created": len(ok),
         "skipped": skipped,
         "moved": moved,
+        "batch": batch,
         "errors": [r for r in results if r.get("status") != "ok"][:5],
         "check": report,
     }
+
+
+class MoveRequest(BaseModel):
+    event_id: str
+    date: str
+
+
+@app.post("/api/year_plan/move")
+def api_year_plan_move(req: MoveRequest):
+    """改訂版で日にちが変わったものを、1件ずつ直す。
+
+    消して作り直さない。id が変わるとポイント台帳の紐づけが切れる。
+    まとめて直さないのは、**改訂版の読み取りが間違っている場合があるため**。
+    親が1件ずつ見て押す。
+    """
+    try:
+        result = move_event(req.event_id, req.date)
+        if result.get("status") == "error":
+            # 直せていないのに 200 を返すと、画面には「直しました」と出て台帳はそのままになる。
+            raise HTTPException(404, result.get("note", "その予定が見つかりませんでした"))
+        return result
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(400, f"日付の形が違います: {e}") from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"日にちを直せませんでした: {e}") from e
 
 
 @app.get("/healthz")
