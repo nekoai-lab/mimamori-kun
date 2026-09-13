@@ -58,6 +58,21 @@ h1{font-family:"Zen Old Mincho",serif;font-size:19px;margin:0;letter-spacing:.05
 .pt{border:1px solid var(--line);border-radius:999px;padding:3px 11px;background:var(--surface)}
 .pt b{font-family:"IBM Plex Mono",monospace;font-size:13px}
 
+/* 子が入れたものの知らせ（D-62） */
+#notice{margin:12px 0 0;padding:11px 13px;border:1px solid var(--accent);border-radius:12px;
+ background:var(--accent-soft)}
+#notice[hidden]{display:none}
+#notice .hd{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+#notice .hd b{font-size:14px}
+#notice .hd .when{font-size:12px;color:var(--ink-3)}
+#notice .hd .seen{margin-left:auto;font:inherit;font-size:12.5px;padding:4px 11px;cursor:pointer;
+ border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);color:var(--ink-2)}
+#notice ul{margin:7px 0 0;padding:0;list-style:none}
+#notice li{display:flex;gap:8px;align-items:center;font-size:13.5px;padding:2px 0}
+#notice li button{font:inherit;font-size:12px;padding:2px 9px;cursor:pointer;border-radius:7px;
+ border:1px solid var(--line-strong);background:var(--surface);color:var(--ink-3)}
+.chip.kid{background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent)}
+
 .addtoggle{font:inherit;font-size:12.5px;padding:4px 13px;margin:10px 0 0;cursor:pointer;
  border:1px dashed var(--line-strong);background:transparent;color:var(--ink-2);border-radius:999px}
 .add{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:10px 0 0;
@@ -199,6 +214,8 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
     <button data-f="done" aria-pressed="false">済も表示</button>
     <span class="pts" id="pts"></span>
   </div>
+
+  <div id="notice" hidden></div>
 
   <button class="addtoggle" id="addtoggle" type="button" aria-expanded="false">＋ 手で足す</button>
   <form class="add" id="add" hidden>
@@ -425,6 +442,7 @@ function rowHtml(it){
         +(late?'<span style="color:var(--late-ink);font-weight:700">'+Math.abs(it.days_left)+"日超過</span>":"")
         +(it.status==="doing"?'<span class="doing">やってる</span>':"")
         +(it.points?'<span>'+it.points+"pt</span>":"")
+        +(it.source==="kid"?'<span class="chip kid">子が入れた</span>':"")
       +"</div>"
       +(it.bring?'<div class="bring"><b>持ち物:</b> '+esc(it.bring)+"</div>":"")
     +"</div>"
@@ -657,12 +675,53 @@ $("#ypgo").addEventListener("click",async()=>{
   btn.disabled=false;
 });
 
+// ---- 子が入れたものの知らせ ------------------------------------------------
+// 承認は挟まない（D-62）。挟むと、通し忘れた日は子のやることが空のまま終わる。
+// 代わりに、入ったことをここで知らせる。違っていたらその場で消せる。
+async function loadNotices(){
+  let list=[];
+  try{ list=(await fetch("/api/notices?unseen=true").then(r=>r.json())).items||[]; }
+  catch(e){ return; }
+  const box=$("#notice");
+  if(!list.length){ box.hidden=true; box.innerHTML=""; return; }
+  const n=list[0];                      // いちばん新しいものだけ出す。溜めて見せない
+  box.hidden=false;
+  box.innerHTML='<div class="hd"><b>'+esc(n.title)+"</b>"
+    +'<span class="when">'+esc((n.at||"").slice(5,16).replace("T"," "))+"</span>"
+    +'<button type="button" class="seen" data-n="'+esc(n.id)+'">見た</button></div>'
+    +"<ul>"+(n.items||[]).map(i=>"<li><span>"+esc(String(i.title).replace(/^[^｜]*｜/,""))+"</span>"
+        +'<button type="button" class="del" data-id="'+esc(i.id)+'">ちがう（消す）</button></li>').join("")+"</ul>"
+    +(list.length>1?'<div class="when">ほかに '+(list.length-1)+"件の知らせがあります</div>":"");
+}
+
+$("#notice").addEventListener("click",async e=>{
+  const seen=e.target.closest(".seen"), del=e.target.closest(".del");
+  if(seen){
+    seen.disabled=true;
+    try{ await fetch("/api/notices/seen",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id:seen.dataset.n})}); }catch(err){}
+    loadNotices();
+    return;
+  }
+  if(del){
+    del.disabled=true; del.textContent="消しています…";
+    try{
+      const r=await fetch("/api/status",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({event_id:del.dataset.id,status:"rejected"})});
+      if(!r.ok) throw new Error("ng");
+      del.closest("li").remove();
+      load();
+    }catch(err){ del.disabled=false; del.textContent="ちがう（消す）"; alert("消せませんでした"); }
+  }
+});
+
 load();
+loadNotices();
 
 // 子が /kid で終わらせたものを、こちらに戻ってきた時点で反映する。
 // 手でリロードしないと消えないと、消えたことに気づけない。
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) load();
+  if (!document.hidden){ load(); loadNotices(); }
 });
 </script>
 </body>

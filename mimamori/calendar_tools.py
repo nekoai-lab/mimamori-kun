@@ -126,6 +126,7 @@ def _raw(start_date: str, end_date: str) -> List[Dict[str, Any]]:
                 "kind": priv.get("kind", ""),
                 "status": priv.get("status", "todo"),
                 "batch": priv.get("batch", ""),
+                "source": priv.get("source", "parent"),
                 "minutes": int(priv.get("minutes") or 0) or _MINUTES.get(priv.get("kind", ""), 10),
                 "points": int(priv.get("points", 0) or 0),
                 "bring": priv.get("bring", ""),
@@ -274,6 +275,8 @@ def _body(item: Dict[str, Any], status: str = "todo") -> Dict[str, Any]:
                 # どの取り込みで入ったか（版）。改訂版との差分を出すときに使う。
                 "batch": item.get("batch", ""),
                 "minutes": str(minutes_for(item)),
+                # だれが入れたか。子が入れたものは親に知らせ、あとから消せるようにする。
+                "source": item.get("source", "parent"),
             }
         },
         "reminders": {
@@ -323,6 +326,7 @@ def _demo_add(item: Dict[str, Any], status: str = "todo") -> str:
             "bring": "、".join(bring) if isinstance(bring, list) else (bring or ""),
             "batch": item.get("batch", ""),
             "minutes": minutes_for(item),
+            "source": item.get("source", "parent"),
             "mine": True,
             "link": "",
             "description": item.get("note", "") or "",

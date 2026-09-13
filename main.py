@@ -25,6 +25,7 @@ from mimamori.calendar_tools import (
     set_status,
 )
 from mimamori.config import config
+from mimamori import notify as notify_mod
 from mimamori import points as points_mod
 from mimamori import recurring as recurring_mod
 from mimamori import study as study_mod
@@ -115,19 +116,59 @@ async def extract(image: UploadFile = File(...), hint: str = Form("")):
 
 class RegisterRequest(BaseModel):
     items: List[Dict[str, Any]]
-    # 子の画面から撮ったものは承認待ちで入れる。親が /board で通すまで、
-    # 子のやることには出ない。
-    pending: bool = False
+    pending: bool = False          # 親が自分の判断で保留にしたいときだけ使う
+    source: str = "parent"         # "kid" なら、子が入れたものとして親に知らせる
 
 
 @app.post("/api/register")
 def register(req: RegisterRequest):
+    """カレンダーに入れる。
+
+    **子が入れたものも、承認を待たずにそのまま入れる（D-62）。**
+    承認を挟むと、親が忘れた日は子のやることが空のまま終わる。
+    子から見れば「出したのに何も起きない」で、次の日から撮らなくなる。
+    代わりに、入ったことを親に知らせ、違ったら消せるようにする。
+    """
     if not req.items:
         raise HTTPException(400, "登録するものがありません。")
+    kid = req.source == "kid"
+    items = [dict(i, source=("kid" if kid else "parent")) for i in req.items]
     try:
-        return {"results": create_events(req.items, "pending" if req.pending else "todo")}
+        results = create_events(items, "pending" if req.pending else "todo")
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"カレンダー登録に失敗しました: {e}") from e
+
+    notice = None
+    if kid:
+        ok = [r for r in results if r.get("status") == "ok"]
+        if ok:
+            who = (items[0].get("child") or "子ども")
+            try:
+                notice = notify_mod.add(
+                    "kid_added",
+                    f"{who}が {len(ok)}件 入れました",
+                    "撮ったものから入りました。違っていたら消せます。",
+                    [{"id": r.get("id", ""), "title": r.get("title", ""),
+                      "date": next((i.get("date", "") for i in items if i.get("title") == r.get("title")), "")}
+                     for r in ok],
+                )
+            except Exception:  # noqa: BLE001
+                notice = None          # 知らせが出せなくても、登録は止めない
+    return {"results": results, "notice": notice}
+
+
+@app.get("/api/notices")
+def api_notices(unseen: bool = False):
+    return {"items": notify_mod.notices(unseen_only=unseen)}
+
+
+class NoticeSeen(BaseModel):
+    id: str = ""
+
+
+@app.post("/api/notices/seen")
+def api_notices_seen(req: NoticeSeen):
+    return {"seen": notify_mod.mark_seen(req.id)}
 
 
 class UndoRequest(BaseModel):
