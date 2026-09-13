@@ -301,7 +301,7 @@ def _points_for(item: Dict[str, Any]) -> int:
     return {"homework": 3, "deadline": 3, "bring": 2, "event": 0}.get(item.get("kind", ""), 1)
 
 
-def _demo_add(item: Dict[str, Any], status: str = "todo") -> None:
+def _demo_add(item: Dict[str, Any], status: str = "todo") -> str:
     """デモ台帳に足す。
 
     ここで足さないと、撮ったおたよりが一覧にも会話にも出てこない。
@@ -310,9 +310,10 @@ def _demo_add(item: Dict[str, Any], status: str = "todo") -> None:
     today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
     _demo_state(today)          # 台帳がまだ無ければ作らせる
     bring = item.get("bring")
+    new_id = "x" + uuid.uuid4().hex[:7]
     _demo_store.append(
         {
-            "id": "x" + uuid.uuid4().hex[:7],
+            "id": new_id,
             "summary": item["title"],
             "date": item["date"],
             "child": item.get("child", ""),
@@ -328,6 +329,7 @@ def _demo_add(item: Dict[str, Any], status: str = "todo") -> None:
             "time": item.get("time_start"),
         }
     )
+    return new_id
 
 
 def create_events(items: List[Dict[str, Any]], status: str = "todo") -> List[Dict[str, str]]:
@@ -341,14 +343,15 @@ def create_events(items: List[Dict[str, Any]], status: str = "todo") -> List[Dic
     for item in items:
         if DEMO:
             try:
-                _demo_add(item, status)
-                results.append({"title": item["title"], "status": "ok", "link": ""})
+                new_id = _demo_add(item, status)
+                results.append({"title": item["title"], "status": "ok", "link": "", "id": new_id})
             except Exception as e:  # noqa: BLE001
                 results.append({"title": item.get("title", "?"), "status": "error", "error": str(e)})
             continue
         try:
             ev = _svc().events().insert(calendarId=config.calendar_id, body=_body(item, status)).execute()
-            results.append({"title": item["title"], "status": "ok", "link": ev.get("htmlLink", "")})
+            results.append({"title": item["title"], "status": "ok",
+                            "link": ev.get("htmlLink", ""), "id": ev.get("id", "")})
         except Exception as e:  # noqa: BLE001
             results.append({"title": item.get("title", "?"), "status": "error", "error": str(e)})
     return results

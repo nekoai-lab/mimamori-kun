@@ -130,6 +130,34 @@ def register(req: RegisterRequest):
         raise HTTPException(500, f"カレンダー登録に失敗しました: {e}") from e
 
 
+class UndoRequest(BaseModel):
+    ids: List[str]
+
+
+@app.post("/api/register/undo")
+def api_register_undo(req: UndoRequest):
+    """まとめて入れたものを、まとめて取り消す（10分以内・D-3）。
+
+    **消さずに隠す。** 予定は rejected にするだけなので、何を取り消したかは残る。
+    18件を1件ずつ消させると、間違えて入れた日が地獄になる。
+    """
+    if not req.ids:
+        raise HTTPException(400, "取り消すものがありません。")
+    if len(req.ids) > 60:
+        raise HTTPException(400, "一度に取り消せるのは60件までです。")
+    done, failed = 0, []
+    for eid in req.ids:
+        try:
+            r = set_status(eid, "rejected")
+            if r.get("status") == "error":
+                failed.append(eid)
+            else:
+                done += 1
+        except Exception:  # noqa: BLE001
+            failed.append(eid)
+    return {"undone": done, "failed": failed}
+
+
 @app.get("/api/tasks")
 def tasks(days: int = 14):
     # 毎日きまっているもの（公文など）は、ここで足りない分だけ用意する。

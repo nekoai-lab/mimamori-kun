@@ -82,6 +82,32 @@ h2{font-family:"Zen Old Mincho",serif;font-size:19px;margin:32px 0 6px;letter-sp
 .badge{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.06em;padding:2px 7px;border-radius:2px}
 .b-kind{background:var(--accent-soft);color:var(--accent)}
 .b-warn{background:var(--warn-soft);color:var(--warn)}
+/* 4分岐のバッジ（D-1） */
+.b-new{background:var(--accent);color:#fff}
+.b-diff{background:var(--warn-soft);color:var(--warn)}
+.b-moved{background:var(--late,#b3402015);color:var(--late-ink,#963c1e);border:1px solid var(--late-line,#b94f2b)}
+.item.b_diff{border-left-color:var(--warn)}
+.item.b_moved{border-left-color:var(--late-line,#b94f2b)}
+.changes{margin:6px 0 0 27px;font-size:12.5px;color:var(--ink-2)}
+.changes b{font-weight:700}
+/* すでに入っているもの：数だけ伝える */
+.skipped{margin:8px 0 0;font-size:12.5px;color:var(--ink-3)}
+.skipped button{font:inherit;font-size:12px;margin-left:6px;padding:2px 8px;cursor:pointer;
+ border:1px solid var(--line);border-radius:7px;background:transparent;color:inherit}
+.skipped ul{margin:6px 0 0;padding-left:1.1em}
+/* 原本サムネイル：確かめているあいだ、ずっと横にある */
+.withshot{display:flex;gap:14px;align-items:flex-start}
+.withshot .shot{flex:none;width:190px;position:sticky;top:76px}
+.withshot .shot img{width:100%;border-radius:10px;border:1px solid var(--line);display:block;cursor:zoom-in}
+.withshot .shot .cap{font-size:11.5px;color:var(--ink-3);margin:5px 0 0}
+.withshot .list{flex:1;min-width:0}
+@media (max-width:700px){
+  .withshot{display:block}
+  .withshot .shot{width:100%;position:static;margin:0 0 12px}
+  .withshot .shot img{max-height:200px;object-fit:cover;object-position:top}
+}
+.item .who{font:inherit;font-size:11px;padding:2px 7px;border-radius:2px;border:1px solid var(--line-strong);
+ background:var(--surface-2);color:var(--ink-2);cursor:pointer}
 .b-dim{background:var(--surface-2);color:var(--ink-3);border:1px solid var(--line)}
 .fields{display:grid;grid-template-columns:1fr;gap:10px;margin:12px 0 0 27px}
 @media(min-width:520px){.fields{grid-template-columns:150px 110px 1fr}}
@@ -208,6 +234,7 @@ const $ = s => document.querySelector(s);
 let picked = null, extraction = null;
 
 fetch("/api/config").then(r=>r.json()).then(c=>{
+  window.CHILDREN = (c.children||[]).map(x=>x.name);
   qSetup(c.children);
   $("#meta").innerHTML =
     "CALENDAR  " + esc(c.calendar_id) + "<br>" +
@@ -259,31 +286,53 @@ $("#go").addEventListener("click", async () => {
 });
 
 function render(d){
+  const KIND = {event:"行事", deadline:"提出期限", homework:"宿題", bring:"持ち物"};
+  const BR = {new:"b-new", diff:"b-diff", moved:"b-moved"};
   let h = "<h2>登録候補</h2>";
   h += '<p class="summary">' + esc(d.summary) + "</p>";
+
+  // すでに入っているものは**候補に出さない**（D-33）。毎回承認させると、承認が面倒になる。
+  if(d.skipped){
+    h += '<p class="skipped">すでに入っているもの ' + d.skipped + "件は、そのままにしました。"
+       + '<button type="button" id="showskip">見る</button>'
+       + '<span id="skiplist"></span></p>';
+  }
   if(d.trace && d.trace.length){
     h += '<div class="trace">' + d.trace.map(t=>"<div>› "+esc(t)+"</div>").join("") + "</div>";
   }
   if(!d.items.length){
-    h += '<div class="err">カレンダーに載せるものは見つかりませんでした。</div>';
-    $("#result").innerHTML = h; return;
+    h += '<div class="ok">新しく入れるものはありませんでした。</div>';
+    $("#result").innerHTML = h;
+    if(d.skipped) bindSkip(d);
+    return;
   }
-  const KIND = {event:"行事", deadline:"提出期限", homework:"宿題", bring:"持ち物"};
-  h += '<div class="items">';
+
+  // 原本を横に置いたまま確かめる（画面設計 12-1）。撮り直さないと確かめられない、をなくす。
+  h += '<div class="withshot"><div class="shot">'
+     + (picked ? '<img id="shot" src="'+URL.createObjectURL(picked)+'" alt="撮ったもの">' : "")
+     + '<p class="cap">撮ったもの</p></div><div class="list"><div class="items">';
+
   d.items.forEach(it => {
-    const cls = it.duplicate_of ? "dup" : (it.needs_review ? "review" : "");
+    const br = it.branch || "new";
+    const cls = (br==="diff" ? "b_diff" : br==="moved" ? "b_moved" : "") + (it.needs_review ? " review" : "");
     h += '<div class="item ' + cls + '" data-id="' + it.id + '">'
       + '<div class="item-head">'
         + '<input type="checkbox" data-f="selected"' + (it.selected ? " checked" : "") + ' aria-label="登録する">'
         + '<input class="item-title" data-f="title" value="' + esc(it.title) + '">'
       + "</div>"
       + '<div class="badges">'
+        + '<span class="badge ' + (BR[br]||"b-dim") + '">' + esc(it.branch_label || "新規") + "</span>"
         + '<span class="badge b-kind">' + esc(KIND[it.kind] || it.kind) + "</span>"
-        + '<span class="badge b-dim">' + esc(it.child) + "</span>"
-        + (it.duplicate_of ? '<span class="badge b-dim">重複の可能性: ' + esc(it.duplicate_of) + "</span>" : "")
+        + '<button type="button" class="who" data-f="child">' + esc(it.child || "不明") + "</button>"
         + (it.needs_review ? '<span class="badge b-warn">要確認</span>' : "")
         + '<span class="badge b-dim">確度 ' + Math.round((it.confidence||0)*100) + "%</span>"
       + "</div>"
+      + (br==="moved"
+          ? '<div class="changes">前は <b>' + esc(it.matched_date||"") + '</b> に入っています（' + esc(it.duplicate_of||"") + "）</div>"
+          : "")
+      + ((it.changes && it.changes.length)
+          ? '<div class="changes">' + it.changes.map(c=>"・"+esc(c)).join("<br>") + "</div>"
+          : "")
       + '<div class="fields">'
         + '<div><label>日付</label><input type="date" data-f="date" value="' + esc(it.date) + '"></div>'
         + '<div><label>開始時刻</label><input type="text" data-f="time_start" placeholder="終日" value="' + esc(it.time_start||"") + '"></div>'
@@ -295,12 +344,62 @@ function render(d){
   h += "</div>";
   h += '<div class="row"><button class="btn primary" id="reg">カレンダーに登録する</button>'
      + '<button class="btn ghost" id="all">全部チェック</button><span id="regnote" class="tag"></span></div>';
+  h += "</div></div>";
   $("#result").innerHTML = h;
 
+  if(d.skipped) bindSkip(d);
   $("#all").addEventListener("click", () => {
     document.querySelectorAll('.item input[data-f="selected"]').forEach(c => c.checked = true);
   });
   $("#reg").addEventListener("click", doRegister);
+
+  // どの子かは**推定値を出しておいて、1タップで変える**（FR-2.2）
+  document.querySelectorAll('.item .who').forEach(btn => {
+    btn.addEventListener("click", () => {
+      const names = (window.CHILDREN || []).concat(["不明"]);
+      const i = names.indexOf(btn.textContent.trim());
+      btn.textContent = names[(i + 1) % names.length];
+    });
+  });
+}
+
+function bindSkip(d){
+  const b = document.getElementById("showskip");
+  if(!b) return;
+  b.addEventListener("click", () => {
+    const box = document.getElementById("skiplist");
+    if(box.innerHTML){ box.innerHTML = ""; b.textContent = "見る"; return; }
+    box.innerHTML = "<ul>" + (d.skipped_titles||[]).map(t=>"<li>"+esc(t)+"</li>").join("") + "</ul>";
+    b.textContent = "閉じる";
+  });
+}
+
+// 10分だけ「取り消す」を出しておく。押し忘れたまま残り続けるより、消えたほうがいい。
+function armUndo(ids){
+  const btn = document.getElementById("undo");
+  if(!btn) return;
+  const until = Date.now() + 10*60*1000;
+  const tick = setInterval(() => {
+    const left = Math.max(0, Math.round((until - Date.now())/1000));
+    if(left <= 0){ clearInterval(tick); btn.remove(); document.getElementById("undonote").textContent=""; return; }
+    document.getElementById("undonote").textContent = "あと" + Math.ceil(left/60) + "分";
+  }, 1000);
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    document.getElementById("undonote").textContent = "取り消しています…";
+    try{
+      const res = await fetch("/api/register/undo", {method:"POST",
+        headers:{"Content-Type":"application/json"}, body: JSON.stringify({ids})});
+      const j = await res.json();
+      if(!res.ok) throw new Error(j.detail || "取り消せませんでした");
+      clearInterval(tick);
+      document.getElementById("regdone").innerHTML =
+        j.undone + " 件を取り消しました。カレンダーには記録として残ります。";
+    }catch(err){
+      btn.disabled = false;
+      document.getElementById("undonote").textContent = err.message;
+    }
+  });
 }
 
 function collect(){
@@ -309,7 +408,9 @@ function collect(){
     const src = extraction.items.find(x => x.id === el.dataset.id);
     if(!el.querySelector('[data-f="selected"]').checked) return;
     const note = el.querySelector('[data-f="note"]').value;
+    const who = el.querySelector('[data-f="child"]');
     out.push(Object.assign({}, src, {
+      child: who ? who.textContent.trim() : src.child,
       title: el.querySelector('[data-f="title"]').value,
       date: el.querySelector('[data-f="date"]').value,
       time_start: el.querySelector('[data-f="time_start"]').value || null,
@@ -334,13 +435,19 @@ async function doRegister(){
     if(!res.ok) throw new Error(data.detail || "登録に失敗しました");
     const ok = data.results.filter(r=>r.status==="ok");
     const ng = data.results.filter(r=>r.status!=="ok");
-    let h = '<div class="ok">' + ok.length + " 件をカレンダーに登録しました。<br>"
+    // まとめて入れたものは、まとめて取り消せる（10分間・D-3）
+    const ids = ok.map(r=>r.id).filter(Boolean);
+    let h = '<div class="ok" id="regdone">' + ok.length + " 件をカレンダーに登録しました。"
+          + (ids.length ? ' <button type="button" class="btn ghost" id="undo">取り消す</button>'
+                          + '<span class="tag" id="undonote"></span>' : "")
+          + "<br>"
           + ok.map(r=>'・<a href="'+esc(r.link)+'" target="_blank" rel="noopener">'+esc(r.title)+"</a>").join("<br>")
           + "</div>";
     if(ng.length) h += '<div class="err">' + ng.length + " 件が失敗しました。<br>"
           + ng.map(r=>"・"+esc(r.title)+" — "+esc(r.error)).join("<br>") + "</div>";
     $("#regnote").textContent = "";
     $("#result").insertAdjacentHTML("beforeend", h);
+    if(ids.length) armUndo(ids);
   }catch(err){
     $("#regnote").textContent = "";
     $("#result").insertAdjacentHTML("beforeend", '<div class="err">'+esc(err.message)+"</div>");

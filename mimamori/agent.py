@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import difflib
 import json
 import re
 import uuid
@@ -23,7 +22,8 @@ from google.adk.agents import LlmAgent
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
-from .calendar_tools import list_events
+from . import dedupe
+from .calendar_tools import list_events, list_raw
 from .config import config
 from .schema import Extraction
 
@@ -133,49 +133,26 @@ def _parse_json(text: str) -> Dict[str, Any]:
     return json.loads(text[start : end + 1])
 
 
-def _norm_title(s: str) -> str:
-    """件名の比較用。全角括弧・空白・✓ の違いで重複を見逃さないようにする。"""
-    s = s.replace("✓", "").translate(str.maketrans("（）　", "() "))
-    return re.sub(r"[\s()]+", "", s).lower()
+def _review(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """既存のカレンダーと突き合わせて4分岐に分ける（dedupe.py）。
 
-
-DUP_RATIO = 0.85  # これ以上似ていれば同じものとみなす
-
-
-def _mark_duplicates(items: List[Dict[str, Any]]) -> None:
-    """既存カレンダーと似た件名のものに duplicate_of を立てる。
-
-    モデルの判断だけに任せると、日付が数日ずれた同じ提出物を見逃すことがある。
-    重複登録は最も嫌われる失敗なので、機械的にもう一度照合する。
-
-    完全一致では足りない。モデルは実行ごとに件名を言い換えるので
-    （「三者面談 希望調査票 提出」と「三者面談希望調査票 提出期限」）類似度で見る。
-    しきい値を上げすぎると「体育祭」と「体育祭 予備日」まで同じ扱いになる。
-    前後2週間を見るのは、締切の訂正や予備日で日付がずれるため。
+    以前はモデルの duplicate_of と類似度照合を混ぜていたが、
+    **完全一致を候補から外す**（＝承認を出さない）判断まで含めるので、
+    判定はひとつの場所にまとめた。モデルの申告はもう使わない。
     """
     dates = sorted(
         i["date"] for i in items if re.fullmatch(r"\d{4}-\d{2}-\d{2}", i.get("date") or "")
     )
     if not dates:
-        return
-    start = (dt.date.fromisoformat(dates[0]) - dt.timedelta(days=14)).isoformat()
-    end = (dt.date.fromisoformat(dates[-1]) + dt.timedelta(days=14)).isoformat()
-    existing = [(e["summary"], _norm_title(e["summary"])) for e in list_events(start, end)]
-
-    for item in items:
-        mine = _norm_title(item.get("title", ""))
-        if not mine:
-            continue
-        best, score = "", 0.0
-        for summary, norm in existing:
-            r = difflib.SequenceMatcher(None, mine, norm).ratio()
-            if r > score:
-                best, score = summary, r
-        # 似ているものが見つかったら、モデルの判断より機械照合を採る。
-        # モデルは duplicate_of に予定の id を書くことがあり、画面に出しても人が読めない。
-        # 見つからなければモデルの判断（言い回しがまるで違う同じ行事）をそのまま残す。
-        if score >= DUP_RATIO:
-            item["duplicate_of"] = best
+        return {"items": items, "skipped": 0, "skipped_titles": []}
+    start = (dt.date.fromisoformat(dates[0]) - dt.timedelta(days=dedupe.MOVE_DAYS)).isoformat()
+    end = (dt.date.fromisoformat(dates[-1]) + dt.timedelta(days=dedupe.MOVE_DAYS)).isoformat()
+    try:
+        existing = list_raw(start, end)
+    except Exception:  # noqa: BLE001
+        # 読めないときは、消さずに全部見せる。黙って飛ばすのは読めたときだけ。
+        return {"items": items, "skipped": 0, "skipped_titles": []}
+    return dedupe.review(items, existing)
 
 
 async def read_otayori(image_bytes: bytes, mime_type: str, hint: str = "") -> Dict[str, Any]:
@@ -209,10 +186,13 @@ async def read_otayori(image_bytes: bytes, mime_type: str, hint: str = "") -> Di
     data = _parse_json(final)
     parsed = Extraction.model_validate(data)
     out = parsed.model_dump()
-    _mark_duplicates(out["items"])
+    verdict = _review(out["items"])
+    out["items"] = verdict["items"]
+    out["skipped"] = verdict["skipped"]                 # 完全一致。数だけ伝える
+    out["skipped_titles"] = verdict["skipped_titles"]
     for item in out["items"]:
         item["id"] = uuid.uuid4().hex[:8]
-        item["selected"] = not item.get("duplicate_of")
+        item.setdefault("selected", True)
     out["trace"] = trace
     return out
 
