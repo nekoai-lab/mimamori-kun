@@ -11,3 +11,5 @@ pydantic==2.13.5
 # 親が送ってくる写真は iPhone の HEIC。JPEG に直してから読ませる。
 Pillow==12.2.0
 pillow-heif==1.7.0
+# 年間行事予定表のPDFを、ページごとの画像にする。
+pymupdf==1.28.2

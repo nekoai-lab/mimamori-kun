@@ -109,6 +109,11 @@ h1{font-family:"Zen Old Mincho",serif;font-size:19px;margin:0;letter-spacing:.05
 .ypout .okbox{padding:9px 11px;border-radius:9px;background:var(--accent-soft);border:1px solid var(--accent)}
 .ypout ul{margin:7px 0 0;padding-left:1.2em}
 .ypout .ex{font-size:12.5px;color:var(--ink-3)}
+.ypfile{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 9px}
+.ypfile input[type=file]{font:inherit;font-size:12.5px;max-width:100%}
+.ypfile button{font:inherit;font-size:13px;padding:7px 13px;cursor:pointer;background:var(--surface);
+ color:var(--ink);border:1px solid var(--line-strong);border-radius:9px}
+.ypfile button:disabled{opacity:.45;cursor:default}
 
 h2{font-family:"Zen Old Mincho",serif;font-size:15px;margin:22px 0 8px;letter-spacing:.04em;
  display:flex;align-items:baseline;gap:9px}
@@ -221,8 +226,13 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
 
   <button class="addtoggle" id="yptoggle" type="button" aria-expanded="false">年間予定をまとめて入れる</button>
   <div class="yp" id="yp" hidden>
-    <p class="recnote">学校からの年間行事予定を、そのまま貼ってください（PDFが落とせないときは、文字にして貼れば大丈夫）。
-      <strong>入れる前に、日付と曜日が合っているかをこちらで確かめます。</strong></p>
+    <p class="recnote"><strong>予定表そのもの（PDF・写真）から読み取るのがいちばん確かです。</strong>
+      文字を貼ってもかまいませんが、アプリの「テキストで表示」は曜日がずれることがあります。
+      どちらの場合も、入れる前に日付と曜日が合っているかをこちらで確かめます。</p>
+    <div class="ypfile">
+      <input type="file" id="ypfiles" accept="image/*,application/pdf" multiple aria-label="年間行事予定表のPDFか写真">
+      <button type="button" id="ypread">写真・PDFから読み取る</button>
+    </div>
     <textarea id="yptext" placeholder="4月&#10;8日 (水) 委員会、一斉下校訓練 13:45下校&#10;14日 (火) 保護者会&#10;…"></textarea>
     <div class="ypbar">
       <select id="ypchild" aria-label="どの子"></select>
@@ -558,6 +568,25 @@ $("#yptoggle").addEventListener("click",()=>{
   box.hidden=!open;
   $("#yptoggle").setAttribute("aria-expanded",String(open));
   if(open) ypChildren();
+});
+
+// 表そのものから読む。アプリのテキスト書き出しは曜日の列がずれることが分かっている。
+// 読んだ結果はそのまま下の枠に出す。**人が見て直せる形で渡してから**、計算で確かめる。
+$("#ypread").addEventListener("click",async()=>{
+  const files=$("#ypfiles").files;
+  if(!files||!files.length){ $("#ypfiles").click(); return; }
+  const btn=$("#ypread"); btn.disabled=true; $("#ypout").textContent="読み取っています…（表は少し時間がかかります）";
+  try{
+    const fd=new FormData();
+    for(const f of files) fd.append("files",f);
+    const res=await fetch("/api/year_plan/extract",{method:"POST",body:fd});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.detail||"読み取れませんでした");
+    $("#yptext").value=j.text;
+    $("#ypout").innerHTML='<p class="ex">'+j.pages+'ページ読みました。下の枠が読み取った中身です。おかしいところは直せます。</p>';
+    $("#ypcheck").click();
+  }catch(err){ $("#ypout").innerHTML='<div class="ng">'+esc(err.message)+'</div>'; }
+  btn.disabled=false;
 });
 
 $("#ypcheck").addEventListener("click",async()=>{

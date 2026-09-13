@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from mimamori.agent import read_otayori
+from mimamori.agent import read_otayori, read_year_plan
 from mimamori import images as images_mod
 from mimamori.kid_agent import talk
 from mimamori.calendar_tools import create_events, list_events, list_tasks, service_account_email, set_status
@@ -218,6 +218,54 @@ def _year_plan_rows(req: YearPlanRequest):
     if not rows:
         raise HTTPException(400, "日付のある行が見つかりませんでした。「4月」「1日 (水) 始業式」の形で貼ってください。")
     return rows
+
+
+@app.post("/api/year_plan/extract")
+async def api_year_plan_extract(
+    files: List[UploadFile] = File(...),
+    fiscal_year: Optional[int] = Form(None),
+):
+    """年間行事予定表の**表そのもの**（PDF・写真）を読み、貼り付け用の文字にして返す。
+
+    アプリの「テキストで表示」は表を1行に潰すときに壊れることが分かっているので
+    （曜日の列が2行ずれていた）、画像から読む道を用意する。
+    ここでは**写すだけ**。日付が正しいかは /api/year_plan/check が計算で確かめる。
+    """
+    pages: List[tuple] = []
+    for f in files[:4]:
+        data = await f.read()
+        if not data:
+            continue
+        if len(data) > MAX_BYTES:
+            raise HTTPException(413, f"{f.filename} が大きすぎます。12MB 以下にしてください。")
+        try:
+            pages += images_mod.to_pages(data, f.content_type or "")
+        except ValueError as e:
+            raise HTTPException(415, str(e)) from e
+    if not pages:
+        raise HTTPException(400, "読み取るものがありません。")
+    if len(pages) > 6:
+        raise HTTPException(400, "一度に読めるのは6ページまでです。")
+
+    sample = os.getenv("MIMAMORI_YEAR_PLAN_SAMPLE", "")
+    if sample and os.path.exists(sample):
+        text = open(sample, encoding="utf-8").read()      # デモ・検証用の差し替え
+    else:
+        try:
+            text = (await read_year_plan(pages))["text"]
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(500, f"読み取りに失敗しました: {e}") from e
+
+    rows = year_plan_mod.parse(text, fiscal_year)
+    return {
+        "text": text,
+        "pages": len(pages),
+        "rows": len(rows),
+        "check": year_plan_mod.check(rows) if rows else None,
+        "counts": year_plan_mod.summarize(rows),
+    }
 
 
 @app.post("/api/year_plan/check")
