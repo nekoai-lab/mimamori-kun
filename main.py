@@ -27,6 +27,7 @@ from mimamori.calendar_tools import (
 from mimamori.config import config
 from mimamori import points as points_mod
 from mimamori import recurring as recurring_mod
+from mimamori import study as study_mod
 from mimamori import year_plan as year_plan_mod
 
 def _key(title: str) -> str:
@@ -69,6 +70,12 @@ def reward():
 def schedule():
     """予定表。月ごとに、入っているものを見る場所。"""
     return FileResponse("static/schedule.html")
+
+
+@app.get("/plan")
+def plan_page():
+    """学習スケジュール。配分の結果を見て、枠と優先度を決める場所。"""
+    return FileResponse("static/plan.html")
 
 
 @app.get("/board")
@@ -201,33 +208,34 @@ def api_week(child: str):
     }
 
 
-DEFAULT_CAPACITY = 90        # 平日に入る目安（分）。上の子の枠バーの高さ
-
-
 @app.get("/api/capacity")
 def api_capacity():
-    """1日に入る目安（分）。親が変えられる。"""
-    from mimamori import ledger
-
-    try:
-        v = int(ledger.get_setting("capacity_minutes") or 0)
-    except (TypeError, ValueError):
-        v = 0
-    return {"minutes": v or DEFAULT_CAPACITY}
+    """今日の枠と、曜日ごとの枠。**当日の上書きが曜日より強い。**"""
+    cap = study_mod.capacity()
+    return {
+        "minutes": study_mod.minutes_on(study_mod.today(), cap),
+        "week": cap["week"],
+        "days": cap["days"],
+        "today": study_mod.today().isoformat(),
+    }
 
 
 class CapacityRequest(BaseModel):
-    minutes: int
+    minutes: Optional[int] = None                 # 今日だけ変える
+    week: Optional[Dict[str, Any]] = None         # 曜日ごと
+    days: Optional[Dict[str, Any]] = None         # 日を指定して上書き
 
 
 @app.post("/api/capacity")
 def api_set_capacity(req: CapacityRequest):
-    from mimamori import ledger
-
-    if not (15 <= req.minutes <= 480):
-        raise HTTPException(400, "15分から480分のあいだで決めてください。")
-    ledger.set_setting("capacity_minutes", req.minutes)
-    return {"minutes": req.minutes}
+    days = dict(req.days or {})
+    if req.minutes is not None:
+        days[study_mod.today().isoformat()] = req.minutes
+    try:
+        study_mod.set_capacity(week=req.week, days=days or None)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return api_capacity()
 
 
 class PostponeRequest(BaseModel):
@@ -563,6 +571,92 @@ def api_schedule(ym: str = "", child: str = ""):
         "children": [c["name"] for c in config.children],
         "items": sorted(items, key=lambda x: (x["date"], x.get("child", ""), x.get("summary", ""))),
     }
+
+
+@app.get("/api/assignments")
+def api_assignments(child: str = "", include_done: bool = False):
+    return {"items": study_mod.assignments(child or None, include_done)}
+
+
+class AssignmentRequest(BaseModel):
+    child: str
+    subject: str
+    title: str
+    due: str
+    range_text: str = ""          # 「p.42-78」。数に直せればこちらだけでよい
+    total: Optional[int] = None
+    unit: str = "page"
+    priority: int = 0
+
+
+@app.post("/api/assignments")
+def api_add_assignment(req: AssignmentRequest):
+    """課題を足す。範囲は**まず計算で**数に直す（モデルは呼ばない）。"""
+    total, unit = req.total, req.unit
+    parsed = study_mod.parse_range(req.range_text or req.title)
+    if total is None:
+        if not parsed:
+            raise HTTPException(
+                400,
+                "範囲を数に直せませんでした。「p.42-78」「1〜50問」「20ページ」のように書くか、量を直接入れてください。",
+            )
+        total, unit = parsed["total"], parsed["unit"]
+    try:
+        row = study_mod.add_assignment(req.child, req.subject, req.title, total, unit, req.due, req.priority)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"assignment": row, "parsed": parsed}
+
+
+class AssignmentUpdate(BaseModel):
+    id: str
+    done: Optional[int] = None
+    priority: Optional[int] = None
+    due: Optional[str] = None
+
+
+@app.post("/api/assignments/update")
+def api_update_assignment(req: AssignmentUpdate):
+    try:
+        return {"assignment": study_mod.update_assignment(req.id, req.done, req.priority, req.due)}
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+class AssignmentDelete(BaseModel):
+    id: str
+
+
+@app.post("/api/assignments/remove")
+def api_remove_assignment(req: AssignmentDelete):
+    if not study_mod.remove_assignment(req.id):
+        raise HTTPException(404, "その課題が見つかりませんでした。")
+    return {"ok": True}
+
+
+@app.get("/api/plan")
+def api_plan(child: str):
+    """配分の結果。**コードだけで出す**ので、押した瞬間に返る。"""
+    if not child:
+        raise HTTPException(400, "だれのぶんかが分かりません。")
+    return study_mod.plan(child)
+
+
+@app.get("/api/plan/today")
+def api_plan_today(child: str):
+    if not child:
+        raise HTTPException(400, "だれのぶんかが分かりません。")
+    return study_mod.today_plan(child)
+
+
+class RangeRequest(BaseModel):
+    text: str
+
+
+@app.post("/api/study/range")
+def api_study_range(req: RangeRequest):
+    """「ワーク p.42-78」→ 37ページ。読めなければ null を返す（人に聞く）。"""
+    return {"parsed": study_mod.parse_range(req.text)}
 
 
 @app.get("/healthz")

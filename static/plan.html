@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>みまもりくん — 学習スケジュール</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@700&family=Noto+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="/static/theme.js"></script>
+<script src="/static/who.js" defer></script>
+<style>
+:root{
+  --paper:#F6F6F1;--surface:#fff;--surface-2:#FBFBF7;
+  --ink:#191C1B;--ink-2:#4A524F;--ink-3:#7C8783;
+  --line:#DCDED6;--line-strong:#C3C8BF;
+  --accent:#0F6B62;--accent-soft:#E2F0ED;
+  --late:#B3402015;--late-line:#B94F2B;--late-ink:#963C1E;
+  --kidA:#2F6690;--kidA-soft:#E3EDF4;
+  --kidB:#8A5A2B;--kidB-soft:#F4EBDF;
+  --shadow:0 1px 2px rgba(25,28,27,.05),0 8px 24px -18px rgba(25,28,27,.3);
+}
+:root[data-theme="dark"]{
+  --paper:#101413;--surface:#191E1D;--surface-2:#151A19;
+  --ink:#ECEFEB;--ink-2:#AFB9B5;--ink-3:#7E8A86;
+  --line:#2A3231;--line-strong:#3A4442;
+  --accent:#5FCFC0;--accent-soft:#14302C;
+  --late:#B9502B20;--late-line:#E8926B;--late-ink:#E8926B;
+  --kidA:#8FBEDD;--kidA-soft:#1B2C38;
+  --kidB:#D5AC7C;--kidB-soft:#312619;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -18px rgba(0,0,0,.9);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+ font-family:"Noto Sans JP",system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;
+ font-size:15px;line-height:1.7;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.wrap{max-width:860px;margin:0 auto;padding:0 18px 90px}
+header{position:sticky;top:0;z-index:10;background:var(--paper);border-bottom:1px solid var(--line)}
+.hdr{max-width:860px;margin:0 auto;padding:13px 18px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+h1{font-family:"Zen Old Mincho",serif;font-size:19px;margin:0;letter-spacing:.05em}
+.date{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink-3);letter-spacing:.06em}
+.nav{flex-basis:100%;display:flex;gap:6px;overflow-x:auto}
+.nav a{flex:none;font-size:12.5px;text-decoration:none;padding:4px 12px;white-space:nowrap;
+ border:1px solid var(--line-strong);border-radius:999px;color:var(--ink-2)}
+.nav a.on{background:var(--accent);border-color:var(--accent);color:var(--paper);font-weight:700}
+.theme{margin-left:auto;flex:none;font:inherit;font-size:12.5px;padding:4px 12px;white-space:nowrap;
+ border:1px solid var(--line-strong);border-radius:999px;background:transparent;color:var(--ink-2);cursor:pointer}
+
+.demo{background:#F6E8C6;color:#7A5A10;font-size:12px;text-align:center;padding:5px}
+:root[data-theme="dark"] .demo{background:#33290F;color:#E0C583}
+
+.addtoggle{font:inherit;font-size:12.5px;padding:4px 13px;margin:10px 0 0;cursor:pointer;
+ border:1px dashed var(--line-strong);background:transparent;color:var(--ink-2);border-radius:999px}
+</style>
+</head>
+<body>
+<header>
+  <div class="hdr">
+    <h1>みまもりくん</h1>
+    <span class="date" id="today"></span>
+    <nav class="nav" aria-label="画面を切り替える">
+      <a href="/">撮る</a>
+      <a href="/board">一覧</a>
+      <a href="/schedule">予定表</a>
+      <a href="/plan" class="on" aria-current="page">計画</a>
+      <a href="/kid">やりとり</a>
+      <a href="/reward">ごほうび</a>
+      <button class="theme" id="theme" type="button">☾ 暗く</button>
+    </nav>
+  </div>
+</header>
+<div id="demo"></div>
+<!-- 学習スケジュール。配分の結果を見て、枠と優先度を決める場所。 -->
+<style>
+.pbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px 0 0}
+.pbar button{font:inherit;font-size:13.5px;padding:6px 13px;cursor:pointer;background:var(--surface);
+ color:var(--ink);border:1px solid var(--line-strong);border-radius:9px}
+.pbar button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.pbar .sp{flex:1}
+.pbar .sum{font-size:13px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+
+/* 入りません（出るときだけ・いちばん上） */
+.alert{margin:12px 0 0;padding:11px 13px;border-radius:11px;border:1px solid var(--late-line);
+ background:var(--late);color:var(--late-ink);font-size:13.5px;line-height:1.7}
+.alert[hidden]{display:none}
+.alert strong{font-weight:700}
+.alert .fix{margin:8px 0 0;display:flex;gap:8px;flex-wrap:wrap}
+.alert .fix button{font:inherit;font-size:12.5px;padding:5px 11px;cursor:pointer;border-radius:8px;
+ border:1px solid var(--late-line);background:var(--surface);color:var(--late-ink)}
+
+.sect{margin:18px 0 0}
+.sect h2{font-family:"Zen Old Mincho",serif;font-size:16px;margin:0 0 8px}
+
+/* 日ごとの配分 */
+.dayrow{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line)}
+.dayrow:first-child{border-top:0}
+.dayrow .d{width:5.6em;flex:none;font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.dayrow .d .w{color:var(--ink-3);font-size:12px}
+.dayrow.sun .d,.dayrow.sat .d{color:var(--ink-3)}
+.dayrow .work{flex:1;display:flex;gap:6px;flex-wrap:wrap}
+.chip{font-size:12.5px;padding:3px 9px;border-radius:8px;background:var(--kidA-soft);color:var(--kidA);
+ white-space:nowrap}
+.dayrow .m{flex:none;font-size:12.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.dayrow .bar{flex:none;width:64px;height:8px;border-radius:5px;background:var(--surface-2);
+ border:1px solid var(--line);overflow:hidden;margin-top:5px}
+.dayrow .bar i{display:block;height:100%;background:var(--accent)}
+.dayrow.over .bar i{background:var(--late-line)}
+
+/* 課題 */
+.ass{display:flex;gap:9px;align-items:center;flex-wrap:wrap;padding:9px 0;border-top:1px solid var(--line)}
+.ass:first-child{border-top:0}
+.ass .t{flex:1;min-width:150px;font-size:14px}
+.ass .meta{font-size:12px;color:var(--ink-3)}
+.ass .prog{font-size:12.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.ass button{font:inherit;font-size:12px;padding:4px 10px;cursor:pointer;border-radius:8px;
+ border:1px solid var(--line-strong);background:var(--surface-2);color:var(--ink-2)}
+
+.form{margin:10px 0 0;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.form[hidden]{display:none}
+.frow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 9px}
+.frow > .lab{font-size:12.5px;color:var(--ink-3);width:4.6em;flex:none}
+.form input,.form select,.wrap .frow input{font:inherit;font-size:14px;padding:8px 11px;color:var(--ink);
+ background:var(--surface-2);border:1px solid var(--line-strong);border-radius:9px}
+.form input[type=text]{flex:1;min-width:150px}
+.form .prim{font:inherit;font-size:14px;font-weight:700;padding:9px 18px;cursor:pointer;
+ background:var(--accent);color:#fff;border:1px solid var(--accent);border-radius:9px}
+.form .note{font-size:12.5px;color:var(--ink-3)}
+.form .note.ok{color:var(--accent);font-weight:700}
+
+/* 枠 */
+.caps{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0}
+.cap{display:flex;flex-direction:column;align-items:center;gap:4px}
+.cap span{font-size:12px;color:var(--ink-3)}
+.cap input{width:66px;text-align:center;font:inherit;font-size:14px;padding:7px 4px;
+ border:1px solid var(--line-strong);border-radius:9px;background:var(--surface-2);color:var(--ink)}
+.empty{color:var(--ink-3);font-size:13.5px}
+</style>
+
+<div class="wrap">
+  <div class="pbar">
+    <span id="kids"></span>
+    <span class="sp"></span>
+    <span class="sum" id="sum"></span>
+  </div>
+
+  <div class="alert" id="alert" hidden></div>
+
+  <div class="sect">
+    <h2>この先の割りふり</h2>
+    <div id="days"></div>
+  </div>
+
+  <div class="sect">
+    <h2>課題</h2>
+    <div id="assigns"></div>
+    <button type="button" class="addtoggle" id="atoggle" aria-expanded="false" style="margin-top:10px">＋ 課題を足す</button>
+    <div class="form" id="aform" hidden>
+      <div class="frow"><span class="lab">教科</span>
+        <select id="asubject"></select>
+        <input type="text" id="atitle" placeholder="題名（例：数学ワーク）">
+      </div>
+      <div class="frow"><span class="lab">範囲</span>
+        <input type="text" id="arange" placeholder="例：p.42-78 ／ 1〜50問 ／ 20ページ ／ 3周">
+        <span class="note" id="aparsed"></span>
+      </div>
+      <div class="frow"><span class="lab">締切</span>
+        <input type="date" id="adue">
+        <button type="button" class="prim" id="aadd">足す</button>
+        <span class="note" id="anote"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="sect">
+    <h2>1日にとれる時間</h2>
+    <div class="caps" id="caps"></div>
+    <div class="frow" style="margin-top:10px">
+      <span class="lab">今日だけ</span>
+      <input type="number" id="todaycap" min="0" max="480" step="15" style="width:90px">
+      <span class="note" id="capnote">分</span>
+    </div>
+  </div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const WD=[["mon","月"],["tue","火"],["wed","水"],["thu","木"],["fri","金"],["sat","土"],["sun","日"]];
+const UNIT={page:"ページ",question:"問",round:"周"};
+const SUBJECTS=["国語","数学","英語","社会","理科","その他"];
+let children=[], child="", planData=null, assigns=[], cap=null;
+
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function u(n,unit){ return n+(UNIT[unit]||""); }
+function md(iso){ const [y,m,d]=iso.split("-"); return (+m)+"/"+(+d); }
+
+async function boot(){
+  try{
+    const c=await fetch("/api/config").then(r=>r.json());
+    children=(c.children||[]).map(x=>x.name);
+    const older=(c.children||[]).find(x=>x.school_level==="junior_high");
+    child=(localStorage.getItem("mimamori-child")||"");
+    if(!children.includes(child)) child=(older&&older.name)||children[0]||"";
+  }catch(e){}
+  $("#kids").innerHTML=children.map(n=>'<button type="button" data-c="'+esc(n)+'" aria-pressed="'+(n===child)+'">'+esc(n)+"</button>").join("");
+  $("#asubject").innerHTML=SUBJECTS.map(x=>"<option>"+x+"</option>").join("");
+  const d=new Date(); d.setDate(d.getDate()+7);
+  $("#adue").value=d.toISOString().slice(0,10);
+  await loadCap();
+  await load();
+}
+
+async function load(){
+  try{
+    const [p,a]=await Promise.all([
+      fetch("/api/plan?child="+encodeURIComponent(child)).then(r=>r.json()),
+      fetch("/api/assignments?child="+encodeURIComponent(child)).then(r=>r.json())
+    ]);
+    planData=p; assigns=a.items||[];
+  }catch(e){ planData=null; }
+  render();
+}
+
+function render(){
+  $("#kids").querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.c===child)));
+  const p=planData;
+  if(!p){ $("#days").innerHTML='<p class="empty">読めませんでした。</p>'; return; }
+
+  // 入りません（出るときだけ・いちばん上）
+  const al=$("#alert");
+  if(p.warnings.length){
+    al.hidden=false;
+    al.innerHTML=p.warnings.map(w=>"<div>"+esc(w).replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>")+"</div>").join("")
+      +'<div class="fix"><button type="button" id="fixcap">1日にとれる時間を増やす</button>'
+      +'<button type="button" id="fixdue">締切を確かめる</button></div>';
+    $("#fixcap").addEventListener("click",()=>$("#caps").scrollIntoView({block:"center"}));
+    $("#fixdue").addEventListener("click",()=>$("#assigns").scrollIntoView({block:"center"}));
+  }else{ al.hidden=true; al.innerHTML=""; }
+
+  $("#sum").textContent=p.days.length
+    ? "のこり "+p.total_minutes+"分 ／ "+p.days.length+"日ぶん（予備日 "+p.buffer_days+"日）"
+    : "";
+
+  // 日ごと
+  if(!p.days.length){
+    $("#days").innerHTML='<p class="empty">割りふるものがありません。課題を足すと、ここに並びます。</p>';
+  }else{
+    $("#days").innerHTML=p.days.map(d=>{
+      const wd=d.weekday, pct=d.capacity?Math.min(100,Math.round(d.used/d.capacity*100)):0;
+      const cls=["dayrow"]; if(wd==="日")cls.push("sun"); if(wd==="土")cls.push("sat");
+      if(d.used>d.capacity)cls.push("over");
+      return '<div class="'+cls.join(" ")+'">'
+        +'<span class="d">'+md(d.date)+'<span class="w">（'+wd+"）</span></span>"
+        +'<span class="work">'+d.items.map(i=>'<span class="chip">'+esc(i.subject)+" "+u(i.units,i.unit)+"</span>").join("")+"</span>"
+        +'<span class="bar"><i style="width:'+pct+'%"></i></span>'
+        +'<span class="m">'+d.used+"/"+d.capacity+"分</span></div>";
+    }).join("");
+  }
+
+  // 課題
+  $("#assigns").innerHTML=assigns.length ? assigns.map(a=>{
+    const left=a.total-(a.done||0);
+    return '<div class="ass" data-id="'+esc(a.id)+'">'
+      +'<span class="t">'+esc(a.title)+'<span class="meta">　'+esc(a.subject)+"・"+md(a.due)+"まで</span></span>"
+      +'<span class="prog">のこり '+u(left,a.unit)+" / "+u(a.total,a.unit)+"</span>"
+      +'<button type="button" class="up" data-d="1">1つ進む</button>'
+      +'<button type="button" class="pri">優先を上げる</button>'
+      +'<button type="button" class="del">やめる</button></div>';
+  }).join("") : '<p class="empty">まだありません。</p>';
+}
+
+// ---- 課題の追加
+$("#atoggle").addEventListener("click",()=>{
+  const f=$("#aform"), open=f.hidden;
+  f.hidden=!open; $("#atoggle").setAttribute("aria-expanded",String(open));
+});
+$("#arange").addEventListener("change",async()=>{
+  const t=$("#arange").value.trim();
+  if(!t){ $("#aparsed").textContent=""; return; }
+  try{
+    const j=await fetch("/api/study/range",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({text:t})}).then(r=>r.json());
+    $("#aparsed").className="note"+(j.parsed?" ok":"");
+    $("#aparsed").textContent=j.parsed ? "→ "+u(j.parsed.total,j.parsed.unit) : "数に直せません。量を書いてください";
+  }catch(e){}
+});
+$("#aadd").addEventListener("click",async()=>{
+  const btn=$("#aadd"); btn.disabled=true; $("#anote").className="note"; $("#anote").textContent="";
+  try{
+    const res=await fetch("/api/assignments",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({child:child,subject:$("#asubject").value,title:$("#atitle").value.trim()||$("#asubject").value,
+        range_text:$("#arange").value.trim(),due:$("#adue").value})});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.detail||"足せませんでした");
+    $("#anote").className="note ok";
+    $("#anote").textContent="足しました（"+u(j.assignment.total,j.assignment.unit)+"）";
+    $("#atitle").value=""; $("#arange").value=""; $("#aparsed").textContent="";
+    load();
+  }catch(err){ $("#anote").textContent=err.message; }
+  btn.disabled=false;
+});
+
+// ---- 課題の操作
+$("#assigns").addEventListener("click",async e=>{
+  const row=e.target.closest(".ass"); if(!row) return;
+  const id=row.dataset.id, a=assigns.find(x=>x.id===id); if(!a) return;
+  let url="/api/assignments/update", body={id:id};
+  if(e.target.classList.contains("up")) body.done=(a.done||0)+1;
+  else if(e.target.classList.contains("pri")) body.priority=(a.priority||0)+1;
+  else if(e.target.classList.contains("del")){ url="/api/assignments/remove"; body={id:id}; }
+  else return;
+  e.target.disabled=true;
+  try{
+    const res=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(!res.ok) throw new Error((await res.json()).detail||"できませんでした");
+    load();
+  }catch(err){ alert(err.message); e.target.disabled=false; }
+});
+
+// ---- 枠
+async function loadCap(){
+  try{ cap=await fetch("/api/capacity").then(r=>r.json()); }catch(e){ return; }
+  $("#caps").innerHTML=WD.map(([k,j])=>
+    '<label class="cap"><span>'+j+'</span><input type="number" min="0" max="480" step="15" data-w="'+k+'" value="'+(cap.week[k]||0)+'"></label>').join("");
+  $("#todaycap").value=cap.minutes;
+}
+$("#caps").addEventListener("change",async e=>{
+  const el=e.target.closest("input[data-w]"); if(!el) return;
+  await saveCap({week:{[el.dataset.w]:+el.value}});
+});
+$("#todaycap").addEventListener("change",async()=>{ await saveCap({minutes:+$("#todaycap").value}); });
+
+async function saveCap(body){
+  $("#capnote").textContent="…";
+  try{
+    const res=await fetch("/api/capacity",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(body)});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.detail||"変えられませんでした");
+    cap=j; $("#todaycap").value=j.minutes;
+    $("#capnote").textContent="分（今日は "+j.minutes+"分）";
+    load();
+  }catch(err){ $("#capnote").textContent=err.message; }
+}
+
+$("#kids").addEventListener("click",e=>{
+  const b=e.target.closest("button[data-c]"); if(!b) return;
+  child=b.dataset.c;
+  try{ localStorage.setItem("mimamori-child",child); }catch(err){}
+  load();
+});
+
+boot();
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden) load(); });
+</script>
+
+</body>
+</html>
