@@ -15,6 +15,7 @@ from mimamori.kid_agent import talk
 from mimamori.calendar_tools import create_events, list_tasks, service_account_email, set_status
 from mimamori.config import config
 from mimamori import points as points_mod
+from mimamori import recurring as recurring_mod
 
 app = FastAPI(title="みまもりくん")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -96,6 +97,12 @@ def register(req: RegisterRequest):
 
 @app.get("/api/tasks")
 def tasks(days: int = 14):
+    # 毎日きまっているもの（公文など）は、ここで足りない分だけ用意する。
+    # 別のスケジューラを立てない。朝いちばんに誰かが開いた時点で並ぶ。
+    try:
+        recurring_mod.ensure()
+    except Exception:  # noqa: BLE001
+        pass            # 定期タスクが作れなくても、一覧は出す
     try:
         return list_tasks(days)
     except Exception as e:  # noqa: BLE001
@@ -165,6 +172,28 @@ def api_set_rewards(req: RewardsRequest):
         raise HTTPException(501, str(e)) from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"交換レートの保存に失敗しました: {e}") from e
+
+
+@app.get("/api/recurring")
+def api_recurring():
+    """毎日きまっていること（テンプレート）を返す。"""
+    return {"templates": recurring_mod.templates(), "today": recurring_mod.ensure()}
+
+
+class RecurringRequest(BaseModel):
+    templates: List[Dict[str, Any]]
+
+
+@app.post("/api/recurring")
+def api_set_recurring(req: RecurringRequest):
+    try:
+        saved = recurring_mod.set_templates(req.templates)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"保存に失敗しました: {e}") from e
+    saved["today"] = recurring_mod.ensure()
+    return saved
 
 
 @app.get("/healthz")

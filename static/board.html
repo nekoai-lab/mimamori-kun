@@ -70,6 +70,30 @@ h1{font-family:"Zen Old Mincho",serif;font-size:19px;margin:0;letter-spacing:.05
  border:1px solid var(--accent);background:var(--accent);color:var(--paper);border-radius:3px}
 .add .prim:disabled{opacity:.45;cursor:default}
 .addnote{font-size:12.5px;color:var(--ink-3)}
+/* まいにちのこと（定期タスク） */
+.rec{margin:10px 0 0;padding:12px 14px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.rec[hidden]{display:none}
+.recnote{margin:0 0 10px;font-size:12.5px;color:var(--ink-3)}
+.recrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:7px 0;border-top:1px solid var(--line)}
+.recrow:first-child{border-top:0}
+.recrow .t{flex:1;min-width:150px;font-size:14px}
+.recrow .who{font-size:12px;color:var(--ink-3)}
+.recrow.off .t,.recrow.off .who,.recrow.off .wd{opacity:.45}
+.wd{display:flex;gap:3px}
+.wd button{font:inherit;font-size:11.5px;width:26px;height:26px;padding:0;cursor:pointer;
+ border:1px solid var(--line-strong);border-radius:7px;background:var(--surface-2);color:var(--ink-3)}
+.wd button[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:700}
+.recrow .del{font:inherit;font-size:13px;padding:3px 9px;cursor:pointer;background:none;
+ border:1px solid var(--line);border-radius:7px;color:var(--ink-3)}
+.recadd{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:10px 0 0;padding-top:10px;border-top:1px solid var(--line)}
+.recadd input,.recadd select,.recadd button{font:inherit;font-size:13.5px;color:var(--ink);
+ background:var(--surface);border:1px solid var(--line-strong);border-radius:9px;padding:7px 10px}
+.recadd input{flex:1;min-width:160px}
+.recadd button{cursor:pointer}
+.recfoot{display:flex;gap:10px;align-items:center;margin:10px 0 0}
+.recfoot .prim{font:inherit;font-size:13px;font-weight:700;padding:7px 16px;cursor:pointer;
+ background:var(--accent);color:#fff;border:1px solid var(--accent);border-radius:9px}
+.recfoot .prim:disabled{opacity:.45;cursor:default}
 
 h2{font-family:"Zen Old Mincho",serif;font-size:15px;margin:22px 0 8px;letter-spacing:.04em;
  display:flex;align-items:baseline;gap:9px}
@@ -164,6 +188,21 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
     <button type="submit" class="prim" id="addgo">入れる</button>
     <span class="addnote" id="addnote"></span>
   </form>
+
+  <button class="addtoggle" id="rectoggle" type="button" aria-expanded="false">まいにちのこと</button>
+  <div class="rec" id="rec" hidden>
+    <p class="recnote">毎日きまっているものは、朝ひらいた時点で並びます。撮らなくても、打たなくてもいい。</p>
+    <div id="reclist"></div>
+    <div class="recadd">
+      <input type="text" id="rectitle" placeholder="例：くもん 算数">
+      <select id="recchild" aria-label="どの子"></select>
+      <button type="button" id="recplus">足す</button>
+    </div>
+    <div class="recfoot">
+      <button type="button" class="prim" id="recsave">保存する</button>
+      <span class="addnote" id="recnote"></span>
+    </div>
+  </div>
 
   <div id="body"></div>
 
@@ -373,6 +412,92 @@ async function onStatus(e){
     alert(err.message);
   }
 }
+
+// ---- まいにちのこと（定期タスク） ------------------------------------------
+// 公文のプリントのように、内容が日替わりでないものはここで一度決める。
+// 曜日を全部ONにしたら「毎日」。ONを外した曜日には出ない。
+const WD=["月","火","水","木","金","土","日"];
+let recs=null;
+
+function recDays(t){ return t.days==="daily" ? [0,1,2,3,4,5,6] : (t.days||[]).map(Number); }
+
+function renderRec(){
+  const names=(data&&data.children)||[...new Set((recs||[]).map(t=>t.child))];
+  const sel=$("#recchild");
+  if(sel && !sel.options.length) sel.innerHTML=names.map(n=>'<option>'+esc(n)+'</option>').join("");
+  $("#reclist").innerHTML=(recs||[]).map((t,i)=>{
+    const on=recDays(t);
+    return '<div class="recrow'+(t.enabled?"":" off")+'" data-i="'+i+'">'
+      +'<input type="checkbox" class="en" aria-label="出す" '+(t.enabled?"checked":"")+'>'
+      +'<span class="t">'+esc(t.title)+'</span>'
+      +'<span class="who">'+esc(t.child)+'</span>'
+      +'<span class="wd">'+WD.map((w,d)=>'<button type="button" data-d="'+d+'" aria-pressed="'
+        +(on.includes(d))+'" aria-label="'+w+'曜">'+w+'</button>').join("")+'</span>'
+      +'<button type="button" class="del" aria-label="やめる">やめる</button>'
+      +'</div>';
+  }).join("") || '<p class="recnote">まだありません。</p>';
+}
+
+async function loadRec(){
+  try{
+    const j=await fetch("/api/recurring").then(r=>r.json());
+    recs=j.templates||[];
+    renderRec();
+  }catch(err){ $("#recnote").textContent="読めませんでした"; }
+}
+
+$("#rectoggle").addEventListener("click",()=>{
+  const box=$("#rec"), open=box.hidden;
+  box.hidden=!open;
+  $("#rectoggle").setAttribute("aria-expanded",String(open));
+  if(open && recs===null) loadRec();
+});
+
+$("#reclist").addEventListener("click",e=>{
+  const row=e.target.closest(".recrow"); if(!row) return;
+  const t=recs[+row.dataset.i]; if(!t) return;
+  if(e.target.classList.contains("del")){ recs.splice(+row.dataset.i,1); renderRec(); return; }
+  const d=e.target.dataset.d;
+  if(d!==undefined){
+    const on=new Set(recDays(t));
+    on.has(+d)?on.delete(+d):on.add(+d);
+    t.days=(on.size===7)?"daily":[...on].sort((a,b)=>a-b);
+    if(on.size===0) t.enabled=false;   // 曜日が無い＝出さない、と同じこと
+    renderRec();
+  }
+});
+
+$("#reclist").addEventListener("change",e=>{
+  const row=e.target.closest(".recrow"); if(!row||!e.target.classList.contains("en")) return;
+  const t=recs[+row.dataset.i];
+  t.enabled=e.target.checked;
+  if(t.enabled && recDays(t).length===0) t.days="daily";
+  renderRec();
+});
+
+$("#recplus").addEventListener("click",()=>{
+  const title=$("#rectitle").value.trim();
+  if(!title){ $("#rectitle").focus(); return; }
+  recs.push({id:"r"+Date.now(),child:$("#recchild").value,title,kind:"homework",days:"daily",enabled:true});
+  $("#rectitle").value="";
+  renderRec();
+});
+
+$("#recsave").addEventListener("click",async()=>{
+  const btn=$("#recsave"); btn.disabled=true; $("#recnote").textContent="";
+  try{
+    const res=await fetch("/api/recurring",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({templates:recs.filter(t=>recDays(t).length>0||!t.enabled)})});
+    const j=await res.json();
+    if(!res.ok) throw new Error(j.detail||"保存できませんでした");
+    recs=j.templates||recs;
+    const made=(j.today&&j.today.created)||[];
+    $("#recnote").textContent=made.length?("保存しました（今日のぶん "+made.length+"件）"):"保存しました";
+    renderRec();
+    load();
+  }catch(err){ $("#recnote").textContent=err.message; }
+  btn.disabled=false;
+});
 
 load();
 
