@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from . import ledger
 from .calendar_tools import list_tasks
@@ -111,6 +111,7 @@ _LABELS = {
     "event": "行事",
     "test_fix": "テストの直し",
     "redeem": "こうかん",
+    "adjust": "調整",
 }
 
 
@@ -131,8 +132,51 @@ def add_test_fix(child: str, fixed_count: int, title: str = "テストの直し"
 
 
 def revoke(entry_id: str) -> bool:
-    """親が加点を取り消す。行は消さず、印を付けるだけ。"""
+    """親が加点を取り消す。行は消さず、印を付けるだけ。
+
+    **日常の導線には置かない。** 親が子のポイントを取り消すのは、子から見れば
+    「疑われた」体験になる。ズルへの対応は、引き換えの承認のときに人が話せばよい。
+    ここは入力ミスの訂正のために残してあるだけの口。
+    """
     return ledger.revoke(entry_id)
+
+
+def adjust(child: str, delta: int, note: str) -> Dict[str, Any]:
+    """親が理由つきで増減を1行足す。**ルールを増やさずに運用で調整するための口。**
+
+    想定している使い方:
+        - 残高がマイナスになったのをリセットする
+        - 「これもやったらポイントあげよう」と決めた臨時の加点
+        - 数え間違いの訂正
+
+    ルールを先に全部決めきるのではなく、走らせながら家族で相談して直していく。
+    その調整が台帳に理由つきで残るので、あとから経緯を辿れる。
+
+    Args:
+        child: 子どもの識別子
+        delta: 増減。減らすときはマイナス
+        note: 理由。子どもにもそのまま見える
+
+    Returns:
+        追加した台帳の行
+    """
+    if not note.strip():
+        raise ValueError("理由を書いてください（あとで経緯が分からなくなります）")
+    return ledger.add(
+        child=child,
+        delta=int(delta),
+        reason="adjust",
+        created_by="parent",
+        title=note.strip(),
+    )
+
+
+def reset_negative(child: str, note: str = "マイナス分をリセット") -> Optional[Dict[str, Any]]:
+    """残高がマイナスなら0に戻す。プラスなら何もしない。"""
+    bal = balance(child)
+    if bal >= 0:
+        return None
+    return adjust(child, -bal, note)
 
 
 # ------------------------------------------------------------------ 交換
