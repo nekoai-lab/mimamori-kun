@@ -89,6 +89,22 @@ h1,.tts,.pt,.who select{white-space:nowrap}
   .pt{font-size:13px;padding:3px 9px}
 }
 
+/* 上の子モード：枠バーと「明日に送る」 */
+#frame{margin:10px 14px 0;padding:10px 12px;border:1px solid var(--line,#dcded6);border-radius:14px;
+ background:var(--surface,#fff)}
+#frame[hidden]{display:none}
+#frame .top{display:flex;align-items:baseline;gap:8px;font-size:12.5px;color:var(--ink-3,#7c8783)}
+#frame .tot{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--ink,#191c1b);font-weight:700}
+#frame .bar{display:flex;align-items:stretch;gap:3px;height:14px;margin:8px 0 0;border-radius:8px;overflow:hidden;
+ background:var(--surface-2,#fbfbf7);border:1px solid var(--line,#dcded6)}
+#frame .seg{align-self:stretch;min-height:12px;background:var(--kidA,#2f6690);opacity:.85}
+#frame .seg:nth-child(even){opacity:.6}
+#frame .over{background:var(--late-line,#b94f2b)}
+#frame .msg{margin:7px 0 0;font-size:12.5px;color:var(--late-ink,#963c1e)}
+.card .min{margin-left:auto;font-size:12px;color:var(--ink-3,#7c8783);font-variant-numeric:tabular-nums}
+.card .later,.cardwrap .later{font:inherit;font-size:11.5px;padding:4px 9px;border-radius:8px;
+ border:1px solid var(--line-strong,#c3c8bf);background:var(--surface-2,#fbfbf7);color:var(--ink-2,#4a524f)}
+
 /* 電波がないとき */
 #offline{margin:10px 14px 0;padding:7px 12px;border:1px dashed var(--line-strong,#c3c8bf);border-radius:12px;
  font-size:12.5px;color:var(--ink-3,#7c8783);background:var(--surface-2,#fbfbf7)}
@@ -152,6 +168,8 @@ h1,.tts,.pt,.who select{white-space:nowrap}
 @media (prefers-reduced-motion:no-preference){
   .card{transition:opacity .25s,transform .25s,background .15s}
 }
+.cardwrap{flex:none;display:flex;flex-direction:column;align-items:center;gap:5px}
+.cardwrap .card{width:104px}
 .card-none{padding:14px 6px;font-size:14px;opacity:.75}
 </style>
 </head>
@@ -173,6 +191,7 @@ h1,.tts,.pt,.who select{white-space:nowrap}
 
 <main id="main">
   <section id="today" aria-label="きょうのやること"></section>
+  <section id="frame" aria-label="きょうの枠" hidden></section>
   <p id="offline" role="status" hidden></p>
   <section id="board" aria-label="こんしゅうの だいし" hidden></section>
   <div class="thread" id="thread"></div>
@@ -266,11 +285,13 @@ function say(text){
 async function boot(){
   const c=await fetch("/api/config").then(r=>r.json()).catch(()=>({children:[]}));
   const sel=$("#child");
+  (c.children||[]).forEach(x=>{ levels[x.name]=x.school_level; });
   sel.innerHTML=(c.children||[]).map(x=>'<option>'+esc(x.name)+"</option>").join("");
   child=sel.value||"";
   sel.addEventListener("change",()=>{stopRecognition();child=sel.value;history=[];thread.innerHTML="";boardDone=-1;refreshPoints();loadCards();loadBoard();open();});
   showOffline();
   flushOutbox();
+  loadCapacity();
   refreshPoints();
   loadBoard();
   loadCards();
@@ -317,12 +338,15 @@ async function loadCards(){
     x.child===child && x.status!=="done" && x.status!=="pending" && x.days_left<=0
     && !sent.has(x.id));                 // 送り待ちのものは、もう出さない
 
+  todayItems=items;
+  renderFrame();
   box.replaceChildren();
   if(!items.length){
     const p=document.createElement("p");
     p.className="card-none";
     p.textContent="きょうは やることないよ！";
     box.appendChild(p);
+    $("#frame").hidden=true;
     return;
   }
   for(const item of items){
@@ -331,10 +355,24 @@ async function loadCards(){
     b.className="card"+(item.days_left<0?" late":"");
     const title=String(item.summary||"").replace("✓ ","").split("｜").pop();
     b.innerHTML='<span class="ic" aria-hidden="true">'+(KIND_ICON[item.kind]||"📝")+
-                '</span><span class="tx">'+esc(title)+"</span>";
+                '</span><span class="tx">'+esc(title)+"</span>"
+                + (isOlder()&&item.minutes?'<span class="min">'+item.minutes+"分</span>":"");
     b.setAttribute("aria-label",title+" を おわりにする");
     b.addEventListener("click",()=>finishCard(item,b));
-    box.appendChild(b);
+    if(isOlder()){
+      // 「明日に送る」はカードの**下**に置く。押し間違えて完了になるのがいちばん困る。
+      const wrap=document.createElement("div");
+      wrap.className="cardwrap";
+      wrap.appendChild(b);
+      const later=document.createElement("button");
+      later.type="button"; later.className="later"; later.textContent="明日に送る";
+      later.setAttribute("aria-label",title+" を 明日に送る");
+      later.addEventListener("click",e=>{ e.stopPropagation(); postpone(item,later); });
+      wrap.appendChild(later);
+      box.appendChild(wrap);
+    }else{
+      box.appendChild(b);
+    }
   }
 }
 
@@ -351,12 +389,65 @@ async function finishCard(item,el){
     queueDone(item.id);
   }
   el.classList.add("done");
-  setTimeout(()=>{ el.remove(); if(!$("#today").querySelector(".card")) loadCards(); },260);
+  setTimeout(()=>{ (el.closest(".cardwrap")||el).remove(); if(!$("#today").querySelector(".card")) loadCards(); },260);
   const line=doneLine();
   add("bot",line);
   say(line);
   refreshPoints();
   loadBoard();
+}
+
+// ------------------------------------------------------------ 上の子モード
+//
+// 中学生には**量**を見せる。ただし数えるのは時間（NF：表示は量・内部は時間）。
+// 入らない日はある。そこで詰め込ませるより、**1日ずらせる**ほうがいい。
+// 「入りません」は出るときだけ出す。常設しない（画面設計 12-5）。
+
+let levels={}, capacity=90, todayItems=[];
+
+function isOlder(){ return levels[child]==="junior_high"; }
+
+async function loadCapacity(){
+  try{ capacity=(await fetch("/api/capacity").then(r=>r.json())).minutes||90; }catch(e){}
+}
+
+function renderFrame(){
+  const box=$("#frame");
+  if(!isOlder() || !todayItems.length){ box.hidden=true; return; }
+  const total=todayItems.reduce((a,x)=>a+(x.minutes||0),0);
+  box.hidden=false;
+  let h='<div class="top"><span>きょうの枠</span>'
+    + '<span class="tot">'+total+"分 / "+capacity+"分</span></div>"
+    + '<div class="bar" role="img" aria-label="きょうの合計 '+total+"分、枠は"+capacity+'分">';
+  let used=0;
+  for(const it of todayItems){
+    const m=it.minutes||0;
+    const w=Math.max(2, Math.round(m/Math.max(capacity,total)*100));
+    const over=used>=capacity;
+    h+='<span class="seg'+(over?" over":"")+'" style="width:'+w+'%"></span>';
+    used+=m;
+  }
+  h+="</div>";
+  if(total>capacity){
+    h+='<p class="msg">きょうの枠には入らない分があります。1つ「明日に送る」と入ります。</p>';
+  }
+  box.innerHTML=h;
+}
+
+async function postpone(item,el){
+  el.disabled=true;
+  try{
+    const r=await fetch("/api/postpone",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({event_id:item.id})});
+    if(!r.ok) throw new Error("ng");
+  }catch(e){
+    el.disabled=false;
+    add("sys","いま動かせなかった。もう一回さわってみて");
+    return;
+  }
+  add("bot","明日にうつしたよ");
+  loadCards();
 }
 
 // ------------------------------------------------------------ 電波がないとき

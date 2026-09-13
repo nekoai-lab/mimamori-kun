@@ -85,8 +85,12 @@ def list_raw(start_date: str, end_date: str) -> List[Dict[str, Any]]:
     """
     if DEMO:
         today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
-        return [e for e in _demo_state(today) if start_date <= e["date"] <= end_date]
-    return [e for e in _raw(start_date, end_date) if e["mine"]]
+        rows = [e for e in _demo_state(today) if start_date <= e["date"] <= end_date]
+    else:
+        rows = [e for e in _raw(start_date, end_date) if e["mine"]]
+    for e in rows:
+        e.setdefault("minutes", minutes_for(e))
+    return rows
 
 
 def _raw(start_date: str, end_date: str) -> List[Dict[str, Any]]:
@@ -122,6 +126,7 @@ def _raw(start_date: str, end_date: str) -> List[Dict[str, Any]]:
                 "kind": priv.get("kind", ""),
                 "status": priv.get("status", "todo"),
                 "batch": priv.get("batch", ""),
+                "minutes": int(priv.get("minutes") or 0) or _MINUTES.get(priv.get("kind", ""), 10),
                 "points": int(priv.get("points", 0) or 0),
                 "bring": priv.get("bring", ""),
             }
@@ -157,6 +162,7 @@ def list_tasks(days: int = 14) -> Dict[str, Any]:
     items = [e for e in items if e["status"] != "rejected"]
 
     for e in items:
+        e.setdefault("minutes", minutes_for(e))
         d = dt.date.fromisoformat(e["date"])
         e["days_left"] = (d - today).days
         e["overdue"] = e["days_left"] < 0 and e["status"] != "done"
@@ -207,6 +213,7 @@ def _demo_items(today: dt.date) -> List[Dict[str, Any]]:
         return (today + dt.timedelta(days=n)).isoformat()
     older, younger = _demo_names()
     base = dict(mine=True, link="", description="", time=None)
+    # 分はダミーでも入れておく。上の子の枠バーが空になると、確かめようがない。
     return [
         dict(base, id="d1", summary=f"{younger}｜図工 ペットボトル2本 持参", date=d(0),
              child=younger, kind="bring", status="todo", points=2, bring="500mlペットボトル2本、油性ペン"),
@@ -266,6 +273,7 @@ def _body(item: Dict[str, Any], status: str = "todo") -> Dict[str, Any]:
                 "bring": ("、".join(item["bring"]) if isinstance(item.get("bring"), list) else (item.get("bring") or "")),
                 # どの取り込みで入ったか（版）。改訂版との差分を出すときに使う。
                 "batch": item.get("batch", ""),
+                "minutes": str(minutes_for(item)),
             }
         },
         "reminders": {
@@ -273,6 +281,19 @@ def _body(item: Dict[str, Any], status: str = "todo") -> Dict[str, Any]:
             "overrides": [{"method": "popup", "minutes": m} for m in config.reminders],
         },
     }
+
+
+# 1件あたりの目安時間（分）。**画面には「量」で出し、内部では時間で数える。**
+# 実測ではなく目安。上の子の枠バーが「だいたい入るか」を言えればいい。
+_MINUTES = {"homework": 30, "deadline": 5, "bring": 5, "event": 0}
+
+
+def minutes_for(item: Dict[str, Any]) -> int:
+    try:
+        m = int(item.get("minutes") or 0)
+    except (TypeError, ValueError):
+        m = 0
+    return m if m > 0 else _MINUTES.get(item.get("kind", ""), 10)
 
 
 def _points_for(item: Dict[str, Any]) -> int:
@@ -300,6 +321,7 @@ def _demo_add(item: Dict[str, Any], status: str = "todo") -> None:
             "points": _points_for(item),
             "bring": "、".join(bring) if isinstance(bring, list) else (bring or ""),
             "batch": item.get("batch", ""),
+            "minutes": minutes_for(item),
             "mine": True,
             "link": "",
             "description": item.get("note", "") or "",

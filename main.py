@@ -201,6 +201,63 @@ def api_week(child: str):
     }
 
 
+DEFAULT_CAPACITY = 90        # 平日に入る目安（分）。上の子の枠バーの高さ
+
+
+@app.get("/api/capacity")
+def api_capacity():
+    """1日に入る目安（分）。親が変えられる。"""
+    from mimamori import ledger
+
+    try:
+        v = int(ledger.get_setting("capacity_minutes") or 0)
+    except (TypeError, ValueError):
+        v = 0
+    return {"minutes": v or DEFAULT_CAPACITY}
+
+
+class CapacityRequest(BaseModel):
+    minutes: int
+
+
+@app.post("/api/capacity")
+def api_set_capacity(req: CapacityRequest):
+    from mimamori import ledger
+
+    if not (15 <= req.minutes <= 480):
+        raise HTTPException(400, "15分から480分のあいだで決めてください。")
+    ledger.set_setting("capacity_minutes", req.minutes)
+    return {"minutes": req.minutes}
+
+
+class PostponeRequest(BaseModel):
+    event_id: str
+
+
+@app.post("/api/postpone")
+def api_postpone(req: PostponeRequest):
+    """「明日に送る」。**消さない。減らさない。日にちを1日ずらすだけ。**
+
+    入らない日がある。詰め込ませるより、動かせるほうがいい。
+    動かしたことは予定に残るので、親も見れば分かる。
+    """
+    today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
+    try:
+        rows = list_raw((today - dt.timedelta(days=14)).isoformat(),
+                        (today + dt.timedelta(days=30)).isoformat())
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"予定を読めませんでした: {e}") from e
+    row = next((r for r in rows if r.get("id") == req.event_id), None)
+    if not row:
+        raise HTTPException(404, "その予定が見つかりませんでした。")
+    base = dt.date.fromisoformat(row["date"])
+    nxt = max(base, today) + dt.timedelta(days=1)
+    result = move_event(req.event_id, nxt.isoformat())
+    if result.get("status") == "error":
+        raise HTTPException(404, result.get("note", "動かせませんでした"))
+    return result
+
+
 @app.get("/api/points")
 def api_points(child: str):
     """残高と履歴。共同開発者の points.py を呼ぶだけ。"""
