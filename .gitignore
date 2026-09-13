@@ -15,3 +15,7 @@ __pycache__/
 *.json.key
 service-account*.json
 credentials*.json
+
+# 実物のプリント・画面写真（学校名や氏名が写るもの）は公開しない
+samples/real/
+*.heic
