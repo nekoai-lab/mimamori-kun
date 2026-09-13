@@ -103,6 +103,25 @@ h1,.tts,.pt,.who select{white-space:nowrap}
 .who-face{display:grid;place-items:center;width:52px;height:52px;flex:none;border-radius:50%;
   background:var(--who-color);color:#fff;font-size:24px}
 @media (prefers-reduced-motion:no-preference){.who-pick{transition:background .15s}}
+
+/* きょうのやること（カード）
+   読み書きゼロで終われるように、タップだけで完了にする。
+   数は出さない。相棒が「残りを数えない」ので、画面も数えない。 */
+#today{display:flex;gap:10px;overflow-x:auto;padding:12px 4px 6px;scrollbar-width:thin}
+#today:empty{display:none}
+.card{flex:none;width:104px;min-height:104px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:6px;padding:12px 8px;
+  border:2px solid var(--line,#d3d8dd);border-radius:16px;background:transparent;
+  color:inherit;font:inherit;cursor:pointer;text-align:center;line-height:1.35}
+.card .ic{font-size:30px;line-height:1}
+.card .tx{font-size:13px;font-weight:700;word-break:break-word}
+.card.late{border-color:#C2614A}
+.card:hover,.card:focus-visible{background:rgba(127,127,127,.10)}
+.card.done{opacity:0;transform:scale(.86)}
+@media (prefers-reduced-motion:no-preference){
+  .card{transition:opacity .25s,transform .25s,background .15s}
+}
+.card-none{padding:14px 6px;font-size:14px;opacity:.75}
 </style>
 </head>
 <body>
@@ -120,7 +139,10 @@ h1,.tts,.pt,.who select{white-space:nowrap}
   </nav>
 </div></header>
 
-<main id="main"><div class="thread" id="thread"></div></main>
+<main id="main">
+  <section id="today" aria-label="きょうのやること"></section>
+  <div class="thread" id="thread"></div>
+</main>
 
 <footer>
   <div class="bar">
@@ -212,8 +234,9 @@ async function boot(){
   const sel=$("#child");
   sel.innerHTML=(c.children||[]).map(x=>'<option>'+esc(x.name)+"</option>").join("");
   child=sel.value||"";
-  sel.addEventListener("change",()=>{stopRecognition();child=sel.value;history=[];thread.innerHTML="";refreshPoints();open();});
+  sel.addEventListener("change",()=>{stopRecognition();child=sel.value;history=[];thread.innerHTML="";refreshPoints();loadCards();open();});
   refreshPoints();
+  loadCards();
   open();
 }
 
@@ -222,6 +245,75 @@ async function refreshPoints(){
     const t=await fetch("/api/tasks").then(r=>r.json());
     $("#pt").textContent=(t.points[child]||0)+" pt";
   }catch(e){ $("#pt").textContent="— pt"; }
+}
+
+// ------------------------------------------------------------ きょうのやること
+//
+// タップだけで終われるようにする。文字を読まなくても、絵と一言で分かる。
+// **数は出さない。** 相棒が残りを数えない以上、画面が数えたら同じことになる。
+// 承認まち（pending）は出さない。親が通していないものを子にやらせない。
+
+const KIND_ICON={homework:"📖",deadline:"📮",bring:"🎒",event:"🎏"};
+const DONE_LINES=["1つおわったね！","おわった！つぎいこう！","かたづいたね！"];
+let lastLine=-1;
+
+function doneLine(){
+  let i=Math.floor(Math.random()*DONE_LINES.length);
+  if(i===lastLine) i=(i+1)%DONE_LINES.length;   // 前と同じ文は返さない
+  lastLine=i;
+  return DONE_LINES[i];
+}
+
+async function loadCards(){
+  const box=$("#today");
+  if(!child){ box.replaceChildren(); return; }
+  let items=[];
+  try{
+    const t=await fetch("/api/tasks").then(r=>r.json());
+    items=(t.items||[]).filter(x=>
+      x.child===child && x.status!=="done" && x.status!=="pending" && x.days_left<=0);
+  }catch(e){ box.replaceChildren(); return; }
+
+  box.replaceChildren();
+  if(!items.length){
+    const p=document.createElement("p");
+    p.className="card-none";
+    p.textContent="きょうは やることないよ！";
+    box.appendChild(p);
+    return;
+  }
+  for(const item of items){
+    const b=document.createElement("button");
+    b.type="button";
+    b.className="card"+(item.days_left<0?" late":"");
+    const title=String(item.summary||"").replace("✓ ","").split("｜").pop();
+    b.innerHTML='<span class="ic" aria-hidden="true">'+(KIND_ICON[item.kind]||"📝")+
+                '</span><span class="tx">'+esc(title)+"</span>";
+    b.setAttribute("aria-label",title+" を おわりにする");
+    b.addEventListener("click",()=>finishCard(item,b));
+    box.appendChild(b);
+  }
+}
+
+async function finishCard(item,el){
+  if(el.disabled) return;
+  el.disabled=true;
+  try{
+    const r=await fetch("/api/status",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({event_id:item.id,status:"done"})});
+    if(!r.ok) throw new Error("status");
+  }catch(e){
+    el.disabled=false;
+    add("sys","いまうまく届かなかった。もう一回さわってみて");
+    return;
+  }
+  el.classList.add("done");
+  setTimeout(()=>{ el.remove(); if(!$("#today").querySelector(".card")) loadCards(); },260);
+  const line=doneLine();
+  add("bot",line);
+  say(line);
+  refreshPoints();
 }
 
 function open(){
@@ -267,7 +359,7 @@ async function send(text, hidden){
     add("bot",j.text);
     say(j.text);
     history.push({role:"assistant",text:j.text});
-    if((j.tools||[]).some(n=>n==="finish_task"||n==="start_task")) refreshPoints();
+    if((j.tools||[]).some(n=>n==="finish_task"||n==="start_task")){ refreshPoints(); loadCards(); }
     if(!hidden){ $("#msg").value=""; $("#msg").style.height="auto"; }
   }catch(e){
     stopThinking(t);
