@@ -4,7 +4,7 @@
 
 ## 概要
 
-みまもりくん：学校・塾の連絡（プリントの写真など）を束ねて、子どもの完了まで見届けるアプリ（public）。FastAPI ＋ Google ADK。本番は Cloud Run の予定（`deploy.sh`、まだデプロイしていない）。
+みまもりくん：学校のおたよりを撮ると、日付・提出期限・持ち物を読み取って Google カレンダーに並べるエージェント（public）。FastAPI ＋ Google ADK。本番は Cloud Run の予定（`deploy.sh`、まだデプロイしていない）。
 
 ## よく使うコマンド
 
