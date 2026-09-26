@@ -25,3 +25,7 @@ asetts/
 
 # 開発用のローカル台帳
 .data/
+
+# 鍵（ai-dev-harness policies/secrets.md。.env.example だけはコミットしてよい）
+.env.*
+!.env.example

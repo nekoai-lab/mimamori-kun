@@ -1,0 +1,2 @@
+# main に直接 push してよいパス（ai-dev-harness の main-check が読む。glob を1行に1つ）
+# 空＝すべて PR（レーン full のコード。子ども・保護者の連絡を扱うので、変更はレビューを通す）

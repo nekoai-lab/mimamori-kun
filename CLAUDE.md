@@ -4,7 +4,7 @@
 
 ## 概要
 
-（1〜2行で：誰の・何を楽にするものか。詳しくは PRODUCT.md）
+みまもりくん：学校・塾の連絡（プリントの写真など）を束ねて、子どもの完了まで見届けるアプリ（public）。FastAPI ＋ Google ADK。本番は Cloud Run の予定（`deploy.sh`、まだデプロイしていない）。
 
 ## よく使うコマンド
 
@@ -38,4 +38,6 @@
 
 ## このリポジトリ固有のルール
 
-（あれば書く）
+- **子ども・学校名・氏名が写る実物は公開しない**（public リポジトリ。`.gitignore` の `samples/real/`・`asetts/`・`.data/` を守る）。鍵は `.env`（変数名だけ確認する）
+- テストはまだない（`tools/check_extract.py` は手で動かす確認）。本番に出す前に pytest と CI を足す
+- public なので、コミットは noreply アドレス（REPOS.md の置き場所のルール）
