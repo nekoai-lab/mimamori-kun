@@ -19,64 +19,60 @@
 4. **`list_events` で既存カレンダーを照会し、重複を見つける** ← 書く前に読む
 5. 登録候補を返す（この時点では書かない）
 
-書き込みは保護者が画面で確認してから。**読み取りと判断は自律、処置は承認。**
+親が撮ったものは、候補を画面で確認してから書き込む。**読み取りと判断は自律、処置は承認。**
+
+**子が撮ったものは、承認を挟まずそのまま入れて、親に知らせる（D-62）。**
+承認を挟むと、親が忘れた日は子のやることが空のまま1日が終わり、子は次の日から撮らなくなる。
+親には `/board` の帯（と、設定していれば `MIMAMORI_NOTIFY_WEBHOOK` の先）で知らせ、違っていればその場で消せる。
 
 ## 画面
 
+6画面。要素・状態・遷移の詳細は [`docs/画面設計.md`](docs/画面設計.md)。
+
 | URL | 誰が | 何をする |
 |---|---|---|
-| `/` | 親 | おたよりを撮る → 抽出結果を確認 → カレンダーに登録 |
-| `/board` | 親 | 承認まち・やること一覧・予定。手で1件足せる。子ども別チップ、ポイント |
-| `/kid` | 子 | 撮る／話す／終わらせる。★⑤ 伴走する人 |
-| `/reward` | 子 | 残高・履歴・交換できるもの（表示のみ） |
+| `/` | 子ども（親も可） | 撮る／手入力 → 候補確認 → カレンダーに登録 |
+| `/kid` | 子ども | 今日やること・完了・相棒と話す。★⑤ 伴走する人。上の子は今日の分と枠バー |
+| `/plan` | 上の子 | 学習計画の全体像と割りふり（締切から前倒しで配る） |
+| `/board` | 親 | 知らせの帯・やること一覧・予定。手で1件足す、年間予定をまとめて入れる |
+| `/reward` | 子ども＋親 | 残高・履歴・引き換え（申請 → 親が承認 → 手渡し）・月の上限 |
+| `/schedule` | 親・子ども | 予定表（月表示）。日を押すと中身が出る |
 
-4画面ともヘッダの2行目に同じナビがある（撮る／一覧／やりとり／ごほうび）。
+6画面ともヘッダの2行目に同じナビがある（撮る／一覧／やりとり／計画／ごほうび／予定表）。
 右端のボタンで明るい／暗いを選べる。選ぶまでは OS の設定に従う。
+画面設計にある `/settings` はまだ無い。
 
 `/board` と `/kid` は `MIMAMORI_DEMO=1` を付けるとダミーのタスクで動く（`/kid` の会話は Gemini が必要）。
 
-## いまどこまで動くか（2026-09-06 時点）
+## いまどこまで動くか
 
-| | 状態 |
-|---|---|
-| `/kid` の会話 | **動く。** 今日のやることを聞かれ、「終わった」と言うと `/board` から外れる |
-| 先回り（3〜7日先の行事を自分で聞く） | **動く。** 1回の会話で1つだけ |
-| 態度の禁止事項 | **会話ログで確認済み。** 答えを4回求めても言わない／数を答えない／評価しない／責めない |
-| `/board` のやること一覧 | **動く。** 遅れているものが最上部。同じ日は提出 → 持ち物 → 宿題の順 |
-| 行事と「やること」の分離 | **動く。** 行事はチェックするものがないので「予定」に分けて出す |
-| `/board` から手で1件足す | **動く。** 撮るほどでもないものを、件名・子・種別・日付だけで入れる |
-| `/kid` から撮ったものの承認 | **動く。** `pending` で入り、親が `/board` で通すまで子のやることに出ない |
-| `/` のおたより抽出 → 承認 → 登録 | **動く。** `samples/` の2枚で通し確認済み（下記） |
-| 相対日付を実日付に直す | **動く。** 「再来週の土曜日」から運動会の日を決め、それを基準に「前週の木曜」「翌々日」「前日」まで解く。曖昧な「今週の金曜日」は `needs_review` を立てて人に投げる |
-| 重複の検出 | **動く。** モデルの判断のあと、既存カレンダーと件名を類似度 0.85 で機械照合する |
-| `/reward` の交換画面 | **動く（表示のみ）。** 残高・履歴・交換候補・ポイントのきまりを出す |
-| 交換を実行する（残高を減らす） | **未実装。** 押して交換するボタンはまだない |
-| 交換レートの保存 | **未実装。** `points.set_rewards` が `NotImplementedError` |
-| 本物のカレンダーへの書き込み | 実装済み。まだ `MIMAMORI_DEMO=1` で繋いでいない |
+**正本は [`docs/現在地.md`](docs/現在地.md)（いまの状態と次の手）と [`docs/WBS.md`](docs/WBS.md)（残タスク。全タスクに DoD つき）。** ここは要約だけ（2026-09-13 時点の現在地.md による）。
 
-`samples/` の2枚で通した結果（2026-09-05）。小学校のおたよりから 5件、中学校から 12件を抽出。
-うちデモ台帳にすでにあった 4件（社会科見学、参加同意書、三者面談 希望調査票、体育祭 係希望票）を
-重複として落とし、残り 13件が登録できた。**同じおたよりをもう一度上げると 5件すべてを重複と判定した。**
-「二学期集金 2400円」と「二学期の集金」のように文言が違うものも当たっている。
+- v0.2（下の子が毎日使える状態）と v0.3（上の子の学習計画 `/plan`）は済み
+- ごほうびの引き換え（申請 → 承認 → 手渡し）・月の上限・「今のペースだと約◯日」も済み（E-1〜E-3）
+- 残りの主なもの：カレンダー共有で同期を本番にする（P-3）、週次目標・おやすみ券・スタンプ・調整（E-4〜E-6）、`/board` の「例外だけ」画面（D-6）、オフラインでも開ける（A-12）。上の子まわり（B-6 / B-7 / C系）は実物を見てから作る
+- **既知の問題：本番（Cloud Run）では、台帳（ポイント・知らせ・設定）が再デプロイ・再起動で消える。** → [#5](https://github.com/nekoai-lab/mimamori-kun/issues/5)
 
 ## 画面と API の契約
 
-画面は自分の口だけを叩く。口の形を変えるときは、使っている画面の持ち主に声をかける。
+画面は自分の口だけを叩く。口の形を変えるときは、その口を使っている画面も合わせて直す。
 
 | 画面 | 叩く口 |
 |---|---|
-| `/`（index.html） | `/api/config` `/api/extract` `/api/register` |
-| `/kid`（kid.html） | `/api/config` `/api/extract` `/api/register`（`pending`）`/api/tasks` `/api/kid/chat` |
-| `/board`（board.html） | `/api/config` `/api/tasks` `/api/status` `/api/register`（手で足す） |
-| `/reward`（reward.html） | `/api/config` `/api/points` `/api/rewards` |
+| `/`（index.html） | `/api/config` `/api/extract` `/api/register` `/api/register/undo` `/api/quick/repeat` |
+| `/kid`（kid.html） | `/api/config` `/api/extract` `/api/register` `/api/tasks` `/api/status` `/api/kid/chat` `/api/week` `/api/capacity` `/api/postpone` |
+| `/plan`（plan.html） | `/api/config` `/api/plan` `/api/study/range` `/api/assignments`（`/update` `/remove`）`/api/capacity` |
+| `/board`（board.html） | `/api/config` `/api/tasks` `/api/status` `/api/register`（手で足す）`/api/notices` `/api/notices/seen` `/api/recurring` `/api/year_plan/*` |
+| `/reward`（reward.html） | `/api/config` `/api/points` `/api/rewards` `/api/redeem/*` |
+| `/schedule`（schedule.html） | `/api/schedule` |
 
-`mimamori/points.py` は、この5つのシグネチャを保てば `main.py` と繋がる。中身は作り替えてよい。
+`mimamori/points.py` は、次のシグネチャを保てば `main.py` と繋がる。中身は作り替えてよい。
 
 ```python
 balance(child) -> int
 history(child, limit=30) -> list[dict]
 get_rewards() -> list[dict]
-set_rewards(rewards) -> dict     # 未実装。NotImplementedError なら 501 が返る
+set_rewards(rewards) -> dict     # 台帳（mimamori/ledger.py）の settings に保存する
 points_for(kind, fixed_count=0) -> int
 RULES: dict                      # calendar_tools._points_for と値を揃えること
 ```
@@ -87,11 +83,14 @@ RULES: dict                      # calendar_tools._points_for と値を揃える
 `app / child / kind / status / points / bring` を持たせ、`/board` はそれを読むだけ。
 カレンダー側で人が手で直しても整合が壊れない。完了しても予定は消さず、件名に ✓ を付けて残す。
 
-`status` は5つ。承認まちも「けした」も、保存先を増やさずここで表す。
+ポイントの加減算・親への知らせ・設定（ごほうび一覧・定期タスクなど）だけは、別の台帳（`mimamori/ledger.py`）に持つ。
+本番でこの台帳が消える問題は [#5](https://github.com/nekoai-lab/mimamori-kun/issues/5)。
+
+`status` は5つ。保留も「けした」も、保存先を増やさずここで表す。
 
 | status | 意味 | 親の一覧 | 子のやること |
 |---|---|---|---|
-| `pending` | 子が撮った。親がまだ通していない | 「承認まち」に出る | **出ない** |
+| `pending` | 親が自分の判断で保留にした（子が撮ったものは D-62 で `todo` として入る） | 「承認まち」に出る | **出ない** |
 | `todo` | やること | 出る | 出る |
 | `doing` | 子が「やってる」と言った | 印だけ出る | 出る |
 | `done` | 終わった | 「済も表示」で出る | 出ない |
@@ -126,12 +125,15 @@ UIの文言もこれに合わせる。理由は「漏れる→怒られる→子
 
 ## 構成
 
+構成図は [`docs/architecture/`](docs/architecture/)（archify で生成。元データは `mimamori-kun.architecture.json`）。
+
 | 層 | 使うもの |
 |---|---|
-| エージェント | Google ADK (`LlmAgent` + `list_events` ツール) |
+| エージェント | Google ADK `LlmAgent`：おたより読み取り（`list_events` ツール）・年間予定の読み取り・伴走（`get_my_tasks` / `finish_task` / `start_task`） |
 | モデル | Vertex AI Gemini |
-| カレンダー | Google Calendar API（実行サービスアカウントの ADC） |
-| API / UI | FastAPI + 単一 HTML |
+| カレンダー | Google Calendar API（実行サービスアカウントの ADC）。タスクの正本 |
+| 台帳 | `mimamori/ledger.py`（ポイント・知らせ・設定。本番の保存先は [#5](https://github.com/nekoai-lab/mimamori-kun/issues/5)） |
+| API / UI | FastAPI + 画面ごとの単一 HTML |
 | 実行環境 | Cloud Run |
 
 ```
@@ -140,24 +142,37 @@ mimamori-kun/
 ├── mimamori/
 │   ├── config.py            環境変数
 │   ├── schema.py            抽出結果の型
-│   ├── calendar_tools.py    カレンダーの読み書き（台帳）
-│   ├── agent.py             おたよりを読むエージェント
+│   ├── calendar_tools.py    カレンダーの読み書き（タスクの正本）
+│   ├── agent.py             おたより・年間予定を読むエージェント
 │   ├── kid_agent.py         子どもと話すエージェント（★⑤）
-│   └── points.py            ポイントと交換        ← 共同開発者
+│   ├── ledger.py            台帳（ポイント・知らせ・設定）
+│   ├── points.py            ポイントと交換レート
+│   ├── redeem.py            引き換え（申請 → 承認 → 手渡し）
+│   ├── notify.py            親への知らせ（帯・Webhook）
+│   ├── recurring.py         定期タスク（公文など）
+│   ├── study.py             上の子の学習計画の割りふり
+│   ├── year_plan.py         年間予定の取り込み
+│   ├── dedupe.py            取り込みの4分岐（完全一致／差分／日程変更／新規）
+│   └── images.py            HEIC などを JPEG に直す
 ├── static/
-│   ├── index.html           撮る → 確認 → 登録（親）
-│   ├── board.html           やること一覧（親）
-│   ├── kid.html             会話画面（子）        ← 共同開発者
-│   ├── reward.html          交換画面（表示のみ）  ← 共同開発者
-│   └── theme.js             明暗の切り替え。4画面で共有
-├── samples/                 テスト用のダミーおたより
-├── docs/分担.md             担当・決定事項・動作確認済みの版
+│   ├── index.html           撮る・手入力 → 確認 → 登録
+│   ├── kid.html             今日やること・相棒（子）
+│   ├── plan.html            学習計画（上の子）
+│   ├── board.html           一覧（親）
+│   ├── reward.html          ごほうび・引き換え
+│   ├── schedule.html        予定表（月表示）
+│   ├── theme.js             明暗の切り替え。6画面で共有
+│   └── who.js               「だれ？」の選択
+├── samples/                 テスト用のダミーおたより（実物は置かない）
+├── tools/check_extract.py   読み取り結果の突き合わせ（手で動かす）
+├── docs/                    要件定義・画面設計・WBS・現在地・構成図
 ├── Dockerfile
 └── deploy.sh
 ```
 
-**誰がどのファイルを持つかは [`docs/分担.md`](docs/分担.md) にある。**
-表にないファイルを触るときは先に一声かける。PRは回さず main に直コミット、push 前に `git pull --rebase`。
+**変更はブランチ → PR で入れる（レーンは full）。**
+CI が通り、実装者と別の AI のレビュー（`request-qa`）でラベル `qa-pass` が付いたらマージする。
+UI の変更がある PR は `ux-pass` も要る。ルールの正本は ai-dev-harness の `policies/git-flow.md`。
 
 ## GCP プロジェクトは分ける
 
@@ -239,58 +254,7 @@ Google カレンダー → 対象カレンダーの設定 → 「特定のユー
 - **`403 Vertex AI API has not been used`** → `gcloud services enable aiplatform.googleapis.com`
 - **ADK のバージョン差** → `agent.py` の `InMemoryRunner` / `run_async` のシグネチャが版で変わることがある
 
-## 残りタスク（2026-09-06 時点）
+## 残りタスク
 
-| # | やること | 誰 | 止まっている理由 |
-|---|---|---|---|
-| 1 | 「引く」を件単位か会話単位か決める | 3人で相談 | **判断待ち** |
-| 2 | `/kid` が重複を黙って捨てていいか決める | 3人で相談 | **判断待ち** |
-| 3 | `/reward` に交換を実行する導線を足す | 共同開発者 | 着手できる |
-| 4 | `points.set_rewards` を実装する | 共同開発者 | 着手できる |
-| 5 | `/kid` を素で触って会話ログを渡す | Tsukineko | 着手できる |
-| 6 | 本物のカレンダーに繋いで通す | Claude | 5 のあと |
-| 7 | Cloud Run へデプロイ | Claude | 6 のあと |
-
-### 判断待ちの2つ
-
-決まれば実装は短い。決まらないまま手を動かすと、あとで態度がぶれる。
-
-- **「2回言って動かなければ引く」を件単位にするか、会話単位にするか。**
-  いまは件単位で、断られた用件からは引くが別の用件では声をかけ得る。会話単位にすると確実に止まる
-  代わりに、伴走の核である先回りがその会話では効かなくなる。態度の決定事項なので相談して決める
-- **`/kid` が重複と判定したものを、子どもに見せずに捨てていいか。**
-  いまの `kid.html` は `duplicate_of` が付いたものを黙って除いている。`/`（親）は重複も
-  チェックを外した状態で表示するので人が気づけるが、`/kid` は気づけない。
-  重複判定が厳しすぎると、子の画面から本物が消える
-
-`/kid` からの登録に承認を挟むかは、**決めて実装した。** `pending` で入り、
-親が `/board` の「承認まち」で通すまで子のやることに出ない。
-
-### 着手できる3つ
-
-- **`/reward` の交換を実行する導線**（共同開発者）。いまは表示だけで、ポイントを使うボタンがない。
-  残高を減らす先は `points.py` 側の設計になる
-- **`points.set_rewards`**（共同開発者）。保存先の案は `mimamori/points.py` の TODO に3つ書いてある
-  （環境変数のまま／カレンダーに設定用の予定を1つ作る／Firestore）。まずは環境変数のままで十分
-- **`/kid` を素で触る**（Tsukineko）。台本ではない言い方（言い直す、話が飛ぶ、無言）で崩れ方が変わる。
-  崩れたところを会話ログで渡してもらえれば、instruction を直す
-
-### 本物のカレンダーに繋ぐとき
-
-`MIMAMORI_DEMO` を 0 にして、カレンダーをサービスアカウントに「予定の変更権限」で共有する。
-繋いだあとに見るべき場所は2つ。
-
-- **「遅れている」に本当に出るか。** 前後14日を読むように直したが、実データで通していない
-- **`status` が空の予定が混ざらないか。** 人が手でカレンダーに作った予定は `app` の目印が
-  ないので `mine` が false になり、一覧には出ない。それが期待どおりか確認する
-
-### 保留にしたもの
-
-- **デモのダミーを増やす。** 8件のまま。一度14件まで増やして確かめたが、
-  1画面に収まらなくなるだけで、解ける問題がなかった（このとき見つかった
-  「同じ日の並び順に意味がない」は直した）
-- **Google ToDo リストへの反映。** Tasks API は OAuth ユーザー認証が必須で、
-  サービスアカウントでは書けない
-- **学校アプリからの自動取り込み。** 今はスクリーンショットを撮って渡す
-- **複数枚まとめて投入。** 1枚ずつ
-- **LINE通知**
+正本は [`docs/WBS.md`](docs/WBS.md)（全タスクに DoD つき）。いまの状態と次の手は [`docs/現在地.md`](docs/現在地.md)。
+要約は上の「いまどこまで動くか」。
