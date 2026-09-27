@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 from google.adk.agents import LlmAgent
 from google.adk.runners import InMemoryRunner
@@ -30,16 +30,13 @@ APP_NAME = "mimamori_kid"
 
 # ------------------------------------------------------------------ ツール
 
-def get_my_tasks(child: str) -> List[Dict[str, Any]]:
-    """その子のやることを、期限が近い順に返す。
+# **子どもの名前はモデルに決めさせない（#8）。**
+# 以前は get_my_tasks(child) の child をモデルが渡していたので、別の名前で呼べば
+# 別の子のやることが読めた。finish_task / start_task も持ち主を見ていなかった。
+# いまは build_agent(child) が、その子に閉じたツールを作ってモデルに渡す。
 
-    Args:
-        child: 子どもの名前
-
-    Returns:
-        id / 件名 / 日付 / 種別 / 状態 / 持ち物 / 残り日数 のリスト。
-        残り日数が 0 なら今日、1 なら明日、マイナスなら過ぎている。
-    """
+def _tasks_of(child: str) -> List[Dict[str, Any]]:
+    """その子のやることを、期限が近い順に返す（済と承認まちは除く）。"""
     data = list_tasks(days=14)
     out = []
     for t in data["items"]:
@@ -61,28 +58,49 @@ def get_my_tasks(child: str) -> List[Dict[str, Any]]:
     return out
 
 
-def finish_task(event_id: str) -> Dict[str, Any]:
-    """やることが終わったので「済」にする。子どもが終わったと言ったときだけ呼ぶ。
-
-    Args:
-        event_id: get_my_tasks が返した id
-
-    Returns:
-        更新結果
-    """
-    return set_status(event_id, "done")
+def _set_own_status(child: str, event_id: str, status: str) -> Dict[str, Any]:
+    """その子のやることのときだけ状態を変える。ほかの子のものは変えずに error を返す。"""
+    if event_id not in {t["id"] for t in _tasks_of(child)}:
+        # instruction に「error なら終わったことにしない」とあるので、そのまま正直に返る
+        return {"id": event_id, "status": "error", "note": f"{child}さんのやることではありません"}
+    return set_status(event_id, status)
 
 
-def start_task(event_id: str) -> Dict[str, Any]:
-    """これからやる、と決まったので「やってる」にする。
+def build_tools(child: str) -> List[Callable[..., Any]]:
+    """child に閉じたツールを作る。モデルからは child を変えられない。"""
 
-    Args:
-        event_id: get_my_tasks が返した id
+    def get_my_tasks() -> List[Dict[str, Any]]:
+        """いま話している子のやることを、期限が近い順に返す。
 
-    Returns:
-        更新結果
-    """
-    return set_status(event_id, "doing")
+        Returns:
+            id / 件名 / 日付 / 種別 / 状態 / 持ち物 / 残り日数 のリスト。
+            残り日数が 0 なら今日、1 なら明日、マイナスなら過ぎている。
+        """
+        return _tasks_of(child)
+
+    def finish_task(event_id: str) -> Dict[str, Any]:
+        """やることが終わったので「済」にする。子どもが終わったと言ったときだけ呼ぶ。
+
+        Args:
+            event_id: get_my_tasks が返した id
+
+        Returns:
+            更新結果。いま話している子のやることでなければ status が error になる
+        """
+        return _set_own_status(child, event_id, "done")
+
+    def start_task(event_id: str) -> Dict[str, Any]:
+        """これからやる、と決まったので「やってる」にする。
+
+        Args:
+            event_id: get_my_tasks が返した id
+
+        Returns:
+            更新結果。いま話している子のやることでなければ status が error になる
+        """
+        return _set_own_status(child, event_id, "doing")
+
+    return [get_my_tasks, finish_task, start_task]
 
 
 # ------------------------------------------------------------------ 指示
@@ -96,7 +114,7 @@ def _instruction(child: str) -> str:
 {now.strftime('%Y-%m-%d %H:%M')}（{"月火水木金土日"[now.weekday()]}曜日）
 
 # 最初にやること
-**毎回、返事を書く前に get_my_tasks("{child}") を呼ぶ。** ここまでの会話が見えていても呼ぶ。
+**毎回、返事を書く前に get_my_tasks() を呼ぶ**（{child}さんのやることだけが返る）。ここまでの会話が見えていても呼ぶ。
 前のやりとりの記憶は残っていないので、台帳を見ないと今の状況が分からない。思い込みで話さない。
 
 # 聞くことの順番
@@ -145,7 +163,7 @@ def build_agent(child: str) -> LlmAgent:
         model=config.model,
         description="子どものやることに伴走する",
         instruction=_instruction(child),
-        tools=[get_my_tasks, finish_task, start_task],
+        tools=build_tools(child),
     )
 
 
