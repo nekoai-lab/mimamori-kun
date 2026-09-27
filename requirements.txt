@@ -13,3 +13,5 @@ Pillow==12.2.0
 pillow-heif==1.7.0
 # 年間行事予定表のPDFを、ページごとの画像にする。
 pymupdf==1.28.2
+# テスト（CI は requirements.txt から入れたときだけ pytest を回す）
+pytest==9.1.1
