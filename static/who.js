@@ -42,6 +42,13 @@
     select.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
+  // 子が決まったことを画面に知らせる。値が変わらなかったとき（覚えていた子が先頭だった等）も出す。
+  // 画面は、これを受けてから子ごとの読み込みを始める（決まる前に先頭の子で始めない。#9）
+  function ready(select) {
+    select.dataset.whoReady = "1";
+    select.dispatchEvent(new Event("who:ready"));
+  }
+
   function names(select) {
     return Array.prototype.map.call(select.options, function (o) {
       return o.value || o.textContent;
@@ -92,12 +99,15 @@
     var saved = stored();
     if (saved && list.indexOf(saved) >= 0) {
       applyTo(select, saved);
+      ready(select);
     } else if (list.length === 1) {
       remember(list[0]);
       applyTo(select, list[0]);
+      ready(select);
     } else {
       chooser(list, function (name) {
         applyTo(select, name);
+        ready(select);
       });
     }
 

@@ -287,16 +287,24 @@ async function boot(){
   const c=await fetch("/api/config").then(r=>r.json()).catch(()=>({children:[]}));
   const sel=$("#child");
   (c.children||[]).forEach(x=>{ levels[x.name]=x.school_level; });
+  // **子が決まるまで、子ごとの読み込みは始めない（#9）。**
+  // 以前は select の先頭の子で会話を送ってから who.js が覚えていた子に切り替えていたので、
+  // 先頭の子あての返事が、切り替えたあとの会話欄に入っていた。
+  // who.js の who:ready（子が決まった）と、手で切り替えたときの change の両方で show する。
+  child="";
+  const show=()=>{
+    const next=sel.value||"";
+    if(!next||next===child) return;      // 同じ子で2回始めない（change と who:ready が続けて来る）
+    stopRecognition();child=next;history=[];thread.innerHTML="";boardDone=-1;
+    refreshPoints();loadCards();loadBoard();open();
+  };
+  sel.addEventListener("change",show);
+  sel.addEventListener("who:ready",show);
+  // 聞き耳を立ててから埋める（埋まると who.js が動き出す）
   sel.innerHTML=(c.children||[]).map(x=>'<option>'+esc(x.name)+"</option>").join("");
-  child=sel.value||"";
-  sel.addEventListener("change",()=>{stopRecognition();child=sel.value;history=[];thread.innerHTML="";boardDone=-1;refreshPoints();loadCards();loadBoard();open();});
   showOffline();
   flushOutbox();
   loadCapacity();
-  refreshPoints();
-  loadBoard();
-  loadCards();
-  open();
 }
 
 async function refreshPoints(){
@@ -519,8 +527,10 @@ async function loadBoard(){
   const box=$("#board");
   if(!child){ box.hidden=true; boardDone=-1; return; }
   let w=null;
-  try{ w=await fetch("/api/week?child="+encodeURIComponent(child)).then(r=>r.json()); }
-  catch(e){ box.hidden=true; return; }
+  const who=child;
+  try{ w=await fetch("/api/week?child="+encodeURIComponent(who)).then(r=>r.json()); }
+  catch(e){ if(who===child) box.hidden=true; return; }
+  if(who!==child) return;                // 切り替えの途中に届いた、前の子の台紙は出さない（#9）
   if(w.detail){ box.hidden=true; return; }
 
   const filled=Math.min(w.done,w.goal);
@@ -599,11 +609,13 @@ async function send(text, hidden){
   setBusy(true); const t=thinking();
   const ac=new AbortController();
   const timeout=setTimeout(()=>ac.abort(),45000);
+  const who=child;                       // 送った時点の子。返事が来たときに違っていたら捨てる（#9）
   try{
     const res=await fetch("/api/kid/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({child,history:requestHistory}),signal:ac.signal});
+      body:JSON.stringify({child:who,history:requestHistory}),signal:ac.signal});
     const j=await res.json();
     stopThinking(t);
+    if(who!==child){ clearTimeout(timeout); setBusy(false); return; }
     if(!res.ok) throw new Error(j.detail||"うまく話せませんでした");
     add("bot",j.text);
     say(j.text);
@@ -612,6 +624,7 @@ async function send(text, hidden){
     if(!hidden){ $("#msg").value=""; $("#msg").style.height="auto"; }
   }catch(e){
     stopThinking(t);
+    if(who!==child){ clearTimeout(timeout); setBusy(false); return; }
     if(e.name==="AbortError") add("sys","時間がかかりすぎた。もう一回送ってみて");
     else add("sys","うまくつながらなかった。もう一回ためしてみて。");
   }
