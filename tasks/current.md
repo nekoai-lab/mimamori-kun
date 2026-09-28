@@ -20,8 +20,8 @@
 
 - #16：PR #17 の UX_REVIEW の指摘対応・再確認（ux-pass）。認証コードは今回のレビューでは変更していない。
 - **デプロイ前にやること**（deploy.sh の実行は人が確認してから）
-  - デプロイ先のプロジェクト作成と課金
-  - `.env` に `GOOGLE_CLOUD_PROJECT`・`MIMAMORI_CALENDAR_ID`・`MIMAMORI_REMINDERS`
+  - [x] ① デプロイ先のプロジェクト作成と課金 → 済（`mimamorikun-family`、番号 932685100691。2026-09-28）
+  - `.env`：`GOOGLE_CLOUD_PROJECT=mimamorikun-family` は入れた（2026-09-28）。`MIMAMORI_CALENDAR_ID`・`MIMAMORI_REMINDERS` は人に何を入れるか確かめてから
   - `.gcloudignore` に `.gitignore` を取り込む（`asetts/`・`.env.*` などがアップロードされる）
   - 通知の Webhook（Slack の #みまもりくん。ローカルは `.env` の `MIMAMORI_NOTIFY_WEBHOOK` で送信確認済み 2026-09-28）を Secret Manager（mimamorikun-family）に入れ、deploy.sh から Cloud Run に渡す（`--set-secrets MIMAMORI_NOTIFY_WEBHOOK=…:latest`。Secret Manager の API 有効化と、実行用 SA に `roles/secretmanager.secretAccessor` を足す）。値は `--set-env-vars` に入れない
   - 実行後に gcloud の既定プロジェクトを戻す（今は okane-kenko-507122）
