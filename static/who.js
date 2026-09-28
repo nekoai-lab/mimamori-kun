@@ -28,6 +28,15 @@
     "border:0;background:#fff;color:#1F2422;cursor:pointer}" +
     "#who-switched .who-err{flex-basis:100%;color:#FFBD8A;font-weight:700}" +
     "#who-switched button:disabled{opacity:.6;cursor:default}" +
+    // 戻れたか分からないとき（R1 追補）。画面全体をおおう
+    "#who-unknown{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;" +
+    "padding:16px;background:#1F2422;color:#fff}" +
+    "#who-unknown>div{max-width:28em;text-align:center}" +
+    "#who-unknown p{margin:0 0 12px;font-size:15px;line-height:1.7}" +
+    "#who-unknown #who-unknown-t{font-size:18px;font-weight:700}" +
+    "#who-unknown button{font:inherit;font-weight:700;margin-top:8px;padding:10px 20px;min-height:44px;" +
+    "border-radius:999px;border:0;background:#fff;color:#1F2422;cursor:pointer}" +
+    "#who-unknown button:disabled{opacity:.6;cursor:default}" +
     "#who-parent{display:block;margin:28px auto 16px;text-align:center;font-size:14px}" +
     // 押せる場所を 44px 以上に（UX_REVIEW R5）
     "#who-parent a{display:inline-flex;align-items:center;min-height:44px;padding:8px 16px;color:inherit;opacity:.8}";
@@ -58,33 +67,105 @@
   var IDLE_MS = 10 * 60 * 1000, TOUCH_MS = 60 * 1000;
 
   // 「子どもに戻す」。**戻せたのを確かめてから**子どもの画面へ（UX_REVIEW R1）。
-  // 失敗したら親の帯を残し、やり直せるようにする。すでにサーバー側で戻っていたら（401）、今の状態を見て進む
-  var backing = false, barBtn = null, barErr = null;
+  // 戻す操作が失敗したら（通信が切れた・もう戻っていた など）、今の状態を /api/auth/me で確かめて分ける:
+  //   - 子どもに戻っている      → 子どもの画面へ
+  //   - 401（ログインが切れた） → ログイン画面へ
+  //   - まだ親のまま            → 親の帯を残し、やり直せるようにする
+  //   - 確かめられない（500・通信断・形式がおかしい）→ 戻れたか分からない。
+  //     **親の画面は閉じたまま**「確認できませんでした」と出し、もう一度たしかめられるようにする（R1 追補）
+  var backing = false, barBtn = null, barErr = null, unknownBox = null;
   function backToChild(auto) {
     if (backing || leaving) return;
     backing = true;
     var btn = barBtn, err = barErr;
     if (btn) { btn.disabled = true; btn.textContent = "子どもに戻しています…"; }
     if (err) err.textContent = "";
+    if (unknownBox) unknownBox.busy(true);
     function fail() {
       backing = false;
+      closeUnknown();
       if (btn) { btn.disabled = false; btn.textContent = "子どもに戻す"; }
       if (err) err.textContent = (auto ? "10分たったので子どもに戻そうとしましたが、" : "") +
         "まだ子どもの画面に戻せていません。通信を確認して、もう一度お試しください。";
     }
+    function unknown() {
+      backing = false;
+      if (btn) { btn.disabled = false; btn.textContent = "子どもに戻す"; }
+      showUnknown();
+    }
     function go() { leaving = true; location.href = "/kid"; }
-    rawFetch("/api/auth/back", { method: "POST" })
-      .then(function (r) {
-        if (r.ok) return go();
-        // 401 や 400：もう戻っているか、ログインが切れている。今の状態を確かめる
-        return rawFetch("/api/auth/me").then(function (m) { return m.ok ? m.json() : null; })
-          .then(function (me) {
-            if (me && me.role === "child" && !me.switched) go();
-            else if (!me) { leaving = true; location.href = "/login"; }
-            else fail();
+    function check() {
+      return rawFetch("/api/auth/me")
+        .then(function (m) {
+          if (m.status === 401) return "login";
+          if (!m.ok) return null;
+          return m.json().then(function (me) {
+            if (!me || typeof me !== "object" || typeof me.role !== "string") return null;
+            if (me.role === "child" && !me.switched) return "kid";
+            if (me.role === "parent" && me.switched) return "parent";
+            return null;
           });
-      })
-      .catch(fail);
+        })
+        .catch(function () { return null; });
+    }
+    rawFetch("/api/auth/back", { method: "POST" })
+      .then(function (r) { return r.ok ? "kid" : check(); },
+            function () { return check(); })
+      .then(function (state) {
+        if (state === "kid") go();
+        else if (state === "login") { leaving = true; location.href = "/login"; }
+        else if (state === "parent") fail();
+        else unknown();
+      });
+  }
+
+  // 戻れたか分からないときの幕。画面全体をおおって、親の画面を操作できないようにする
+  function showUnknown() {
+    if (unknownBox) { unknownBox.busy(false); return; }
+    var back = document.createElement("div");
+    back.id = "who-unknown";
+    back.setAttribute("role", "alertdialog");
+    back.setAttribute("aria-modal", "true");
+    back.setAttribute("aria-labelledby", "who-unknown-t");
+    var box = document.createElement("div");
+    var t = document.createElement("p");
+    t.id = "who-unknown-t";
+    t.textContent = "子どもの画面に 戻せたか、確認できませんでした";
+    var d = document.createElement("p");
+    d.textContent = "通信を確認して、「もう一度たしかめる」を押してください。確かめられるまで、おうちの人の画面は閉じておきます。";
+    var b = document.createElement("button");
+    b.type = "button";
+    b.textContent = "もう一度たしかめる";
+    b.addEventListener("click", function () { backToChild(false); });
+    box.appendChild(t); box.appendChild(d); box.appendChild(b);
+    back.appendChild(box);
+    // 後ろの画面は読み上げ・操作の対象から外す
+    var hidden = [];
+    Array.prototype.forEach.call(document.body.children, function (el) {
+      if (el === back) return;
+      hidden.push(el);
+      el.setAttribute("aria-hidden", "true");
+      el.inert = true;
+    });
+    document.body.appendChild(back);
+    b.focus();
+    unknownBox = {
+      el: back,
+      busy: function (on) {
+        b.disabled = on;
+        b.textContent = on ? "たしかめています…" : "もう一度たしかめる";
+        if (!on) b.focus();
+      },
+      close: function () {
+        hidden.forEach(function (el) { el.removeAttribute("aria-hidden"); el.inert = false; });
+        back.remove();
+      },
+    };
+  }
+  function closeUnknown() {
+    if (!unknownBox) return;
+    unknownBox.close();
+    unknownBox = null;
   }
 
   function showSwitched(me) {
