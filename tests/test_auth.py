@@ -514,3 +514,49 @@ def test_wrong_and_locked_responses_speak_to_the_person_and_carry_retry_after(mo
     assert "合言葉が一致しませんでした" in p["detail"] and "おうちの人" not in p["detail"]   # 親には親の言葉
     t = c.post("/api/auth/login", json={"who": "c0", "passcode": "0000"}).json()
     assert "合言葉が一致しませんでした" in t["detail"] and "おうちの人に聞いて" in t["detail"]  # 中学生は漢字で
+
+
+def _late_parent_cookie(c):
+    """切り替え中に始まった遅い処理の応答が、あとから Set-Cookie で親の Cookie を送り直す場面を作る。"""
+    c.post("/api/auth/touch")                                   # 延長の Cookie（＝遅い応答が返すもの）
+    return c.cookies.get(auth.COOKIE)
+
+
+def test_a_late_parent_cookie_after_back_to_child_stays_a_child():
+    """Codex のレビュー（#17）：子どもに戻したあとに遅い応答が届いても、親には戻らない。"""
+    c = login(YOUNGER)
+    switch_to_parent(c)
+    late = _late_parent_cookie(c)
+    assert c.post("/api/auth/back").status_code == 200
+    c.cookies.clear()
+    c.cookies.set(auth.COOKIE, late)                            # 遅い応答が子どもの Cookie を上書きした
+    r = c.get("/board", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/kid"
+    assert c.get("/api/auth/me").json()["role"] == "child"
+    assert c.get("/api/notices").status_code == 403
+
+
+def test_a_late_parent_cookie_after_logout_is_rejected():
+    c = login(YOUNGER)
+    switch_to_parent(c)
+    late = _late_parent_cookie(c)
+    assert c.post("/api/auth/logout").status_code == 200
+    c.cookies.clear()
+    c.cookies.set(auth.COOKIE, late)
+    assert c.get("/api/tasks").status_code == 401
+
+
+def test_a_late_parent_cookie_after_the_idle_revert_stays_a_child(monkeypatch):
+    now = [7_000_000.0]
+    monkeypatch.setattr(auth, "_now", lambda: now[0])
+    c = login(YOUNGER)
+    switch_to_parent(c)
+    late = _late_parent_cookie(c)
+    now[0] += auth.IDLE_SECONDS + 1
+    c.get("/api/tasks")                                         # 10分たって子どもに戻る
+    now[0] -= auth.IDLE_SECONDS                                 # 期限内に作られた延長の Cookie が遅れて届いた
+    c.cookies.clear()
+    c.cookies.set(auth.COOKIE, late)
+    r = c.get("/api/notices")                                   # 親のつもりの操作は、子どもとしても親としても実行しない
+    assert r.status_code == 401 and r.headers["x-mimamori-reverted"] == "1"
+    assert c.get("/api/auth/me").json()["role"] == "child"

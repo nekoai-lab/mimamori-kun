@@ -36,6 +36,7 @@ LOCK_SECONDS = 15 * 60             # 15分ロック
 IDLE_SECONDS = 10 * 60             # 子どもの端末で親に切り替えたとき、操作がなければ10分で子どもに戻す
 
 K_USERS, K_SECRET, K_EPOCH, K_FAILS = "auth_users", "auth_secret", "auth_epoch", "auth_fails"
+K_SWITCH = "auth_switch"           # 親への一時の切り替え（1回ごとに番号）。使える／戻した／ログアウトした
 _SCRYPT = {"n": 2 ** 14, "r": 8, "p": 1, "dklen": 32}
 
 _LEVEL_LABEL = {"junior_high": "中学生", "elementary": "小学生"}
@@ -233,7 +234,40 @@ def _unb64(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
 
 
-def issue(user: str, back_to: Optional[str] = None, generation: Optional[int] = None) -> str:
+# ------------------------------------------------------------------ 親への一時の切り替え
+#
+# Cookie だけで状態を持つと、切り替え中に始まった遅い処理の応答が、戻したあと・ログアウトしたあとに
+# 親の Cookie を送り直してしまう。切り替えごとに番号を振り、**サーバーの台帳に状態を残す**。
+#   active … 使える   back … 子どもに戻した（古い Cookie は子どもとして扱う）   logout … ログアウトした（使えない）
+
+def start_switch() -> str:
+    sid = secrets.token_hex(12)
+    ledger.set_setting(f"{K_SWITCH}:{sid}", {"state": "active", "at": int(_now())})
+    return sid
+
+
+def end_switch(sid: Optional[str], state: str) -> None:
+    """切り替えを終える。いったん back / logout になったものは active に戻さない。"""
+    if not sid:
+        return
+
+    def step(row):
+        row = dict(row or {})
+        if row.get("state", "active") == "active":
+            row.update(state=state, ended=int(_now()))
+        return row
+
+    ledger.transact_setting(f"{K_SWITCH}:{sid}", step)
+
+
+def switch_state(sid: Optional[str]) -> str:
+    if not sid:
+        return "logout"
+    return (ledger.get_setting(f"{K_SWITCH}:{sid}") or {}).get("state", "logout")
+
+
+def issue(user: str, back_to: Optional[str] = None, generation: Optional[int] = None,
+          sid: Optional[str] = None) -> str:
     """Cookie の中身を作る。back_to を渡すと「子どもの端末で親に切り替えた」一時の状態になる。
 
     一時の状態では、元の子（b）と、操作がないまま戻る時刻（i）も署名して入れる。
@@ -243,8 +277,11 @@ def issue(user: str, back_to: Optional[str] = None, generation: Optional[int] = 
     gen = epoch() if generation is None else int(generation)
     payload: Dict[str, Any] = {"u": user, "e": gen, "x": int(_now()) + MAX_AGE}
     if back_to:
+        if not sid:
+            raise ValueError("親への切り替えには番号（sid）が要る")
         payload["b"] = back_to
         payload["i"] = int(_now()) + IDLE_SECONDS
+        payload["s"] = sid
     body = _b64(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode())
     sig = _b64(hmac.new(_secret(), body.encode(), hashlib.sha256).digest())
     return f"{body}.{sig}"
@@ -277,11 +314,17 @@ def read(token: Optional[str]) -> Optional[Dict[str, Any]]:
     if back_to:
         if back_to not in children() or not is_parent(user):
             return None
-        if int(data.get("i") or 0) <= _now():
-            return {"user": back_to, "back_to": None, "idle_until": 0, "reverted": True, "epoch": data["e"]}
+        sid = data.get("s")
+        state = switch_state(sid)
+        if state == "logout":
+            return None                      # ログアウトしたあとに届いた古い Cookie
+        if state == "back" or int(data.get("i") or 0) <= _now():
+            # 子どもに戻したあと（または10分たった）。古い Cookie でも親にはしない
+            return {"user": back_to, "back_to": None, "idle_until": 0, "reverted": True,
+                    "epoch": data["e"], "sid": sid}
         return {"user": user, "back_to": back_to, "idle_until": int(data["i"]), "reverted": False,
-                "epoch": data["e"]}
-    return {"user": user, "back_to": None, "idle_until": 0, "reverted": False, "epoch": data["e"]}
+                "epoch": data["e"], "sid": sid}
+    return {"user": user, "back_to": None, "idle_until": 0, "reverted": False, "epoch": data["e"], "sid": None}
 
 
 def verify(token: Optional[str]) -> Optional[str]:

@@ -85,6 +85,7 @@ async def require_login(request: Request, call_next):
     request.state.back_to = session["back_to"]
     request.state.idle_until = session["idle_until"]
     request.state.epoch = session["epoch"]
+    request.state.sid = session["sid"]
     if session["reverted"]:
         # 子どもの端末で親に切り替えたまま10分操作がなかった。元の子に戻す（#16 ①）
         if path.startswith("/api/"):
@@ -93,6 +94,7 @@ async def require_login(request: Request, call_next):
                                status_code=401, headers={"X-Mimamori-Reverted": "1"})
         else:
             res = RedirectResponse("/kid" if path in _PARENT_PAGES else path, status_code=303)
+        auth.end_switch(session["sid"], "back")       # 10分で戻った。遅れて届く親の Cookie も子どもとして扱う
         _set_session(res, user, generation=session["epoch"])
         return res
     if path in _PARENT_PAGES and not auth.is_parent(user):
@@ -100,7 +102,7 @@ async def require_login(request: Request, call_next):
     response = await call_next(request)
     if session["back_to"] and _is_activity(request):
         # 操作があったので、戻るまでの10分を数え直す（読み込みだけのアクセスでは延ばさない）
-        _set_session(response, user, back_to=session["back_to"], generation=session["epoch"])
+        _set_session(response, user, back_to=session["back_to"], generation=session["epoch"], sid=session["sid"])
         request.state.idle_until = int(auth._now()) + auth.IDLE_SECONDS
     return response
 
@@ -116,8 +118,10 @@ def _is_activity(request: Request) -> bool:
     return request.method != "GET"
 
 
-def _set_session(res, user: str, back_to: Optional[str] = None, generation: Optional[int] = None) -> None:
-    res.set_cookie(auth.COOKIE, auth.issue(user, back_to=back_to, generation=generation), max_age=auth.MAX_AGE,
+def _set_session(res, user: str, back_to: Optional[str] = None, generation: Optional[int] = None,
+                 sid: Optional[str] = None) -> None:
+    res.set_cookie(auth.COOKIE, auth.issue(user, back_to=back_to, generation=generation, sid=sid),
+                   max_age=auth.MAX_AGE,
                    httponly=True, secure=True, samesite="lax", path="/")
 
 
@@ -247,16 +251,18 @@ def api_auth_login(req: LoginRequest, request: Request):
     # 子どもでログインしている端末で親が入ったら、「親に切り替え」の一時の状態にする（#16 ①）。
     # 操作がなければ10分で元の子に戻る。親の端末（子どもでログインしていない）なら今までどおり180日
     current = auth.read(request.cookies.get(auth.COOKIE))
-    back_to = None
+    back_to, sid = None, None
     if auth.is_parent(user) and current:
         if current["back_to"]:
-            back_to = current["back_to"]                    # 切り替え中にもう一度入った
+            back_to, sid = current["back_to"], current["sid"]     # 切り替え中にもう一度入った
         elif not auth.is_parent(current["user"]):
-            back_to = current["user"]
+            back_to, sid = current["user"], auth.start_switch()
+    elif current and current["back_to"]:
+        auth.end_switch(current["sid"], "back")          # 切り替え中の端末で子どもが入り直した
     res = JSONResponse({"user": auth.display_name(user), "role": "parent" if auth.is_parent(user) else "child",
                         "home": "/board" if auth.is_parent(user) else "/kid",
                         "back_to": back_to})
-    _set_session(res, user, back_to=back_to)
+    _set_session(res, user, back_to=back_to, sid=sid)
     return res
 
 
@@ -283,23 +289,26 @@ def api_auth_back(request: Request):
     back_to = getattr(request.state, "back_to", None)
     if not back_to:
         raise HTTPException(400, "子どもの端末で親に切り替えているときだけ使えます。")
+    auth.end_switch(getattr(request.state, "sid", None), "back")
     res = JSONResponse({"user": back_to, "home": "/kid"})
     _set_session(res, back_to, generation=getattr(request.state, "epoch", None))
     return res
 
 
 @app.post("/api/auth/logout")
-def api_auth_logout():
+def api_auth_logout(request: Request):
+    # 切り替え中なら、その切り替えを「ログアウトした」にする（遅れて届く親の Cookie を使えなくする）
+    auth.end_switch(getattr(request.state, "sid", None), "logout")
     res = JSONResponse({"ok": True})
     res.delete_cookie(auth.COOKIE, path="/", secure=True, httponly=True, samesite="lax")
     return res
 
 
 @app.post("/api/auth/logout_all", dependencies=[Depends(parent_only)])
-def api_auth_logout_all():
+def api_auth_logout_all(request: Request):
     """すべての端末をログアウトさせる（この端末も含む）。"""
     auth.logout_all()
-    return api_auth_logout()
+    return api_auth_logout(request)
 
 
 @app.get("/")
