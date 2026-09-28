@@ -281,7 +281,10 @@ def _body(item: Dict[str, Any], status: str = "todo") -> Dict[str, Any]:
         },
         "reminders": {
             "useDefault": False,
-            "overrides": [{"method": "popup", "minutes": m} for m in config.reminders],
+            "overrides": [
+                {"method": "popup", "minutes": m}
+                for m in (config.reminders_timed if t0 else config.reminders_allday)
+            ],
         },
     }
 

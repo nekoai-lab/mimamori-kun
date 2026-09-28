@@ -15,14 +15,16 @@ def _children():
     return out
 
 
-def _reminders():
-    raw = os.getenv("MIMAMORI_REMINDERS", "1200,60")
+def _reminders(name="MIMAMORI_REMINDERS_TIMED", default=(1200, 60)):
+    raw = os.getenv(name)
+    if raw is None:
+        raw = os.getenv("MIMAMORI_REMINDERS", "") if name == "MIMAMORI_REMINDERS_TIMED" else ""
     out = []
     for chunk in raw.split(","):
         chunk = chunk.strip()
         if chunk.isdigit():
             out.append(int(chunk))
-    return out or [1200, 60]
+    return out or list(default)
 
 
 @dataclass
@@ -33,7 +35,10 @@ class Config:
     calendar_id: str = field(default_factory=lambda: os.getenv("MIMAMORI_CALENDAR_ID", "primary"))
     timezone: str = field(default_factory=lambda: os.getenv("MIMAMORI_TZ", "Asia/Tokyo"))
     children: list = field(default_factory=_children)
-    reminders: list = field(default_factory=_reminders)
+    reminders_timed: list = field(default_factory=_reminders)
+    reminders_allday: list = field(
+        default_factory=lambda: _reminders("MIMAMORI_REMINDERS_ALLDAY", (360,))
+    )
 
     @property
     def children_label(self) -> str:
