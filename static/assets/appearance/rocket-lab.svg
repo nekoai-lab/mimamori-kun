@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-hidden="true">
+  <!-- ロケットラボの相棒：非対称アンテナのカプセル型ロボ（オリジナル） -->
+  <path d="M52 30 L46 14" stroke="#2454B8" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="45" cy="12" r="6" fill="#F2A33A"/>
+  <path d="M72 30 L76 22" stroke="#2454B8" stroke-width="4" stroke-linecap="round"/>
+  <rect x="73" y="16" width="9" height="7" rx="2" fill="#7FD6C2"/>
+  <rect x="24" y="28" width="72" height="62" rx="30" fill="#FFFFFF" stroke="#152744" stroke-width="4"/>
+  <rect x="34" y="42" width="52" height="30" rx="15" fill="#DCE7FF"/>
+  <circle cx="49" cy="57" r="5" fill="#152744"/>
+  <circle cx="71" cy="57" r="5" fill="#152744"/>
+  <path d="M53 66 Q60 71 67 66" fill="none" stroke="#152744" stroke-width="3" stroke-linecap="round"/>
+  <rect x="16" y="54" width="10" height="18" rx="5" fill="#2454B8"/>
+  <rect x="94" y="54" width="10" height="18" rx="5" fill="#2454B8"/>
+  <rect x="40" y="88" width="12" height="14" rx="4" fill="#152744"/>
+  <rect x="68" y="88" width="12" height="14" rx="4" fill="#152744"/>
+  <circle cx="98" cy="30" r="7" fill="#F2A33A"/>
+  <ellipse cx="98" cy="30" rx="12" ry="3.5" fill="none" stroke="#7FD6C2" stroke-width="2" transform="rotate(-18 98 30)"/>
+</svg>

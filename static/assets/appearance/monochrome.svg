@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-hidden="true">
+  <!-- モノクロの相棒：カプセル型を小さな線画に（オリジナル） -->
+  <g fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M58 32 L54 20"/>
+    <circle cx="53" cy="17" r="3.5"/>
+    <rect x="30" y="32" width="60" height="54" rx="26"/>
+    <path d="M47 58 h6 M67 58 h6"/>
+    <path d="M54 70 h12"/>
+    <path d="M44 86 v12 M76 86 v12"/>
+  </g>
+</svg>
