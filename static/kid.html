@@ -232,7 +232,7 @@ function showChild(){
   $("#today").replaceChildren();$("#records-list").replaceChildren();feedback("");
   $("#board").textContent="だいしを よみこんでいるよ";$("#board").classList.remove("full");
   $("#greeting").textContent="きたね！";$("#companion").classList.remove("resting");
-  companionName="まる";readingPolicy={};paintName();$("#companion-input").value="";$("#name-preview").textContent="まる";$("#name-status").textContent="";$("#save-name").disabled=false;
+  companionName="まる";savedName="まる";readingPolicy={};paintName();$("#companion-input").value="";$("#name-preview").textContent="まる";$("#name-status").textContent="";$("#save-name").disabled=false;
   const saved=lsGet(OUT_KEY,[]);
   if(Array.isArray(saved))for(const j of saved){if(j.child===child&&!jobs.has(jobKey(j.child,j.item.id))){j.state="waiting";jobs.set(jobKey(j.child,j.item.id),j);}}
   try{Promise.resolve(window.Appearance?.setChild(child)).catch(()=>{});}catch(e){}
@@ -423,18 +423,24 @@ function paintName(){document.querySelectorAll("[data-companion-name]").forEach(
 let nameVersion=0;
 async function loadName(){
   const s=scope(),version=++nameVersion;
-  try{if(!window.CompanionStore?.read)throw new Error("unconnected");const settings=await window.CompanionStore.read(child);if(!current(s)||version!==nameVersion)return;companionName=typeof settings?.companion_name==="string"&&settings.companion_name.trim()?settings.companion_name:"まる";readingPolicy=settings?.reading_policy||{};paintName();$("#companion-input").value=companionName;$("#name-preview").textContent=companionName;}catch(e){if(current(s))$("#name-status").textContent="なまえを よみこめなかったよ。いまは まる だよ";}
+  try{if(!window.CompanionStore?.read)throw new Error("unconnected");const settings=await window.CompanionStore.read(child);if(!current(s)||version!==nameVersion)return;companionName=typeof settings?.companion_name==="string"&&settings.companion_name.trim()?settings.companion_name:"まる";readingPolicy=settings?.reading_policy||{};savedName=companionName;paintName();$("#companion-input").value=companionName;$("#name-preview").textContent=companionName;}catch(e){if(current(s))$("#name-status").textContent="なまえを よみこめなかったよ。いまは まる だよ";}
 }
 function previewName(){const name=$("#companion-input").value.trim()||"まる";$("#name-preview").textContent=name;return name;}
-$("#companion-input").addEventListener("input",previewName);
+// 覚えた名前（保存が確かめられたもの）。入力がこれと違えば「まだ おぼえていない」と出す（UX_REVIEW PR-39 F1）
+let savedName="まる";
+const NAME_UNSAVED="まだ おぼえていないよ。「このなまえにする」を おしてね。";
+function markName(){const name=previewName();$("#name-status").textContent=name===savedName?"":NAME_UNSAVED;}
+$("#companion-input").addEventListener("input",markName);
 $("#hear-name").addEventListener("click",()=>say(previewName()));
-$("#reset-name").addEventListener("click",()=>{$("#companion-input").value="まる";previewName();});
+$("#reset-name").addEventListener("click",()=>{$("#companion-input").value="まる";markName();});
 $("#name-form").addEventListener("submit",async e=>{
   e.preventDefault();if(!child||$("#save-name").disabled)return;
   const name=previewName();if([...name].length>12){$("#name-status").textContent="12文字までに してね";return;}
   const s=scope();++nameVersion;companionName=name;paintName();$("#save-name").disabled=true;
   $("#name-status").textContent="なまえを おぼえているよ";
-  try{if(!window.CompanionStore?.write)throw new Error("unconnected");await window.CompanionStore.write(child,{companion_name:name});if(current(s))$("#name-status").textContent="このなまえを おぼえたよ";}
+  try{if(!window.CompanionStore?.write)throw new Error("unconnected");await window.CompanionStore.write(child,{companion_name:name});if(current(s)){savedName=name;
+    // 待つあいだに入力を変えていたら、先に送った名前の成功を、いまの名前の成功として出さない
+    $("#name-status").textContent=previewName()===name?"このなまえを おぼえたよ":NAME_UNSAVED;}}
   catch(e){if(current(s))$("#name-status").textContent="この画面では変えたけれど、まだ覚えられていないよ。もういちど「このなまえにする」で ためしてね";}
   finally{if(current(s))$("#save-name").disabled=false;}
 });

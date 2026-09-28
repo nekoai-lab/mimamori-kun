@@ -620,3 +620,25 @@ def test_recent_undo_focus_fallback_skips_disabled_tasks(available):
       const other=$('#today').children.find(row=>row.dataset.itemId==='other');
       assert.equal(document.activeElement,AVAILABLE==='other'?other.querySelector('.finish'):$('#talk'));
     '''.replace('AVAILABLE', json.dumps(available)))
+
+
+def test_name_success_is_not_shown_for_an_unsaved_name():
+    """UX_REVIEW PR-39 F1：保存したあとに名前を変えたら「おぼえたよ」を残さない。待つあいだに変えた場合も同じ。"""
+    run_js('''
+      setup();window.CompanionStore={write:async()=>({})};
+      $('#companion-input').value='ぴよ';await $('#name-form').fire('submit');
+      assert.equal($('#name-status').textContent,'このなまえを おぼえたよ');
+      $('#companion-input').value='ぴよこ';await $('#companion-input').fire('input');
+      assert.equal($('#name-status').textContent,'まだ おぼえていないよ。「このなまえにする」を おしてね。');
+      $('#companion-input').value='ぴよ';await $('#companion-input').fire('input');
+      assert.equal($('#name-status').textContent,'');
+      await $('#reset-name').fire('click');
+      assert.equal($('#name-status').textContent,'まだ おぼえていないよ。「このなまえにする」を おしてね。');
+      // 保存を待つあいだに入力を変えた：先に送った名前の成功を、いまの名前の成功として出さない
+      const d=deferred();window.CompanionStore={write:()=>d.promise};
+      $('#companion-input').value='もも';const sending=$('#name-form').fire('submit');
+      $('#companion-input').value='もこ';await $('#companion-input').fire('input');
+      d.resolve({});await sending;
+      assert.equal($('#name-status').textContent,'まだ おぼえていないよ。「このなまえにする」を おしてね。');
+      assert.equal(savedName,'もも');
+    ''')

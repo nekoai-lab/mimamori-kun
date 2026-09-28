@@ -491,7 +491,10 @@ function previewReading(){
 // 学年・ふりがなの保存（塊 F：/api/child-settings）。表示例を変えただけでは保存しない。保存するのは「保存する」のときだけ。
 // 子を切り替えたら、その子の保存済みの値を読み直す（前の子の打ちかけを持ち越さない）。
 const GRADE_CODES=["","e1","e2","e3","e4","e5","e6","j1","j2","j3"];
-let readingSeq=0, readingLoaded=false;
+let readingSeq=0, readingLoaded=false, readingSaved="";
+// 保存済みの値と、いまフォームにある値。違えば「まだ保存していません」を出す（UX_REVIEW PR-39 F1）
+const READING_UNSAVED="まだ保存していません。「保存する」で確定します。";
+function readingValues(){return JSON.stringify([$("#schoolGrade").value,$("#kanjiScope").value,$("#rubyMode").value]);}
 function setReadingControls(on){for(const id of ["schoolGrade","kanjiScope","rubyMode","readingSave"]) $("#"+id).disabled=!on;}
 async function loadReading(){
   const child=$("#readingChild").value, seq=++readingSeq;
@@ -505,7 +508,7 @@ async function loadReading(){
     $("#schoolGrade").value=String(Math.max(0,GRADE_CODES.indexOf(st.school_grade||"")));
     $("#kanjiScope").value=st.kanji_scope==="current_grade"?"current_grade":"previous_grade";
     $("#rubyMode").value=st.ruby_mode==="all"?"all":"auto";
-    readingLoaded=true; setReadingControls(true); $("#readingStatus").textContent=""; previewReading();
+    readingLoaded=true; readingSaved=readingValues(); setReadingControls(true); $("#readingStatus").textContent=""; previewReading();
   }catch(err){
     if(seq!==readingSeq) return;
     // 読めないまま保存すると、知らない値を上書きしてしまう。読めるまで保存させない
@@ -517,13 +520,14 @@ $("#readingForm").addEventListener("submit",async e=>{
   e.preventDefault();
   const child=$("#readingChild").value, seq=readingSeq;
   if(!child||!readingLoaded) return;
-  const grade=GRADE_CODES[Number($("#schoolGrade").value)]||null;
+  const grade=GRADE_CODES[Number($("#schoolGrade").value)]||null, sent=readingValues();
   setReadingControls(false); $("#readingStatus").textContent="保存しています…";
   try{
     await readJSON("/api/child-settings",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({child,school_grade:grade,kanji_scope:$("#kanjiScope").value,ruby_mode:$("#rubyMode").value})});
     if(seq!==readingSeq) return;
-    $("#readingStatus").textContent="「"+child+"」の学年・ふりがなを保存しました。";
+    readingSaved=sent;
+    $("#readingStatus").textContent=readingValues()===sent?"「"+child+"」の学年・ふりがなを保存しました。":READING_UNSAVED;
   }catch(err){
     if(seq!==readingSeq) return;
     $("#readingStatus").textContent="保存できませんでした。通信を確かめて、もう一度「保存する」を押してください。";
@@ -532,6 +536,8 @@ $("#readingForm").addEventListener("submit",async e=>{
 $("#readingForm").addEventListener("change",e=>{
   if(e.target.id==="readingChild"){ loadReading(); return; }
   previewReading();
+  // 表示例を変えただけでは保存しない。保存済みの値と違うあいだは、成功の文を残さず「まだ保存していません」
+  if(readingLoaded) $("#readingStatus").textContent=readingValues()===readingSaved?"":READING_UNSAVED;
 });
 previewReading();
 

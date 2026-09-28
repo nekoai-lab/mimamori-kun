@@ -377,6 +377,12 @@ const post=calls.find(c=>c.method==='POST');
 assert.equal(post.url,'/api/child-settings');
 assert.equal(JSON.stringify(post.body),JSON.stringify({child:'子A',school_grade:'e4',kanji_scope:'current_grade',ruby_mode:'all'}));
 assert.match(el('#readingStatus').textContent,/保存しました/);
+// 保存したあとに値を変えたら、成功の文を残さない（UX_REVIEW PR-39 F1）。元に戻したら消える
+el('#rubyMode').value='auto'; el('#readingForm').handlers.change[0]({target:{id:'rubyMode'}});
+assert.equal(el('#readingStatus').textContent,'まだ保存していません。「保存する」で確定します。');
+el('#rubyMode').value='all'; el('#readingForm').handlers.change[0]({target:{id:'rubyMode'}});
+assert.equal(el('#readingStatus').textContent,'');
+assert.equal(calls.filter(c=>c.method==='POST').length,1);             // 変えただけでは送らない
 // 保存に失敗したら、保存できたと言わない。もう一度押せる
 responses.set('/api/child-settings',[reply({detail:'x'},500)]);
 await el('#readingForm').handlers.submit[0]({preventDefault(){}});
