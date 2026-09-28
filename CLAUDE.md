@@ -41,3 +41,4 @@
 - **子ども・学校名・氏名が写る実物は公開しない**（public リポジトリ。`.gitignore` の `samples/real/`・`asetts/`・`.data/` を守る）。鍵は `.env`（変数名だけ確認する）
 - テストはまだない（`tools/check_extract.py` は手で動かす確認）。本番に出す前に pytest と CI を足す
 - public なので、コミットは noreply アドレス（REPOS.md の置き場所のルール）
+- **UX レビューを書くとき（ChatGPT・Codex）は `tasks/current.md` を変更しない。書き込むのは `design/inbox/UX_REVIEW.md` だけ**（UX_RULES.md「受け渡し」）
