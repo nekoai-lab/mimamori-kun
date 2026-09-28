@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja">
+<html lang="ja" data-audience="parent">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@700&family=Noto+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <script src="/static/theme.js"></script>
+<link rel="stylesheet" href="/static/appearance.css">
 <script src="/static/who.js" defer></script>
 <style>
 :root{
@@ -35,9 +36,9 @@ body{margin:0;background:var(--paper);color:var(--ink);
  font-family:"Noto Sans JP",system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;
  font-size:15px;line-height:1.7;-webkit-font-smoothing:antialiased}
 a{color:inherit}
-.wrap{max-width:860px;margin:0 auto;padding:0 18px 90px}
+.wrap{max-width:760px;margin:0 auto;padding:0 18px 90px}
 header{position:sticky;top:0;z-index:10;background:var(--paper);border-bottom:1px solid var(--line)}
-.hdr{max-width:860px;margin:0 auto;padding:13px 18px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.hdr{max-width:760px;margin:0 auto;padding:13px 18px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
 h1{font-family:"Zen Old Mincho",serif;font-size:19px;margin:0;letter-spacing:.05em}
 .date{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink-3);letter-spacing:.06em}
 .nav{flex-basis:100%;display:flex;gap:6px;overflow-x:auto}
@@ -54,10 +55,6 @@ h1{font-family:"Zen Old Mincho",serif;font-size:19px;margin:0;letter-spacing:.05
 .filters button{font:inherit;font-size:12.5px;padding:4px 13px;border:1px solid var(--line-strong);
  background:transparent;color:var(--ink-2);border-radius:999px;cursor:pointer}
 .filters button[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink);font-weight:700}
-.pts{margin-left:auto;display:flex;gap:8px;font-size:12.5px;color:var(--ink-2);align-items:center}
-.pt{border:1px solid var(--line);border-radius:999px;padding:3px 11px;background:var(--surface)}
-.pt b{font-family:"IBM Plex Mono",monospace;font-size:13px}
-
 /* 子が入れたものの知らせ（D-62） */
 #notice{margin:12px 0 0;padding:11px 13px;border:1px solid var(--accent);border-radius:12px;
  background:var(--accent-soft)}
@@ -192,36 +189,59 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
 .who-face{display:grid;place-items:center;width:52px;height:52px;flex:none;border-radius:50%;
   background:var(--who-color);color:#fff;font-size:24px}
 @media (prefers-reduced-motion:no-preference){.who-pick{transition:background .15s}}
+/* A 未導入でも読める親画面。ナビ本体は A が差込先に描く。 */
+#headline{font-family:inherit;font-size:clamp(24px,5vw,32px);line-height:1.4;margin:8px 0}
+#freshness,.reason{font-size:13px;color:var(--ink-2)}
+#conclusion p{margin:8px 0}
+details{margin:20px 0;padding:12px;border:1px solid var(--line-strong);border-radius:10px}
+summary{cursor:pointer;font-weight:700;min-height:44px;display:list-item;padding:8px}
+.notice-card{padding:12px 0;border-bottom:1px solid var(--line-strong)}
+.notice-card:last-child{border-bottom:0}
+.notice-card ul{display:block!important}
+.notice-card li{display:block!important;overflow-wrap:anywhere}
+.reason{font-weight:700;margin:0 0 6px;color:var(--late-ink)}
+.row{display:block;overflow-wrap:anywhere}
+.row .chip{display:inline-block;margin-bottom:6px}
+.acts{margin-top:10px;flex-wrap:wrap}
+button,input,select{max-width:100%}
+button,.acts button,.filters button{min-height:44px}
+button:focus-visible,a:focus-visible,summary:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+#readingForm label{display:block;margin:10px 0}
+#readingPreview{line-height:2.5}
+#readingForm select,#reload,.notice-card button{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line-strong);border-radius:6px;padding:8px}
+[data-family-nav]:not(:empty) + .fallback-links{display:none}
+#exceptions{margin-top:16px}
+#actionMsg{color:var(--late-ink)}
 </style>
 </head>
 <body>
-<header>
-  <div class="hdr">
-    <h1>みまもりくん</h1>
-    <span class="date" id="today"></span>
-    <nav class="nav" aria-label="画面を切り替える">
-      <a href="/">撮る</a>
-      <a href="/board" class="on" aria-current="page">一覧</a>
-      <a href="/schedule">予定表</a>
-      <a href="/plan">計画</a>
-      <a href="/kid">やりとり</a>
-      <a href="/reward">ごほうび</a>
-      <button class="theme" id="theme" type="button">☾ 暗く</button>
-    </nav>
-  </div>
-</header>
+<header><div class="hdr"><h1>みまもりくん — 親の一覧</h1></div></header>
 <div id="demo"></div>
-
-<div class="wrap">
-  <div class="filters">
-    <button data-f="all" aria-pressed="true">全員</button>
-    <span id="kidbtns"></span>
-    <button data-f="done" aria-pressed="false">済も表示</button>
-    <span class="pts" id="pts"></span>
-  </div>
-
-  <div id="notice" hidden></div>
-
+<main class="wrap">
+  <p class="date" id="today">日付を確認しています</p>
+  <section id="conclusion" aria-live="polite" aria-atomic="true">
+    <h2 id="headline">確認しています</h2>
+    <p id="reason">登録済みの予定と新しい知らせを取得しています。</p>
+    <p id="freshness"></p>
+  </section>
+  <button id="reload" type="button">再読込</button>
+  <p id="actionMsg" role="alert"></p>
+  <div id="exceptions" class="list"></div>
+  <section id="notice" aria-label="新しい知らせ" hidden></section>
+  <details id="allPlans">
+    <summary>すべての予定を見る</summary>
+    <p>取得範囲は過去14日〜未来14日の登録済み予定です。それより前の未完了や、まだ撮っていない紙は含みません。</p>
+    <div class="filters">
+      <button data-f="all" aria-pressed="true">全員</button>
+      <span id="kidbtns"></span>
+      <button data-f="done" aria-pressed="false">済も表示</button>
+    </div>
+    <div id="body"></div>
+  </details>
+  <details id="management">
+    <summary>メニュー・追加・管理</summary>
+    <div data-profile-menu></div>
+    <div data-appearance-picker></div>
   <button class="addtoggle" id="addtoggle" type="button" aria-expanded="false">＋ 手で足す</button>
   <form class="add" id="add" hidden>
     <input type="text" id="addtitle" placeholder="件名（例：算数ドリル p.12）" required>
@@ -274,8 +294,20 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
     <div class="ypout" id="ypout"></div>
   </div>
 
-  <div id="body"></div>
-
+  <section aria-labelledby="readingTitle">
+    <h2 id="readingTitle">学年・ふりがな</h2>
+    <p id="readingUnavailable">設定の保存はまだ利用できません。以下は表示例を試すフォームで、保存済みの設定ではありません。</p>
+    <form id="readingForm" aria-describedby="readingUnavailable">
+      <label>子ども <select id="readingChild" required></select></label>
+      <label>学年 <select id="schoolGrade"><option value="0">未設定</option><option value="1">小1</option><option value="2">小2</option><option value="3">小3</option><option value="4">小4</option><option value="5">小5</option><option value="6">小6</option><option value="7">中1</option><option value="8">中2</option><option value="9">中3</option></select></label>
+      <label>漢字を使う範囲 <select id="kanjiScope"><option value="previous_grade">前学年まで</option><option value="current_grade">今の学年まで</option></select></label>
+      <label>ふりがな <select id="rubyMode"><option value="auto">学年に合わせる</option><option value="all">漢字に広く付ける</option></select></label>
+      <p id="readingPreview" aria-live="polite"></p>
+      <p>表示例のみです。4月にも自動で学年は変えません。</p>
+      <button type="submit" disabled>保存する（まだ利用できません）</button>
+    </form>
+  </section>
+  <section id="systemNotices" aria-label="運用のお知らせ"></section>
   <footer>
     <a href="https://calendar.google.com/" target="_blank" rel="noopener">Google カレンダーで開く</a>
     <span id="meta"></span>
@@ -285,7 +317,12 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
       <span class="auth-msg" id="authMsg" role="alert"></span>
     </span>
   </footer>
-</div>
+  </details>
+  <div data-family-nav></div>
+  <p class="fallback-links"><a href="/?mode=parent">撮る</a> · <a href="/reward?view=parent">ごほうび</a> · <a href="/schedule">予定表</a> · <a href="/plan">計画</a> · <a href="/kid">やりとり</a></p>
+  <button class="theme" id="theme" type="button">☾ 暗く</button>
+</main>
+<script src="/static/appearance.js"></script>
 
 <script>
 /* ---- ログアウト（#16） ---- */
@@ -316,30 +353,98 @@ function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","
 
 function fmt(iso){
   // 端末のタイムゾーンに引きずられないよう、文字列のまま扱う
+  if(typeof iso!=="string" || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "日付不明";
   const [y,m,dd]=iso.split("-").map(Number);
   const w="日月火水木金土"[new Date(Date.UTC(y,m-1,dd)).getUTCDay()];
   return m+"/"+dd+"（"+w+"）";
 }
 
-async function load(){
-  try{
-    const [t,c]=await Promise.all([
-      fetch("/api/tasks").then(r=>r.json()),
-      fetch("/api/config").then(r=>r.json()).catch(()=>({}))
-    ]);
-    if(t.detail) throw new Error(t.detail);
-    data=t;
-    $("#today").textContent=fmt(t.today);
-    if(c.calendar_id) $("#meta").textContent="反映先: "+c.calendar_id;
-    if(c.service_account==="(デモモード)"){
-      $("#demo").innerHTML='<div class="demo">デモモードです。ダミーのタスクを表示しています（MIMAMORI_DEMO=1）</div>';
-    }
-    renderKidButtons();
-    render();
-  }catch(e){
-    $("#body").innerHTML='<div class="err">'+esc(e.message||"読み込みに失敗しました")+"</div>";
-  }
+let notices=[], loadVersion=0;
+const sources={tasks:{state:"loading",at:null},notices:{state:"loading",at:null}};
+async function readJSON(url, options){
+  const r=await fetch(url, options);
+  const j=await r.json();
+  if(!r.ok || !j || j.detail || j.status==="error") throw new Error(j?.detail||j?.error||"取得・更新できませんでした");
+  return j;
 }
+function exceptionReason(it){
+  if(["done","rejected"].includes(it.status)) return "";
+  if(it.status==="pending") return "登録の確認が必要です";
+  if(!["todo","doing"].includes(it.status)) return "";
+  if(it.days_left<0 && ["homework","deadline","bring"].includes(it.kind)) return "⚠ 期限を過ぎています";
+  if(it.days_left===0 && ["deadline","bring"].includes(it.kind)) return "今日の提出・持ち物です";
+  return "";
+}
+function exceptions(items){
+  return items.filter(it=>exceptionReason(it)).sort((a,b)=>
+    (a.status!=="pending")-(b.status!=="pending") || a.days_left-b.days_left);
+}
+function dailyNotices(){return notices.filter(n=>["kid_added","redeem"].includes(n.kind));}
+function renderConclusion(){
+  const failed=Object.keys(sources).filter(k=>sources[k].state==="error");
+  const loading=Object.values(sources).some(s=>s.state==="loading");
+  const ex=exceptions(data?.items||[]), news=dailyNotices();
+  let headline, reason;
+  if(loading){headline="確認しています"; reason="登録済みの予定と新しい知らせを取得しています。";}
+  else if(failed.length){
+    headline=failed.length===2 && Object.values(sources).some(s=>s.at)?"最新の状態を確認できません":"確認できていない情報があります";
+    reason=failed.map(k=>k==="tasks"?"予定":"新しい知らせ").join("・")+"を取得できませんでした。再読込してください。前回取得した情報があれば残しています。";
+  }else if(ex.length){headline="確認すること "+ex.length+"件"; reason=exceptionReason(ex[0]);}
+  else if(news.length){headline="新しい知らせがあります";reason=news.some(n=>n.kind==="kid_added")?"子どもが登録した予定の承認は不要です。":"ごほうびの申込があります。";}
+  else {headline="いま確認することはありません";reason="登録済みの予定と新しい知らせを確認しました。";}
+  $("#headline").textContent=headline;
+  $("#reason").textContent=reason;
+  $("#freshness").textContent=Object.entries(sources).map(([k,s])=>(k==="tasks"?"予定":"知らせ")+": "+(s.at? s.at+"取得":"未取得")+(s.state==="error"?"（最新を確認できません）":"")).join(" ／ ");
+}
+function validPayload(key,j){
+  if(!Array.isArray(j.items)) return false;
+  if(key==="tasks") return /^\d{4}-\d{2}-\d{2}$/.test(j.today||"") &&
+    Array.isArray(j.children) && j.children.every(n=>typeof n==="string") &&
+    j.items.every(it=>it && typeof it.id==="string" && it.id && typeof it.kind==="string" &&
+      ["pending","todo","doing","done","rejected"].includes(it.status) && Number.isFinite(it.days_left));
+  return j.items.every(n=>n && typeof n.id==="string" && n.id && typeof n.kind==="string" &&
+    (n.items===undefined || (Array.isArray(n.items) && n.items.every(i=>i && typeof i.id==="string" && i.id))));
+}
+async function load(){
+  const version=++loadVersion;
+  Object.values(sources).forEach(s=>s.state="loading");
+  renderConclusion();
+  await Promise.all(["tasks","notices"].map(async key=>{
+    try{
+      const j=await readJSON(key==="tasks"?"/api/tasks":"/api/notices?unseen=true");
+      if(!validPayload(key,j)) throw new Error("形式が不正です");
+      if(version!==loadVersion) return;
+      if(key==="tasks"){
+        data=j; $("#today").textContent=fmt(j.today); renderKidButtons();
+      }else notices=j.items;
+      sources[key]={state:"ready",at:new Date().toLocaleString("ja-JP",{timeZone:"Asia/Tokyo"})+"（日本時間）"};
+    }catch(e){if(version!==loadVersion) return; sources[key].state="error";}
+    if(version===loadVersion) render();
+  }));
+}
+$("#reload").addEventListener("click",load);
+// デモ印だけは予定・知らせの結論とは独立。設定取得失敗を安全表示に使わない。
+readJSON("/api/config").then(c=>{
+  if(c.calendar_id) $("#meta").textContent="反映先: "+c.calendar_id;
+  if(c.service_account==="(デモモード)") $("#demo").innerHTML='<div class="demo">デモ — ダミーの予定を表示しています</div>';
+}).catch(()=>{});
+
+function previewReading(){
+  const grade=Number($("#schoolGrade").value);
+  const scope=grade-($("#kanjiScope").value==="previous_grade"?1:0);
+  const words=[["今日","きょう",2],["学校","がっこう",1],["音読","おんどく",2]];
+  const rendered=words.map(([word,reading,level])=> $("#rubyMode").value==="all"||scope<level?
+    "<ruby>"+esc(word)+"<rt>"+esc(reading)+"</rt></ruby>":esc(word));
+  $("#readingPreview").innerHTML="表示例："+rendered[0]+"は"+rendered[1]+"で"+rendered[2]+"をします。";
+}
+$("#readingForm").addEventListener("submit",e=>e.preventDefault());
+$("#readingForm").addEventListener("change",e=>{
+  if(e.target.id==="readingChild"){
+    $("#schoolGrade").value="0"; $("#kanjiScope").value="previous_grade"; $("#rubyMode").value="auto";
+  }
+  previewReading();
+});
+previewReading();
 
 function renderKidButtons(){
   $("#kidbtns").innerHTML=data.children.map((n,i)=>
@@ -348,6 +453,9 @@ function renderKidButtons(){
   const sel=$("#addchild"), keep=sel.value;
   sel.innerHTML=data.children.map(n=>"<option>"+esc(n)+"</option>").join("");
   if(keep) sel.value=keep;
+  const reading=$("#readingChild"), child=reading.value;
+  reading.innerHTML=data.children.map(n=>"<option>"+esc(n)+"</option>").join("");
+  if(data.children.includes(child)) reading.value=child;
   // 打ちかけの日付を、タブに戻った拍子に上書きしない。
   if(!$("#adddate").value) $("#adddate").value=data.today;
 }
@@ -420,93 +528,73 @@ function group(items){
 }
 
 function render(){
+  renderConclusion();
+  renderNotices();
+  if(!data) return;
+  $("#exceptions").innerHTML=exceptions(data.items).map(it=>rowHtml(it,exceptionReason(it))).join("");
   let items=data.items;
   if(filter.startsWith("kid:")) items=items.filter(i=>i.child===filter.slice(4));
-
-  $("#pts").innerHTML=data.children.map(n=>
-    '<span class="pt">'+esc(n)+' <b>'+(data.points[n]||0)+"</b>pt</span>").join("");
-
   const g=group(items);
-  const secs=[
-    ["late","遅れている",true],["today","今日",false],["tomorrow","明日",false],
-    ["week","今週",false],["later","その先",false]
-  ];
+  const secs=[["pending","登録の確認待ち"],["late","期限を過ぎた予定"],["today","今日"],["tomorrow","明日"],
+    ["week","今週"],["later","その先"],["plan","行事"]];
+  if(showDone) secs.push(["done","対応済み"]);
   let h="";
-  if(g.pending.length){
-    h+='<h2 class="wait">承認まち<span class="cnt">'+g.pending.length+"</span></h2>";
-    h+='<div class="note">子どもが撮ったものです。通すまで、子のやることには出ません。</div>';
-    h+='<div class="list">'+g.pending.map(rowHtml).join("")+"</div>";
+  for(const [key,label] of secs){
+    if(g[key].length) h+='<h2>'+label+'<span class="cnt">'+g[key].length+'</span></h2><div class="list">'+g[key].map(it=>rowHtml(it)).join("")+'</div>';
   }
-  const open=g.late.length+g.today.length+g.tomorrow.length+g.week.length+g.later.length;
-  // 承認まちがあるのに「確認しなくて大丈夫」と出すと、やるべきことと食い違う。
-  if(open===0&&!g.pending.length){
-    h+='<div class="empty"><b>抜けはありません</b>確認しなくて大丈夫です。</div>';
-  }
-  for(const [k,label,late] of secs){
-    if(!g[k].length) continue;
-    h+='<h2'+(late?' class="late"':'')+'>'+label+'<span class="cnt">'+g[k].length+"</span></h2>";
-    h+='<div class="list">'+g[k].map(rowHtml).join("")+"</div>";
-  }
-  if(g.plan.length){
-    h+='<h2>予定<span class="cnt">'+g.plan.length+"</span></h2>";
-    h+='<div class="list">'+g.plan.map(rowHtml).join("")+"</div>";
-  }
-  if(showDone&&g.done.length){
-    h+='<h2>済<span class="cnt">'+g.done.length+"</span></h2>";
-    h+='<div class="list">'+g.done.map(rowHtml).join("")+"</div>";
-  }
-  $("#body").innerHTML=h;
-  document.querySelectorAll("[data-status]").forEach(b=>b.addEventListener("click",onStatus));
+  $("#body").innerHTML=h||'<p class="empty">この表示条件の予定はありません。</p>';
+}
+for(const selector of ["#exceptions","#body"]){
+  $(selector).addEventListener("click",e=>{
+    const btn=e.target.closest("[data-status]");
+    if(btn) onStatus({currentTarget:btn});
+  });
 }
 
-function rowHtml(it){
+function rowHtml(it,reason=""){
   const ki=data.children.indexOf(it.child);
-  const late=it.days_left<0&&it.status!=="done";
+  const late=exceptionReason(it).startsWith("⚠");
   return '<div class="row'+(late?" is-late":"")+(it.status==="done"?" is-done":"")+'" data-id="'+esc(it.id)+'">'
+    +(reason?'<p class="reason">'+esc(reason)+'</p>':"")
     +'<span class="chip k'+(ki===0?0:1)+'">'+esc(it.child||"？")+"</span>"
     +'<div class="main">'
-      +'<div class="ttl">'+esc(it.summary.replace(/^✓\s*/,"").replace(/^[^｜]*｜/,""))+"</div>"
+      +'<div class="ttl">'+esc(String(it.summary||it.title||"").replace(/^✓\s*/,"").replace(/^[^｜]*｜/,""))+"</div>"
       +'<div class="meta">'
-        +"<span>"+fmt(it.date)+(it.time?" "+esc(it.time):"")+"</span>"
+        +"<span>期限："+esc(fmt(it.date))+(it.time?" "+esc(it.time):"")+"</span>"
         +'<span class="kind">'+esc(KIND[it.kind]||it.kind||"—")+"</span>"
         +(late?'<span style="color:var(--late-ink);font-weight:700">'+Math.abs(it.days_left)+"日超過</span>":"")
         +(it.status==="doing"?'<span class="doing">やってる</span>':"")
-        +(it.points?'<span>'+it.points+"pt</span>":"")
         +(it.source==="kid"?'<span class="chip kid">子が入れた</span>':"")
       +"</div>"
       +(it.bring?'<div class="bring"><b>持ち物:</b> '+esc(it.bring)+"</div>":"")
     +"</div>"
     // 「やってる」は子が /kid で言うこと。親は見るだけで、代わりに申告しない。
     +(it.status==="pending"?'<div class="acts">'
-      +'<button class="ok" data-status="todo" data-id="'+esc(it.id)+'">通す</button>'
-      +'<button data-status="rejected" data-id="'+esc(it.id)+'">けす</button>'
+      +'<button class="ok" data-status="todo" data-id="'+esc(it.id)+'">登録する</button>'
+      +'<button data-status="rejected" data-id="'+esc(it.id)+'">除外する</button>'
     +"</div>"
     :it.kind==="event"?"":'<div class="acts">'
-      +'<button data-status="done" data-id="'+esc(it.id)+'" aria-pressed="'+(it.status==="done")+'">済</button>'
+      +'<button data-status="done" data-id="'+esc(it.id)+'" aria-pressed="'+(it.status==="done")+'">'+(it.status==="done"?"未対応に戻す":"対応済みにする")+'</button>'
     +"</div>")
   +"</div>";
 }
 
+const statusBusy=new Set();
 async function onStatus(e){
-  const btn=e.currentTarget;
-  const id=btn.dataset.id;
-  const it=data.items.find(x=>x.id===id);
-  if(!it) return;
+  const btn=e.currentTarget, id=btn.dataset.id;
+  const it=data?.items.find(x=>x.id===id);
+  if(!it || statusBusy.has(id)) return;
   const next=(it.status===btn.dataset.status)?"todo":btn.dataset.status;
-  btn.disabled=true;
+  statusBusy.add(id); btn.disabled=true;
+  $("#actionMsg").textContent="";
   try{
-    const res=await fetch("/api/status",{method:"POST",headers:{"Content-Type":"application/json"},
+    const result=await readJSON("/api/status",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({event_id:id,status:next})});
-    const j=await res.json();
-    if(!res.ok) throw new Error(j.detail||"更新に失敗しました");
+    if(result.status!==next) throw new Error("更新の結果を確認できませんでした");
     it.status=next;
-    if(next==="done") data.points[it.child]=(data.points[it.child]||0)+it.points;
-    else if(btn.dataset.status==="done") data.points[it.child]=Math.max(0,(data.points[it.child]||0)-it.points);
-    render();
-  }catch(err){
-    btn.disabled=false;
-    alert(err.message);
-  }
+    await load();
+  }catch(err){$("#actionMsg").textContent="更新できたか確認できません。再読込して状態を確認してください。";}
+  finally{statusBusy.delete(id);btn.disabled=false;}
 }
 
 // ---- まいにちのこと（定期タスク） ------------------------------------------
@@ -637,7 +725,7 @@ $("#ypread").addEventListener("click",async()=>{
     const j=await res.json();
     if(!res.ok) throw new Error(j.detail||"読み取れませんでした");
     $("#yptext").value=j.text;
-    $("#ypout").innerHTML='<p class="ex">'+j.pages+'ページ読みました。下の枠が読み取った中身です。おかしいところは直せます。</p>';
+    $("#ypout").innerHTML='<p class="ex">'+esc(j.pages)+'ページ読みました。下の枠が読み取った中身です。おかしいところは直せます。</p>';
     $("#ypcheck").click();
   }catch(err){ $("#ypout").innerHTML='<div class="ng">'+esc(err.message)+'</div>'; }
   btn.disabled=false;
@@ -658,8 +746,8 @@ $("#ypcheck").addEventListener("click",async()=>{
     if(j.check.examples.length){
       h+='<p class="ex">例: '+j.check.examples.map(e=>esc(e.date)+" は資料が「"+esc(e.label)+"」、実際は「"+esc(e.real)+"」（"+esc(e.title)+"）").join(" ／ ")+'</p>';
     }
-    h+='<p>読めた行 '+j.check.dated+'件 ／ 入れる候補 <strong>'+j.will_add+'件</strong>'
-      +'（家に関わる '+j.counts.family+' ・ 校内 '+j.counts.school+' ・ 休み '+j.counts.holiday+'）</p>';
+    h+='<p>読めた行 '+esc(j.check.dated)+'件 ／ 入れる候補 <strong>'+esc(j.will_add)+'件</strong>'
+      +'（家に関わる '+esc(j.counts.family)+' ・ 校内 '+esc(j.counts.school)+' ・ 休み '+esc(j.counts.holiday)+'）</p>';
     if(j.preview.length){
       h+='<p class="ex">はじめの数件: '+j.preview.slice(0,5).map(p=>esc(p.date)+" "+esc(p.title)).join(" ／ ")+'</p>';
     }
@@ -690,8 +778,8 @@ $("#ypgo").addEventListener("click",async()=>{
     const res=await fetch("/api/year_plan/register",{method:"POST",headers:{"Content-Type":"application/json"},body:ypBody(true)});
     const j=await res.json();
     if(!res.ok) throw new Error(j.detail||"入れられませんでした");
-    let h='<div class="okbox"><strong>'+j.created+'件 入れました。</strong>';
-    if(j.skipped) h+=' すでにあった '+j.skipped+'件は作りませんでした。';
+    let h='<div class="okbox"><strong>'+esc(j.created)+'件 入れました。</strong>';
+    if(j.skipped) h+=' すでにあった '+esc(j.skipped)+'件は作りませんでした。';
     h+='</div>';
     if(j.moved&&j.moved.length){
       h+='<p><strong>日にちが変わったかもしれないもの:</strong> 1件ずつ見て、直すものだけ押してください。</p><ul id="ypmoved">'
@@ -705,54 +793,52 @@ $("#ypgo").addEventListener("click",async()=>{
   btn.disabled=false;
 });
 
-// ---- 子が入れたものの知らせ ------------------------------------------------
-// 承認は挟まない（D-62）。挟むと、通し忘れた日は子のやることが空のまま終わる。
-// 代わりに、入ったことをここで知らせる。違っていたらその場で消せる。
-async function loadNotices(){
-  let list=[];
-  try{ list=(await fetch("/api/notices?unseen=true").then(r=>r.json())).items||[]; }
-  catch(e){ return; }
-  const box=$("#notice");
-  if(!list.length){ box.hidden=true; box.innerHTML=""; return; }
-  const n=list[0];                      // いちばん新しいものだけ出す。溜めて見せない
-  box.hidden=false;
-  box.innerHTML='<div class="hd"><b>'+esc(n.title)+"</b>"
-    +'<span class="when">'+esc((n.at||"").slice(5,16).replace("T"," "))+"</span>"
-    +'<button type="button" class="seen" data-n="'+esc(n.id)+'">見た</button></div>'
-    +"<ul>"+(n.items||[]).map(i=>"<li><span>"+esc(String(i.title).replace(/^[^｜]*｜/,""))+"</span>"
-        +'<button type="button" class="del" data-id="'+esc(i.id)+'">ちがう（消す）</button></li>').join("")+"</ul>"
-    +(list.length>1?'<div class="when">ほかに '+(list.length-1)+"件の知らせがあります</div>":"");
+// 通知の既読と、予定の対応済みは独立した操作。
+function noticeHtml(n){
+  const redeem=n.kind==="redeem", kid=n.kind==="kid_added";
+  return '<article class="notice-card"><div class="hd"><b>'+esc(redeem?"ごほうびの申込があります":n.title)+'</b>'
+    +'<span class="when">'+esc(n.at||"")+'</span></div><p>'+esc(n.body||"")+'</p>'
+    +(redeem?'<p><a href="/reward?view=parent">ごほうびの申込を確認する</a></p><p>既読にしても申込の対応は完了しません。</p>':"")
+    +(kid?'<p>承認は不要です。</p><details><summary>内容を確認</summary><ul>'+(n.items||[]).map(i=>
+      '<li>'+esc(i.title)+' — '+esc(i.date||"日付不明")+' <button type="button" class="cancel-task" data-id="'+esc(i.id)+'" data-title="'+esc(i.title)+'">この予定を取り消す</button></li>').join("")
+      +'</ul><a href="https://calendar.google.com/" target="_blank" rel="noopener">Google カレンダーで内容を修正する</a></details>':"")
+    +'<button type="button" class="seen" data-n="'+esc(n.id)+'">見た</button></article>';
 }
-
-$("#notice").addEventListener("click",async e=>{
-  const seen=e.target.closest(".seen"), del=e.target.closest(".del");
-  if(seen){
-    seen.disabled=true;
-    try{ await fetch("/api/notices/seen",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({id:seen.dataset.n})}); }catch(err){}
-    loadNotices();
-    return;
-  }
-  if(del){
-    del.disabled=true; del.textContent="消しています…";
-    try{
-      const r=await fetch("/api/status",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({event_id:del.dataset.id,status:"rejected"})});
-      if(!r.ok) throw new Error("ng");
-      del.closest("li").remove();
-      load();
-    }catch(err){ del.disabled=false; del.textContent="ちがう（消す）"; alert("消せませんでした"); }
-  }
-});
-
+function renderNotices(){
+  const news=dailyNotices();
+  $("#notice").hidden=!news.length;
+  $("#notice").innerHTML=news.length?'<h2>新しい知らせ '+news.length+'件</h2>'+news.map(noticeHtml).join(""):"";
+  $("#systemNotices").innerHTML=notices.filter(n=>!["kid_added","redeem"].includes(n.kind)).map(noticeHtml).join("");
+}
+const noticeBusy=new Set();
+async function onNotice(e){
+  const seen=e.target.closest(".seen"), cancel=e.target.closest(".cancel-task");
+  const btn=seen||cancel;
+  if(!btn) return;
+  const key=seen?"notice:"+seen.dataset.n:"task:"+cancel.dataset.id;
+  if(noticeBusy.has(key) || (cancel && statusBusy.has(cancel.dataset.id))) return;
+  if(cancel && !window.confirm('「'+cancel.dataset.title+'」を取り消しますか？')) return;
+  noticeBusy.add(key);btn.disabled=true;
+  if(cancel) statusBusy.add(cancel.dataset.id);
+  $("#actionMsg").textContent="";
+  try{
+    if(seen){
+      const j=await readJSON("/api/notices/seen",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:seen.dataset.n})});
+      if(!j.seen) throw new Error("既読を確認できませんでした");
+      notices=notices.filter(n=>n.id!==seen.dataset.n);
+    }else{
+      const result=await readJSON("/api/status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({event_id:cancel.dataset.id,status:"rejected"})});
+      if(result.status!=="rejected") throw new Error("取消の結果を確認できませんでした");
+      for(const n of notices) n.items=(n.items||[]).filter(i=>i.id!==cancel.dataset.id);
+    }
+    await load();
+  }catch(err){$("#actionMsg").textContent="変更できたか確認できません。再読込して確認し、もう一度お試しください。";}
+  finally{noticeBusy.delete(key); if(cancel) statusBusy.delete(cancel.dataset.id); btn.disabled=false;}
+}
+$("#notice").addEventListener("click",onNotice);
+$("#systemNotices").addEventListener("click",onNotice);
 load();
-loadNotices();
-
-// 子が /kid で終わらせたものを、こちらに戻ってきた時点で反映する。
-// 手でリロードしないと消えないと、消えたことに気づけない。
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden){ load(); loadNotices(); }
-});
+document.addEventListener("visibilitychange",()=>{if(!document.hidden) load();});
 </script>
 </body>
 </html>
