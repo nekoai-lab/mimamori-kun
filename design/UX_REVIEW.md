@@ -11,4 +11,4 @@ UX レビュー（ChatGPT）は PR ごとに `design/reviews/PR-<番号>.md` に
 | [#35](https://github.com/nekoai-lab/mimamori-kun/pull/35) | 親の一覧（/board、塊 D） | ux-pass でよい。D1追補は解消、その他は前回の判定のまま（2026-09-28、ChatGPT の再確認） | [PR-35.md](reviews/PR-35.md) |
 | [#36](https://github.com/nekoai-lab/mimamori-kun/pull/36) | A の結合（見出しの書体・ログアウトの強弱・「暗く」の位置） | ux-pass でよい。指定の3点に直すものなし（対象外の結合作業は持ち越し）（2026-09-28、ChatGPT） | [PR-36.md](reviews/PR-36.md) |
 | [#38](https://github.com/nekoai-lab/mimamori-kun/pull/38) | A の結合（2）（相棒の着替え・子の / のナビ・「もう一度確かめる」の余白・/login の色） | ux-pass でよい。指定の①〜④に直すものなし（2026-09-28、ChatGPT／Codex） | [PR-38.md](reviews/PR-38.md) |
-| [#39](https://github.com/nekoai-lab/mimamori-kun/pull/39) | 子ごとの設定の保存（塊 F：見た目・相棒の名前・学年とふりがな） | まだ ux-pass にはしない。直すもの F1（保存済みと未保存の区別）1件（2026-09-28、ChatGPT／Codex） | [PR-39.md](reviews/PR-39.md) |
+| [#39](https://github.com/nekoai-lab/mimamori-kun/pull/39) | 子ごとの設定の保存（塊 F：見た目・相棒の名前・学年とふりがな） | ux-pass でよい。F1は解消、その他は前回の判定のまま（2026-09-29、Codex の再確認） | [PR-39.md](reviews/PR-39.md) |
