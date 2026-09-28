@@ -98,7 +98,11 @@ def _read_companion_settings(child: str) -> Dict[str, Any]:
     サーバーで child をキーに読み、companion_name / companion_language_level
     を返す。チャット本文やクライアントの自由入力を設定として受け取らない。
     """
-    return {}
+    from mimamori import appearance   # 塊 F の設定（読めなければ既定で話す）
+    try:
+        return appearance.companion_settings(child)
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def _companion_settings(child: str) -> Dict[str, str]:

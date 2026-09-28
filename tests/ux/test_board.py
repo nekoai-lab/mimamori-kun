@@ -147,7 +147,7 @@ def test_layout_and_integration_contract():
     assert 'id="pts"' not in HTML and "it.points" not in SCRIPT
     assert "抜けはありません" not in HTML and "MIMAMORI_DEMO" not in HTML
     assert "過去14日〜未来14日" in HTML
-    assert "保存はまだ利用できません" in HTML
+    assert "/api/child-settings" in HTML and 'id="readingSave"' in HTML
     assert '<script>\n/* ---- ログアウト（#16） ---- */' in HTML
 
 
@@ -360,16 +360,59 @@ assert.equal(btn.disabled,false);
 """)
 
 
-def test_settings_preview_never_writes_or_leaks_child_draft():
+def test_reading_settings_load_for_the_child_and_save_only_on_submit():
+    """学年・ふりがな（塊 F）：子を選ぶとその子の保存済みの値を読む。表示例を変えても保存しない。保存は「保存する」だけ。"""
     run_js(r"""
+const A='/api/child-settings?child='+encodeURIComponent('子A');
+responses.set(A,[reply({settings:{school_grade:'e3',kanji_scope:'current_grade',ruby_mode:'all'}})]);
+el('#readingChild').value='子A'; await loadReading();
+assert.equal(el('#schoolGrade').value,'3');assert.equal(el('#kanjiScope').value,'current_grade');assert.equal(el('#rubyMode').value,'all');
+assert.equal(el('#readingSave').disabled,false);
 calls.length=0;
-el('#schoolGrade').value='3';el('#kanjiScope').value='previous_grade';previewReading();
-assert.doesNotMatch(el('#readingPreview').innerHTML,/<ruby>/);
-el('#rubyMode').value='all';previewReading();assert.match(el('#readingPreview').innerHTML,/<ruby>/);
-el('#readingForm').handlers.change[0]({target:{id:'readingChild'}});
-assert.equal(el('#schoolGrade').value,'0');assert.equal(el('#rubyMode').value,'auto');
-let prevented=false;el('#readingForm').handlers.submit[0]({preventDefault(){prevented=true;}});
-assert.equal(prevented,true);assert.equal(calls.length,0);
+el('#schoolGrade').value='4'; el('#readingForm').handlers.change[0]({target:{id:'schoolGrade'}});
+assert.equal(calls.filter(c=>c.method==='POST').length,0);           // 表示例を変えただけでは送らない
+let prevented=false; await el('#readingForm').handlers.submit[0]({preventDefault(){prevented=true;}});
+assert.equal(prevented,true);
+const post=calls.find(c=>c.method==='POST');
+assert.equal(post.url,'/api/child-settings');
+assert.equal(JSON.stringify(post.body),JSON.stringify({child:'子A',school_grade:'e4',kanji_scope:'current_grade',ruby_mode:'all'}));
+assert.match(el('#readingStatus').textContent,/保存しました/);
+// 保存したあとに値を変えたら、成功の文を残さない（UX_REVIEW PR-39 F1）。元に戻したら消える
+el('#rubyMode').value='auto'; el('#readingForm').handlers.change[0]({target:{id:'rubyMode'}});
+assert.equal(el('#readingStatus').textContent,'まだ保存していません。「保存する」で確定します。');
+el('#rubyMode').value='all'; el('#readingForm').handlers.change[0]({target:{id:'rubyMode'}});
+assert.equal(el('#readingStatus').textContent,'');
+assert.equal(calls.filter(c=>c.method==='POST').length,1);             // 変えただけでは送らない
+// 保存に失敗したら、保存できたと言わない。もう一度押せる
+responses.set('/api/child-settings',[reply({detail:'x'},500)]);
+await el('#readingForm').handlers.submit[0]({preventDefault(){}});
+assert.match(el('#readingStatus').textContent,/保存できませんでした/);
+assert.equal(el('#readingSave').disabled,false);
+""")
+
+
+def test_reading_settings_do_not_carry_a_draft_to_another_child_or_save_unread_values():
+    run_js(r"""
+const A='/api/child-settings?child='+encodeURIComponent('子A'), B='/api/child-settings?child='+encodeURIComponent('子B');
+responses.set(A,[reply({settings:{school_grade:'e2'}})]);
+el('#readingChild').value='子A'; await loadReading();
+el('#schoolGrade').value='6';                                        // 子A の打ちかけ
+responses.set(B,[reply({settings:{}})]);
+el('#readingChild').value='子B'; await loadReading();
+assert.equal(el('#schoolGrade').value,'0');                           // 子B は保存済みの値（未設定）
+// 読み込めない子は、知らない値を上書きしないよう保存させない
+responses.set(A,[new Error('offline')]);
+el('#readingChild').value='子A'; await loadReading();
+assert.equal(el('#readingSave').disabled,true);
+assert.match(el('#readingStatus').textContent,/読み込めませんでした/);
+calls.length=0; await el('#readingForm').handlers.submit[0]({preventDefault(){}});
+assert.equal(calls.filter(c=>c.method==='POST').length,0);
+// 遅れて届いた前の子の値で、今の子の表示を上書きしない
+let slow; responses.set(A,[new Promise(r=>slow=r)]); responses.set(B,[reply({settings:{school_grade:'j1'}})]);
+el('#readingChild').value='子A'; const first=loadReading();
+el('#readingChild').value='子B'; await loadReading();
+slow(reply({settings:{school_grade:'e1'}})); await first;
+assert.equal(el('#schoolGrade').value,'7');
 """)
 
 
