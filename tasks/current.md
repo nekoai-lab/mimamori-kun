@@ -4,7 +4,7 @@
 
 - 更新日: 2026-09-28
 - 担当エージェント: Claude Code（#16）
-- レビュー: #16 の PR を Codex がレビュー（request-qa）。UI の変更なので ux-pass も要る（ChatGPT の UX_REVIEW 待ち）
+- レビュー: #16 の PR #17 の UX レビューを `design/inbox/UX_REVIEW.md` に追加。高2件・中4件は修正後に再確認（ux-pass は未付与）。
 
 <!-- 上限で交代するときは、次のエージェントがこのファイルだけ読めば続きができるように書く -->
 
@@ -18,7 +18,7 @@
 
 ## やり残し
 
-- #16：PR・Codex のレビュー・ChatGPT の UX レビュー（ux-pass）
+- #16：PR #17 の UX_REVIEW の指摘対応・再確認（ux-pass）。認証コードは今回のレビューでは変更していない。
 - **デプロイ前にやること**（deploy.sh の実行は人が確認してから）
   - デプロイ先のプロジェクト作成と課金
   - `.env` に `GOOGLE_CLOUD_PROJECT`・`MIMAMORI_CALENDAR_ID`・`MIMAMORI_REMINDERS`
@@ -30,5 +30,5 @@
 
 ## 次の1手
 
-- #16 の PR を出して request-qa（Codex）、スクショを ChatGPT に渡して UX_REVIEW をもらう
+- #17 の `design/inbox/UX_REVIEW.md` を確認し、R1〜R6を修正または採らない理由を記録する。修正後の主要操作と状態別スクショでUXを再確認する。
 - ARCHITECTURE.md と CLAUDE.md のコマンドを埋める
