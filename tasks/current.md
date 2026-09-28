@@ -3,8 +3,8 @@
 # 今の作業 — mimamori-kun
 
 - 更新日: 2026-09-28
-- 担当エージェント: Claude Code（#16）
-- レビュー: PR #17 のR1追補を ChatGPT が再確認（2026-09-28、6b66e97）。直すものなし、ux-pass でよい。`design/UX_REVIEW.md` の末尾「再確認：R1追補のみ」に反映し、inbox は空にした。見た目は塊 A に持ち越し。
+- 担当エージェント: Claude Code（塊 A・C・F）、Codex（塊 D）
+- レビュー: UX レビューは PR ごとに `design/reviews/PR-<番号>.md`、`design/UX_REVIEW.md` は目次（2026-09-28 に人が決めた）。#17・#28・#29 は最新判定が ux-pass でよい
 
 <!-- 上限で交代するときは、次のエージェントがこのファイルだけ読めば続きができるように書く -->
 
@@ -14,12 +14,14 @@
 - 構成図を `docs/architecture/` に追加（#4）。PRODUCT.md を埋め、README を今の状態に合わせた（#6）
 - UX 見直し前の画面を `design/screenshots/before/` に（#7）。撮っていて #8・#9 を見つけ、どちらもマージ（#10・#11）
 - 台帳を Firestore に（#5 → #13、実装 Codex）。ローカルは既定で JSON（#14 → #15、実装 Codex）。**GCP への反映（deploy.sh）はまだ**
-- #16（人ごとの合言葉でログイン）を Claude Code が実装中。ページと /api/* をすべて守る。子どもは自分のぶんだけ。合言葉は tools/set_passcode.py で手元から決める（画面からは決めない）
+- ログイン（#16 → #17）をマージ。ページと /api/* をすべて守る。子どもは自分のぶんだけ。合言葉は tools/set_passcode.py で手元から決める（画面からは決めない）。子どもの端末で親に一時的に切り替え（10分で戻る）
+- UX の塊：G（#27）・H（#30）・B（#28）・E（#29）をマージ。リマインダーを終日と時刻つきで分けた（#32）。main のテストは 336件通過（2026-09-28）
 
 ## やり残し
 
-- PR #35 の UX レビュー（2026-09-28、対象 50f43c6）：まだ ux-pass にはしない。中2件（下方カードの更新失敗をその場で伝える、処理後のフォーカス継続）。`design/inbox/UX_REVIEW.md` に受渡し。次は実装者がレビューを取り込み、修正後に再確認を依頼する。色・書体と学年保存はA/Fへ持ち越し。
-- #16：PR #17 は ux-pass を付けた。UX のあとにコミットを足したので request-qa を取り直す。qa-pass・CI がそろったらマージ（人の指示を待つ）
+- 塊 A（#19、Claude Code）と D（#22、Codex）を並行で進める。A のあとに F（#24）、C（#21）
+  - A に持ち越した UX 指摘：ログイン A1〜A4（確認不能の幕と親の帯の色・プロフィールへの入口・ログアウトの強弱）、B の A1・A2（A のあと短い画面で重なりを測り直す）、E の A1〜A3（「もう一度確かめる」の下の余白・確認できないあいだのナビ）
+  - QA のあとに足したコミットが `design/`・`tasks/` の docs だけなら qa-pass をそのまま使う。docs 以外（main を取り込んだマージで入ったファイルも）が入ったら request-qa をやり直す（ai-dev-harness PR #21）
 - **デプロイ前にやること**（deploy.sh の実行は人が確認してから）
   - [x] ① デプロイ先のプロジェクト作成と課金 → 済（`mimamorikun-family`、番号 932685100691。2026-09-28）
   - `.env`：`GOOGLE_CLOUD_PROJECT=mimamorikun-family` は入れた（2026-09-28）
@@ -35,5 +37,5 @@
 
 ## 次の1手
 
-- #17 マージ（人の指示を待つ）→ #29 を main に合わせ直して request-qa → 塊 A・C・D・F
+- 塊 A（Claude Code）と D（Codex）→ F → C。それぞれ撮影 → ChatGPT の UX レビュー → `design/reviews/PR-<番号>.md` → ux-pass
 - ARCHITECTURE.md と CLAUDE.md のコマンドを埋める
