@@ -309,15 +309,15 @@ button:focus-visible,a:focus-visible,summary:focus-visible,select:focus-visible,
 
   <section aria-labelledby="readingTitle">
     <h2 id="readingTitle">学年・ふりがな</h2>
-    <p id="readingUnavailable">設定の保存はまだ利用できません。以下は表示例を試すフォームで、保存済みの設定ではありません。</p>
-    <form id="readingForm" aria-describedby="readingUnavailable">
+    <p id="readingAbout">子どもごとに、漢字とふりがなの出し方を決めます。学年は4月にも自動では変えません。</p>
+    <form id="readingForm" aria-describedby="readingAbout">
       <label>子ども <select id="readingChild" required></select></label>
       <label>学年 <select id="schoolGrade"><option value="0">未設定</option><option value="1">小1</option><option value="2">小2</option><option value="3">小3</option><option value="4">小4</option><option value="5">小5</option><option value="6">小6</option><option value="7">中1</option><option value="8">中2</option><option value="9">中3</option></select></label>
       <label>漢字を使う範囲 <select id="kanjiScope"><option value="previous_grade">前学年まで</option><option value="current_grade">今の学年まで</option></select></label>
       <label>ふりがな <select id="rubyMode"><option value="auto">学年に合わせる</option><option value="all">漢字に広く付ける</option></select></label>
       <p id="readingPreview" aria-live="polite"></p>
-      <p>表示例のみです。4月にも自動で学年は変えません。</p>
-      <button type="submit" disabled>保存する（まだ利用できません）</button>
+      <button type="submit" id="readingSave">保存する</button>
+      <p id="readingStatus" role="status" aria-live="polite"></p>
     </form>
   </section>
   <section id="systemNotices" aria-label="運用のお知らせ"></section>
@@ -488,11 +488,49 @@ function previewReading(){
     "<ruby>"+esc(word)+"<rt>"+esc(reading)+"</rt></ruby>":esc(word));
   $("#readingPreview").innerHTML="表示例："+rendered[0]+"は"+rendered[1]+"で"+rendered[2]+"をします。";
 }
-$("#readingForm").addEventListener("submit",e=>e.preventDefault());
-$("#readingForm").addEventListener("change",e=>{
-  if(e.target.id==="readingChild"){
-    $("#schoolGrade").value="0"; $("#kanjiScope").value="previous_grade"; $("#rubyMode").value="auto";
+// 学年・ふりがなの保存（塊 F：/api/child-settings）。表示例を変えただけでは保存しない。保存するのは「保存する」のときだけ。
+// 子を切り替えたら、その子の保存済みの値を読み直す（前の子の打ちかけを持ち越さない）。
+const GRADE_CODES=["","e1","e2","e3","e4","e5","e6","j1","j2","j3"];
+let readingSeq=0, readingLoaded=false;
+function setReadingControls(on){for(const id of ["schoolGrade","kanjiScope","rubyMode","readingSave"]) $("#"+id).disabled=!on;}
+async function loadReading(){
+  const child=$("#readingChild").value, seq=++readingSeq;
+  $("#schoolGrade").value="0"; $("#kanjiScope").value="previous_grade"; $("#rubyMode").value="auto"; previewReading();
+  if(!child){ return; }
+  readingLoaded=false; setReadingControls(false); $("#readingStatus").textContent="「"+child+"」の設定を読み込んでいます…";
+  try{
+    const j=await readJSON("/api/child-settings?child="+encodeURIComponent(child));
+    if(seq!==readingSeq) return;
+    const st=(j&&j.settings)||{};
+    $("#schoolGrade").value=String(Math.max(0,GRADE_CODES.indexOf(st.school_grade||"")));
+    $("#kanjiScope").value=st.kanji_scope==="current_grade"?"current_grade":"previous_grade";
+    $("#rubyMode").value=st.ruby_mode==="all"?"all":"auto";
+    readingLoaded=true; setReadingControls(true); $("#readingStatus").textContent=""; previewReading();
+  }catch(err){
+    if(seq!==readingSeq) return;
+    // 読めないまま保存すると、知らない値を上書きしてしまう。読めるまで保存させない
+    setReadingControls(false); $("#readingChild").disabled=false;
+    $("#readingStatus").textContent="「"+child+"」の設定を読み込めませんでした。子どもを選び直すか、再読込してください。";
   }
+}
+$("#readingForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const child=$("#readingChild").value, seq=readingSeq;
+  if(!child||!readingLoaded) return;
+  const grade=GRADE_CODES[Number($("#schoolGrade").value)]||null;
+  setReadingControls(false); $("#readingStatus").textContent="保存しています…";
+  try{
+    await readJSON("/api/child-settings",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({child,school_grade:grade,kanji_scope:$("#kanjiScope").value,ruby_mode:$("#rubyMode").value})});
+    if(seq!==readingSeq) return;
+    $("#readingStatus").textContent="「"+child+"」の学年・ふりがなを保存しました。";
+  }catch(err){
+    if(seq!==readingSeq) return;
+    $("#readingStatus").textContent="保存できませんでした。通信を確かめて、もう一度「保存する」を押してください。";
+  }finally{ if(seq===readingSeq) setReadingControls(true); }
+});
+$("#readingForm").addEventListener("change",e=>{
+  if(e.target.id==="readingChild"){ loadReading(); return; }
   previewReading();
 });
 previewReading();
@@ -507,6 +545,7 @@ function renderKidButtons(){
   const reading=$("#readingChild"), child=reading.value;
   reading.innerHTML=data.children.map(n=>"<option>"+esc(n)+"</option>").join("");
   if(data.children.includes(child)) reading.value=child;
+  if(reading.value!==child || !readingLoaded) loadReading();   // 初めて・子が変わったときだけ読む（再読込のたびに打ちかけを消さない）
   // 打ちかけの日付を、タブに戻った拍子に上書きしない。
   if(!$("#adddate").value) $("#adddate").value=data.today;
 }

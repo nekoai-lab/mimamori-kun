@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from mimamori.agent import read_otayori, read_year_plan
+from mimamori import appearance as appearance_mod
 from mimamori import auth
 from mimamori import images as images_mod
 from mimamori import ledger
@@ -597,6 +598,51 @@ async def kid_chat(req: KidChatRequest, request: Request):
         raise HTTPException(500, f"うまく話せませんでした: {e}") from e
 
 
+# ---------------------------------------------------------------- 子ごとの設定（UX 塊 F）
+
+def _settings_child(request: Request, child: str) -> str:
+    """設定を読み書きする子。子どもは自分だけ（ほかの子は 403）。親は家族の子なら誰でも。"""
+    child = _self(request, (child or "").strip())
+    if not child:
+        raise HTTPException(400, "だれの設定かが分かりません。")
+    if child not in [c["name"] for c in config.children]:
+        raise HTTPException(404, "その子が見つかりません。")
+    return child
+
+
+def _settings_body(child: str) -> Dict[str, Any]:
+    settings = appearance_mod.read(child)
+    return {"child": child, "settings": settings, "reading_policy": appearance_mod.reading_policy(settings)}
+
+
+@app.get("/api/child-settings")
+def api_child_settings(request: Request, child: str = ""):
+    """子ごとの設定（見た目・相棒・学年と読み）。塊 A の AppearanceStore／CompanionStore が読む。"""
+    return _settings_body(_settings_child(request, child))
+
+
+@app.post("/api/child-settings")
+async def api_child_settings_write(request: Request):
+    """送った項目だけを変える（部分更新）。子どもは自分のテーマと相棒の名前だけ。学年・読み・文体は親だけ。"""
+    try:
+        body = await request.json()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, "JSON で送ってください。") from e
+    if not isinstance(body, dict):
+        raise HTTPException(400, "JSON のオブジェクトで送ってください。")
+    child = _settings_child(request, str(body.pop("child", "") or ""))
+    try:
+        appearance_mod.write(child, body, parent=auth.is_parent(_user(request)))
+    except PermissionError as e:
+        raise HTTPException(403, str(e)) from e
+    except appearance_mod.SettingError as e:
+        raise HTTPException(400, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        # 保存できなかったのに成功を返さない（画面は「まだ覚えられていない」を出す）
+        raise HTTPException(500, f"設定を保存できませんでした: {e}") from e
+    return _settings_body(child)
+
+
 WEEK_GOAL = 5          # 週の台紙。★5つで1枚
 
 
@@ -616,8 +662,9 @@ def api_week(request: Request, child: str = ""):
     # 明日ぶんを今日やることもある。週のうちなら数える。
     try:
         rows = list_raw(start.isoformat(), end.isoformat())
-    except Exception:  # noqa: BLE001
-        rows = []
+    except Exception as e:  # noqa: BLE001
+        # 取れなかったのに 0件と返すと、台紙が「まだ0こ」に見える（UX_SPEC §4.3）。取れなかったと返す
+        raise HTTPException(500, f"今週の台紙を取得できませんでした: {e}") from e
     done = [r for r in rows if r.get("child") == child and r.get("status") == "done"]
     return {
         "child": child,
