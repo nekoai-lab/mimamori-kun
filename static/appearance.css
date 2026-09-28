@@ -2,6 +2,7 @@
  *
  * - 明暗は theme.js の data-theme（light|dark）。この CSS は明暗を決めない
  * - 親子の境界は data-audience（parent|kid）。子の色は kid のときだけ。親の画面は子のテーマを継承しない
+ * - だれか決まる前の入口（/login）は data-audience="entry"。親の静かな色と書体を使う（A の結合（2）・PR-17 A1）
  * - 子の見た目は data-kid-theme（rocket-lab|monochrome|snow-bird）。付いていなければ中立（各画面の元の色）
  * - 変数は属性の付いた要素ならどこでも効く（見た目シートのプレビューもこの仕組みで塗る）
  * - 各画面の元の変数（--paper・--surface・--ink など）は、親子が決まったときだけ置き換える。
@@ -9,28 +10,32 @@
  */
 
 /* ---------------------------------------------------------------- 親：静かな画面（§3.1） */
-[data-audience="parent"] {
+[data-audience="parent"], [data-audience="entry"] {
   --parent-bg: #F5F5F7; --parent-text: #1D1D1F; --parent-muted: #5C5C63; --parent-card: #FFFFFF;
   --parent-accent: #005FCC; --parent-warning: #984A13; --parent-line: #D7D7DC;
 }
-[data-theme="dark"][data-audience="parent"], [data-theme="dark"] [data-audience="parent"] {
+[data-theme="dark"][data-audience="parent"], [data-theme="dark"] [data-audience="parent"],
+[data-theme="dark"][data-audience="entry"], [data-theme="dark"] [data-audience="entry"] {
   --parent-bg: #111113; --parent-text: #F5F5F7; --parent-muted: #B8B8C0; --parent-card: #202024;
   --parent-accent: #88B8FF; --parent-warning: #FFBD8A; --parent-line: #45454C;
 }
 /* 画面の元の変数へ（html:root で、各画面の :root・:root[data-theme="dark"] より強くする） */
-html:root[data-audience="parent"], html:root[data-audience="parent"][data-theme="dark"] {
+html:root[data-audience="parent"], html:root[data-audience="parent"][data-theme="dark"],
+html:root[data-audience="entry"], html:root[data-audience="entry"][data-theme="dark"] {
   --paper: var(--parent-bg); --surface: var(--parent-card); --surface-2: var(--parent-bg);
   --ink: var(--parent-text); --ink-2: var(--parent-muted); --ink-3: var(--parent-muted);
   --line: var(--parent-line); --accent: var(--parent-accent); --warn: var(--parent-warning);
 }
 
 /* 親の書体（§3.1）：本文も見出しも同じ日本語 sans。見出しに明朝体・等幅英字を混ぜない（A の結合） */
-html:root[data-audience="parent"] {
+html:root[data-audience="parent"], html:root[data-audience="entry"] {
   --parent-font: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
 }
-html:root[data-audience="parent"] body { font-family: var(--parent-font); }
+html:root[data-audience="parent"] body, html:root[data-audience="entry"] body { font-family: var(--parent-font); }
 html:root[data-audience="parent"] :is(h1, h2, h3, h4),
-html:root[data-audience="parent"] :is(h1, h2, h3, h4) * { font-family: var(--parent-font); letter-spacing: normal; }
+html:root[data-audience="parent"] :is(h1, h2, h3, h4) *,
+html:root[data-audience="entry"] :is(h1, h2, h3, h4),
+html:root[data-audience="entry"] :is(h1, h2, h3, h4) * { font-family: var(--parent-font); letter-spacing: normal; }
 
 /* ---------------------------------------------------------------- 子：3テーマ×明暗（§3.2） */
 [data-kid-theme="rocket-lab"] {
