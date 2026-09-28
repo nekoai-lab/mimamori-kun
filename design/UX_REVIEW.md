@@ -7,4 +7,4 @@ UX レビュー（ChatGPT）は PR ごとに `design/reviews/PR-<番号>.md` に
 | [#17](https://github.com/nekoai-lab/mimamori-kun/pull/17) | ログインまわり | ux-pass でよい。R1追補は解消し、今回の再確認範囲に直すものはありません。R2〜R6は前回の解消判定を引き継ぎます。（2026-09-28、ChatGPT の再確認） | [PR-17.md](reviews/PR-17.md) |
 | [#28](https://github.com/nekoai-lab/mimamori-kun/pull/28) | 子どもの今日（/kid） | ux-pass でよい。B1〜B5は解消し、今回の再確認範囲に直すものはありません。（2026-09-28、ChatGPT の再確認） | [PR-28.md](reviews/PR-28.md) |
 | [#29](https://github.com/nekoai-lab/mimamori-kun/pull/29) | 撮る画面（/） | ux-pass でよい。E1〜E3は解消し、今回の再確認範囲に直すものはありません。（2026-09-28、ChatGPT の再確認） | [PR-29.md](reviews/PR-29.md) |
-| [#35](https://github.com/nekoai-lab/mimamori-kun/pull/35) | 親の一覧（/board、塊 D） | まだ ux-pass にはしない。D2は解消、D1追補（取消の結果が分からない）中1件（2026-09-28、ChatGPT の再確認） | [PR-35.md](reviews/PR-35.md) |
+| [#35](https://github.com/nekoai-lab/mimamori-kun/pull/35) | 親の一覧（/board、塊 D） | ux-pass でよい。D1追補は解消、その他は前回の判定のまま（2026-09-28、ChatGPT の再確認） | [PR-35.md](reviews/PR-35.md) |
