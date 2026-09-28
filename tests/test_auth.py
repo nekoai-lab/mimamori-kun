@@ -491,3 +491,26 @@ def test_logout_all_during_a_request_is_not_undone_by_the_refresh(monkeypatch):
     monkeypatch.setattr(main.study_mod, "set_capacity", logout_all_meanwhile)
     c.post("/api/capacity", json={"minutes": 60})          # 書き込み＝操作なので、応答で延長の Cookie が出る
     assert c.get("/api/tasks").status_code == 401            # 延長された Cookie も無効のまま
+
+
+def test_wrong_and_locked_responses_speak_to_the_person_and_carry_retry_after(monkeypatch):
+    """UX_REVIEW R6：子ども向けの言葉。ロックの待ち時間は Retry-After で渡す。"""
+    now = [5_000_000.0]
+    monkeypatch.setattr(auth, "_now", lambda: now[0])
+    c = client()
+    r = c.post("/api/auth/login", json={"who": "c1", "passcode": "0000"})
+    j = r.json()
+    assert r.status_code == 401 and "あいことばが あわなかったよ" in j["detail"]
+    assert j["remaining"] == auth.MAX_FAILS - 1 and "まちがえると" in j["note"]
+    for _ in range(auth.MAX_FAILS - 1):
+        r = c.post("/api/auth/login", json={"who": "c1", "passcode": "0000"})
+    assert r.status_code == 429
+    assert int(r.headers["retry-after"]) == auth.LOCK_SECONDS
+    assert "いまは はいれません" in r.json()["detail"]
+    now[0] += 60
+    r = c.post("/api/auth/login", json={"who": "c1", "passcode": CODES[YOUNGER]})
+    assert r.status_code == 429 and int(r.headers["retry-after"]) == auth.LOCK_SECONDS - 60
+    p = c.post("/api/auth/login", json={"who": "parent", "passcode": "0000"}).json()
+    assert "合言葉が一致しませんでした" in p["detail"] and "おうちの人" not in p["detail"]   # 親には親の言葉
+    t = c.post("/api/auth/login", json={"who": "c0", "passcode": "0000"}).json()
+    assert "合言葉が一致しませんでした" in t["detail"] and "おうちの人に聞いて" in t["detail"]  # 中学生は漢字で

@@ -218,12 +218,32 @@ def api_auth_login(req: LoginRequest, request: Request):
     if not user:
         raise HTTPException(400, "だれかを選んでください。")
     result, n = auth.check(user, req.passcode)
+    # 言葉の出し分け：小学生はひらがな中心、中学生と親は漢字（UX_REVIEW R6 の文言の表）
+    kid = not auth.is_parent(user) and next(
+        (c.get("school_level") for c in config.children if c["name"] == user), "") == "elementary"
+    teen = not auth.is_parent(user) and not kid
+    minutes = auth.LOCK_SECONDS // 60
     if result == "locked":
-        raise HTTPException(429, f"まちがいが続いたので、{max(1, (n + 59) // 60)}分まってからもう一度。")
+        # 待つ秒数は Retry-After で渡す（画面は日本語の文から数字を抜き出さない。UX_REVIEW R6）
+        return JSONResponse({
+            "detail": ("いまは はいれません。しばらく まってから「もういちど たしかめる」を おしてね。" if kid else
+                       "入力が続けて一致しなかったため、一時的にログインできません。時間をおいて「もう一度確認する」を押してください。"),
+            "note": (f"まちがいが つづくと、{minutes}分 おやすみに なります。" if kid else f"ロック時間は{minutes}分です。"),
+            "retry_after": n,
+        }, status_code=429, headers={"Retry-After": str(n)})
     if result == "unset":
-        raise HTTPException(403, "まだ合言葉が決まっていません。おうちの人に聞いてください。")
+        raise HTTPException(403, "まだ あいことばが きまっていません。おうちの人に きいてね。" if kid else
+                            "まだ合言葉が決まっていません。おうちの人に聞いてください。" if teen else
+                            "まだ合言葉が決まっていません。tools/set_passcode.py で決めてください。")
     if result != "ok":
-        raise HTTPException(401, f"合言葉がちがいます（あと{n}回まちがえると、しばらく入れません）。")
+        return JSONResponse({
+            "detail": ("あいことばが あわなかったよ。えらんだ人と、あいことばを たしかめてね。わからないときは、おうちの人に きいてね。"
+                       if kid else "合言葉が一致しませんでした。選んだ人と合言葉を確かめてください。"
+                       + ("わからないときは、おうちの人に聞いてください。" if teen else "")),
+            "note": (f"あと {n}回 まちがえると、しばらく はいれなく なるよ。" if kid else
+                     f"あと{n}回続けて一致しないと、{minutes}分ログインできなくなります。"),
+            "remaining": n,
+        }, status_code=401)
     # 子どもでログインしている端末で親が入ったら、「親に切り替え」の一時の状態にする（#16 ①）。
     # 操作がなければ10分で元の子に戻る。親の端末（子どもでログインしていない）なら今までどおり180日
     current = auth.read(request.cookies.get(auth.COOKIE))

@@ -26,8 +26,11 @@
     "#who-switched b{font-weight:700}#who-switched span{flex:1;min-width:12em}" +
     "#who-switched button{font:inherit;font-weight:700;padding:8px 16px;min-height:44px;border-radius:999px;" +
     "border:0;background:#fff;color:#1F2422;cursor:pointer}" +
-    "#who-parent{display:block;margin:28px auto 16px;text-align:center;font-size:13px}" +
-    "#who-parent a{color:inherit;opacity:.75}";
+    "#who-switched .who-err{flex-basis:100%;color:#FFBD8A;font-weight:700}" +
+    "#who-switched button:disabled{opacity:.6;cursor:default}" +
+    "#who-parent{display:block;margin:28px auto 16px;text-align:center;font-size:14px}" +
+    // 押せる場所を 44px 以上に（UX_REVIEW R5）
+    "#who-parent a{display:inline-flex;align-items:center;min-height:44px;padding:8px 16px;color:inherit;opacity:.8}";
   document.head.appendChild(style);
 
   var rawFetch = window.fetch.bind(window);
@@ -54,12 +57,36 @@
   //   - 「子どもに戻す」ボタンは、切り替え中ずっと出す
   var IDLE_MS = 10 * 60 * 1000, TOUCH_MS = 60 * 1000;
 
-  function backToChild() {
-    if (leaving) return;
-    leaving = true;
+  // 「子どもに戻す」。**戻せたのを確かめてから**子どもの画面へ（UX_REVIEW R1）。
+  // 失敗したら親の帯を残し、やり直せるようにする。すでにサーバー側で戻っていたら（401）、今の状態を見て進む
+  var backing = false;
+  function backToChild(auto) {
+    if (backing || leaving) return;
+    backing = true;
+    var bar = document.getElementById("who-switched");
+    var btn = bar && bar.querySelector("button");
+    var err = bar && bar.querySelector(".who-err");
+    if (btn) { btn.disabled = true; btn.textContent = "子どもに戻しています…"; }
+    if (err) err.textContent = "";
+    function fail() {
+      backing = false;
+      if (btn) { btn.disabled = false; btn.textContent = "子どもに戻す"; }
+      if (err) err.textContent = (auto ? "10分たったので子どもに戻そうとしましたが、" : "") +
+        "まだ子どもの画面に戻せていません。通信を確認して、もう一度お試しください。";
+    }
+    function go() { leaving = true; location.href = "/kid"; }
     rawFetch("/api/auth/back", { method: "POST" })
-      .catch(function () {})
-      .then(function () { location.href = "/kid"; });
+      .then(function (r) {
+        if (r.ok) return go();
+        // 401 や 400：もう戻っているか、ログインが切れている。今の状態を確かめる
+        return rawFetch("/api/auth/me").then(function (m) { return m.ok ? m.json() : null; })
+          .then(function (me) {
+            if (me && me.role === "child" && !me.switched) go();
+            else if (!me) { leaving = true; location.href = "/login"; }
+            else fail();
+          });
+      })
+      .catch(fail);
   }
 
   function showSwitched(me) {
@@ -68,9 +95,9 @@
     bar.setAttribute("role", "region");
     bar.setAttribute("aria-label", "おうちの人で使っています");
     bar.innerHTML = '<span><b>おうちの人</b>で つかっています。さわらないと 10分で <b></b> の画面に もどります</span>' +
-      '<button type="button">子どもに戻す</button>';
+      '<button type="button">子どもに戻す</button><span class="who-err" role="alert"></span>';
     bar.querySelectorAll("b")[1].textContent = me.back_to;     // 呼び名は文字として入れる
-    bar.querySelector("button").addEventListener("click", backToChild);
+    bar.querySelector("button").addEventListener("click", function () { backToChild(false); });
     document.body.insertBefore(bar, document.body.firstChild);
 
     var last = Date.now(), touched = Date.now();
@@ -85,7 +112,7 @@
       window.addEventListener(ev, active, { passive: true, capture: true });
     });
     setInterval(function () {
-      if (Date.now() - last >= IDLE_MS) backToChild();
+      if (Date.now() - last >= IDLE_MS) backToChild(true);
     }, 15 * 1000);
   }
 
