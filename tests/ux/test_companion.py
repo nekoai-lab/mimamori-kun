@@ -1,7 +1,7 @@
 """Issue #25 の静的契約。Gemini の返答品質そのものは検証しない。
 
-実行: .venv/bin/python -m pytest tests/ux/companion.py
-所有範囲の companion.* に合わせた名前なので、pytest には明示して渡す。
+実行: .venv/bin/python -m pytest
+pytest の標準探索で収集され、CI でも実行される。
 """
 import asyncio
 import inspect
