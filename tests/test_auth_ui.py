@@ -18,8 +18,9 @@ pytestmark = pytest.mark.skipif(node is None, reason="node が無い")
 FAKE_DOM = r"""
 const vm = require('vm');
 function el(tag){
-  const e = { tag, id:'', className:'', textContent:'', type:'', disabled:false, hidden:false, kids:[], attrs:{}, handlers:{}, dataset:{}, style:{},
-    setAttribute(k,v){ this.attrs[k]=v; if(k==='id') this.id=v; }, getAttribute(k){ return this.attrs[k]; },
+  const e = { tag, id:'', className:'', textContent:'', type:'', disabled:false, hidden:false, kids:[], attrs:{}, handlers:{}, dataset:{},
+    setAttribute(k,v){ this.attrs[k]=v; if(k==='id') this.id=v; },
+    style:{ setProperty(){} }, getAttribute(k){ return k in this.attrs ? this.attrs[k] : null; }, hasAttribute(k){ return k in this.attrs; },
     appendChild(c){ this.kids.push(c); c.parent=this; return c; }, insertBefore(c){ this.kids.unshift(c); c.parent=this; return c; },
     removeAttribute(k){ delete this.attrs[k]; },
     addEventListener(ev,fn){ (this.handlers[ev]=this.handlers[ev]||[]).push(fn); },
@@ -35,7 +36,7 @@ function makeEnv(responses){
     head: el('head'), body: el('body'), readyState: 'complete',
     createElement: el, createTextNode: t => ({ tag:'#text', textContent:t }),
     getElementById: id => byId[id] || null, addEventListener(){}, dispatchEvent(){}, querySelector(){ return null; },
-    documentElement: { dataset:{} },
+    documentElement: el('html'),
   };
   const loc = { href: '/board', pathname: '/board', reload(){ loc.reloaded = true; } };
   const fetch = (url, opts) => {

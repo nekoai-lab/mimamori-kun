@@ -1,0 +1,142 @@
+/* 見た目の共通基盤（UX 塊 A・design/UX_SPEC.md §3.1〜§3.4・§4.2）
+ *
+ * - 明暗は theme.js の data-theme（light|dark）。この CSS は明暗を決めない
+ * - 親子の境界は data-audience（parent|kid）。子の色は kid のときだけ。親の画面は子のテーマを継承しない
+ * - 子の見た目は data-kid-theme（rocket-lab|monochrome|snow-bird）。付いていなければ中立（各画面の元の色）
+ * - 変数は属性の付いた要素ならどこでも効く（見た目シートのプレビューもこの仕組みで塗る）
+ * - 各画面の元の変数（--paper・--surface・--ink など）は、親子が決まったときだけ置き換える。
+ *   :root に無条件で上書きしない。/plan・/schedule はこのファイルを読まないので変わらない
+ */
+
+/* ---------------------------------------------------------------- 親：静かな画面（§3.1） */
+[data-audience="parent"] {
+  --parent-bg: #F5F5F7; --parent-text: #1D1D1F; --parent-muted: #5C5C63; --parent-card: #FFFFFF;
+  --parent-accent: #005FCC; --parent-warning: #984A13; --parent-line: #D7D7DC;
+}
+[data-theme="dark"][data-audience="parent"], [data-theme="dark"] [data-audience="parent"] {
+  --parent-bg: #111113; --parent-text: #F5F5F7; --parent-muted: #B8B8C0; --parent-card: #202024;
+  --parent-accent: #88B8FF; --parent-warning: #FFBD8A; --parent-line: #45454C;
+}
+/* 画面の元の変数へ（html:root で、各画面の :root・:root[data-theme="dark"] より強くする） */
+html:root[data-audience="parent"], html:root[data-audience="parent"][data-theme="dark"] {
+  --paper: var(--parent-bg); --surface: var(--parent-card); --surface-2: var(--parent-bg);
+  --ink: var(--parent-text); --ink-2: var(--parent-muted); --ink-3: var(--parent-muted);
+  --line: var(--parent-line); --accent: var(--parent-accent); --warn: var(--parent-warning);
+}
+
+/* ---------------------------------------------------------------- 子：3テーマ×明暗（§3.2） */
+[data-kid-theme="rocket-lab"] {
+  --kid-bg: #F3F7FF; --kid-text: #152744; --kid-accent: #2454B8; --kid-card: #FFFFFF;
+  --kid-done: #17664D; --kid-on-accent: #FFFFFF; --kid-muted: #4C5F7A;
+  --kid-line: #C9D6EE; --kid-radius-card: 24px; --kid-radius-button: 16px;
+  --kid-font: "Zen Maru Gothic", system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+}
+[data-theme="dark"][data-kid-theme="rocket-lab"], [data-theme="dark"] [data-kid-theme="rocket-lab"] {
+  --kid-bg: #101A2D; --kid-text: #F2F6FF; --kid-accent: #9DBDFF; --kid-card: #1D2B45;
+  --kid-done: #83D9B6; --kid-on-accent: #101A2D; --kid-muted: #B6C6E0; --kid-line: #3A4B6B;
+}
+[data-kid-theme="monochrome"] {
+  --kid-bg: #F5F5F5; --kid-text: #202124; --kid-accent: #292929; --kid-card: #FFFFFF;
+  --kid-done: #414141; --kid-on-accent: #FFFFFF; --kid-muted: #606166;
+  --kid-line: #CFCFCF; --kid-radius-card: 10px; --kid-radius-button: 8px;
+  --kid-font: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+}
+[data-theme="dark"][data-kid-theme="monochrome"], [data-theme="dark"] [data-kid-theme="monochrome"] {
+  --kid-bg: #151515; --kid-text: #F2F2F2; --kid-accent: #E8E8E8; --kid-card: #242424;
+  --kid-done: #D4D4D4; --kid-on-accent: #151515; --kid-muted: #BDBDBD; --kid-line: #4A4A4A;
+}
+[data-kid-theme="snow-bird"] {
+  --kid-bg: #F1F7FA; --kid-text: #243541; --kid-accent: #326474; --kid-card: #FFFFFF;
+  --kid-done: #386653; --kid-on-accent: #FFFFFF; --kid-muted: #526675;
+  --kid-line: #C6D7E0; --kid-radius-card: 22px; --kid-radius-button: 14px;
+  --kid-font: "Noto Sans JP", "Zen Maru Gothic", system-ui, -apple-system, "Hiragino Kaku Gothic ProN", sans-serif;
+}
+[data-theme="dark"][data-kid-theme="snow-bird"], [data-theme="dark"] [data-kid-theme="snow-bird"] {
+  --kid-bg: #17232C; --kid-text: #F1F7FB; --kid-accent: #A4CFDF; --kid-card: #253540;
+  --kid-done: #A1D4BC; --kid-on-accent: #17232C; --kid-muted: #BDCFDC; --kid-line: #40535F;
+}
+/* テーマが決まった子の画面だけ、元の変数を子の色にする（テーマ未設定＝中立は元のまま） */
+html:root[data-audience="kid"][data-kid-theme], html:root[data-audience="kid"][data-kid-theme][data-theme="dark"] {
+  --paper: var(--kid-bg); --surface: var(--kid-card); --surface-2: var(--kid-bg);
+  --ink: var(--kid-text); --ink-2: var(--kid-muted); --ink-3: var(--kid-muted); --line: var(--kid-line);
+  --accent: var(--kid-accent); --me: var(--kid-accent); --me-ink: var(--kid-on-accent);
+}
+html:root[data-audience="kid"][data-kid-theme] body { font-family: var(--kid-font); background: var(--kid-bg); color: var(--kid-text); }
+/* モノクロは紙吹雪を出さない（§3.2） */
+:root[data-kid-theme="monochrome"] #confetti { display: none; }
+
+/* ---------------------------------------------------------------- 共通ナビ（[data-family-nav]） */
+/* 置き場所（上・下）は各画面が決める。ここは見た目と押す大きさだけ（§3.4：子48px・親44px） */
+[data-family-nav].ap-nav { display: flex; gap: 8px; align-items: stretch; }
+[data-family-nav].ap-nav a.ap-nav-link {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px;
+  padding: 8px 14px; border-radius: 999px; text-decoration: none; color: var(--ink, inherit); font-weight: 600;
+}
+[data-audience="kid"] [data-family-nav].ap-nav a.ap-nav-link { min-height: 48px; min-width: 48px; font-size: 16px; }
+[data-family-nav].ap-nav a.ap-nav-link[aria-current="page"] { background: var(--accent, #0F6B62); color: var(--kid-on-accent, #fff); }
+[data-audience="parent"] [data-family-nav].ap-nav a.ap-nav-link[aria-current="page"] { color: #fff; }
+[data-theme="dark"] [data-audience="parent"] [data-family-nav].ap-nav a.ap-nav-link[aria-current="page"],
+[data-theme="dark"][data-audience="parent"] [data-family-nav].ap-nav a.ap-nav-link[aria-current="page"] { color: var(--parent-bg); }
+[data-family-nav].ap-nav a.ap-nav-link:focus-visible,
+.ap-sheet :focus-visible, [data-profile-menu] :focus-visible, [data-appearance-picker] :focus-visible {
+  outline: 3px solid var(--accent, #0F6B62); outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- プロフィール（[data-profile-menu]） */
+.ap-profile { position: relative; }
+.ap-profile > summary { display: inline-flex; align-items: center; gap: 6px; min-height: 48px; padding: 6px 14px;
+  border: 1px solid var(--line, #CFC9B9); border-radius: 999px; cursor: pointer; font-weight: 700; list-style: none; }
+.ap-profile > summary::-webkit-details-marker { display: none; }
+.ap-profile > summary::after { content: ""; width: 8px; height: 8px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: translateY(-2px) rotate(45deg); }
+.ap-profile[open] > summary::after { transform: translateY(2px) rotate(-135deg); }
+.ap-profile-menu { position: absolute; z-index: 30; margin-top: 6px; min-width: 14em; padding: 8px;
+  background: var(--surface, #fff); color: var(--ink, inherit); border: 1px solid var(--line, #CFC9B9); border-radius: 14px; box-shadow: 0 8px 24px -12px rgba(0,0,0,.35); }
+.ap-profile-menu a { display: flex; align-items: center; min-height: 48px; padding: 8px 12px; border-radius: 10px; color: inherit; text-decoration: none; }
+.ap-profile-menu a:hover { background: var(--paper, rgba(0,0,0,.04)); }
+
+/* ---------------------------------------------------------------- 見た目（[data-appearance-picker]） */
+.ap-open { font: inherit; font-weight: 700; min-height: 48px; padding: 8px 16px; border-radius: 999px;
+  border: 1px solid var(--line, #CFC9B9); background: var(--surface, #fff); color: var(--ink, inherit); cursor: pointer; }
+.ap-status { display: block; font-size: 14px; margin-top: 4px; }
+.ap-status:empty { display: none; }
+.ap-status button { font: inherit; font-weight: 700; min-height: 44px; margin-left: 6px; padding: 6px 12px; border-radius: 999px;
+  border: 1px solid currentColor; background: transparent; color: inherit; cursor: pointer; }
+
+.ap-sheet { width: min(640px, 100%); max-height: 92dvh; margin: auto auto 0; padding: 0; border: 0; border-radius: 20px 20px 0 0;
+  background: var(--paper, #FAF7F0); color: var(--ink, #1F2422); overflow: auto; }
+.ap-sheet::backdrop { background: rgba(0,0,0,.45); }
+@media (min-width: 700px) { .ap-sheet { margin: auto; border-radius: 20px; } }
+.ap-sheet-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 12px 16px; background: inherit; border-bottom: 1px solid var(--line, #CFC9B9); }
+.ap-sheet-head h2 { margin: 0; font-size: 20px; }
+.ap-sheet-body { padding: 16px; display: grid; gap: 12px; }
+.ap-sheet button.ap-btn { font: inherit; font-weight: 700; min-height: 48px; padding: 8px 18px; border-radius: 999px;
+  border: 1px solid var(--line, #CFC9B9); background: var(--surface, #fff); color: var(--ink, inherit); cursor: pointer; }
+.ap-sheet button.ap-primary { background: var(--accent, #0F6B62); color: var(--me-ink, #fff); border-color: transparent; }
+.ap-choices { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.ap-choice { display: grid; grid-template-columns: 96px 1fr; gap: 12px; align-items: center; width: 100%; text-align: left;
+  font: inherit; padding: 12px; min-height: 48px; cursor: pointer;
+  background: var(--kid-bg); color: var(--kid-text); border: 2px solid var(--kid-line); border-radius: var(--kid-radius-card); }
+.ap-choice[aria-pressed="true"] { border-color: var(--kid-accent); box-shadow: 0 0 0 2px var(--kid-accent) inset; }
+.ap-choice .ap-name { font-size: 20px; font-weight: 700; display: block; }
+.ap-choice .ap-picked { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 14px; font-weight: 700; color: var(--kid-done); }
+.ap-choice .ap-picked::before { content: "✓"; }
+.ap-art { display: block; width: 96px; height: 96px; }
+.ap-art-mono { background: var(--kid-text); -webkit-mask: var(--ap-mask) center / contain no-repeat; mask: var(--ap-mask) center / contain no-repeat; }
+.ap-mini { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 8px 10px; background: var(--kid-card); color: var(--kid-text);
+  border: 1px solid var(--kid-line); border-radius: var(--kid-radius-button); font-size: 14px; }
+.ap-mini .ap-stamp { width: 24px; height: 24px; flex: none; }
+.ap-mini .ap-mini-done { margin-left: auto; color: var(--kid-done); font-weight: 700; white-space: nowrap; }
+.ap-mini > span:not(.ap-stamp) { word-break: keep-all; overflow-wrap: anywhere; }
+.ap-preview { padding: 16px; border-radius: var(--kid-radius-card); background: var(--kid-bg); color: var(--kid-text); border: 1px solid var(--kid-line);
+  font-family: var(--kid-font); display: grid; gap: 10px; }
+.ap-preview .ap-art { width: 120px; height: 120px; margin: 0 auto; }
+.ap-preview .ap-card { display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--kid-card); border: 1px solid var(--kid-line); border-radius: var(--kid-radius-card); font-size: 18px; }
+.ap-preview .ap-card .ap-stamp { width: 32px; height: 32px; flex: none; }
+.ap-preview .ap-card .ap-go { margin-left: auto; min-height: 48px; padding: 8px 16px; border-radius: var(--kid-radius-button); background: var(--kid-accent); color: var(--kid-on-accent); font-weight: 700; display: inline-flex; align-items: center; white-space: nowrap; }
+.ap-preview .ap-muted { color: var(--kid-muted); font-size: 14px; margin: 0; }
+.ap-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ap-actions .ap-btn { flex: 1 1 10em; }
+.ap-sheet-msg { margin: 0; font-size: 14px; }
+.ap-sheet-msg:empty { display: none; }
+@media (prefers-reduced-motion: reduce) { .ap-sheet, .ap-choice { transition: none !important; animation: none !important; } }
