@@ -19,7 +19,12 @@
 ## やり残し
 
 - #16：PR・Codex のレビュー・ChatGPT の UX レビュー（ux-pass）
-- deploy.sh の前に：デプロイ先のプロジェクト作成と課金、`.env` に `GOOGLE_CLOUD_PROJECT`・`MIMAMORI_CALENDAR_ID`・`MIMAMORI_REMINDERS`、`.gcloudignore` に `.gitignore` を取り込む（`asetts/`・`.env.*` などがアップロードされる）、実行後に gcloud の既定プロジェクトを戻す
+- **デプロイ前にやること**（deploy.sh の実行は人が確認してから）
+  - デプロイ先のプロジェクト作成と課金
+  - `.env` に `GOOGLE_CLOUD_PROJECT`・`MIMAMORI_CALENDAR_ID`・`MIMAMORI_REMINDERS`
+  - `.gcloudignore` に `.gitignore` を取り込む（`asetts/`・`.env.*` などがアップロードされる）
+  - 通知の Webhook（Slack の #みまもりくん。ローカルは `.env` の `MIMAMORI_NOTIFY_WEBHOOK` で送信確認済み 2026-09-28）を Secret Manager（mimamorikun-family）に入れ、deploy.sh から Cloud Run に渡す（`--set-secrets MIMAMORI_NOTIFY_WEBHOOK=…:latest`。Secret Manager の API 有効化と、実行用 SA に `roles/secretmanager.secretAccessor` を足す）。値は `--set-env-vars` に入れない
+  - 実行後に gcloud の既定プロジェクトを戻す（今は okane-kenko-507122）
 - デプロイのあと：本番の台帳（Firestore）に合言葉を入れる（README「4. 合言葉を決める」）、カレンダー共有、Firestore の読み書き確認 → WBS の A-1 を ✅
 - docs/WBS.md の A-1 は「実装済み・実環境確認待ち」。実環境で確認するまで ✅ にしない
 
