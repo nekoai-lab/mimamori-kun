@@ -201,10 +201,12 @@ for(const href of ['/schedule','/plan','/kid','/?mode=parent','/reward?view=pare
   else assert.ok(fallback.contains(links[0]));
 }
 if(!POPULATED)assert.equal(fallback.querySelectorAll('a').filter(visible).length,5);
-const group=root.querySelector('.board-navigation');
+const group=root.querySelector('.board-navigation'), sub=root.querySelector('.board-subnav');
 assert.equal(nav.parentElement,group);
-assert.equal(fallback.parentElement,group);
-assert.equal(root.querySelector('#theme').parentElement,group);
+// 「暗く」はリンクの行と同じ行（.board-subnav）の右端。ほかの親の画面と同じ置き方（A の結合）
+assert.equal(sub.parentElement,group);
+assert.equal(fallback.parentElement,sub);
+assert.equal(root.querySelector('#theme').parentElement,sub);
 """.replace("POPULATED", json.dumps(populated)))
 
 
@@ -222,6 +224,9 @@ def test_navigation_spacing_and_wrapping_css():
     assert rules[".fallback-links"]["display"] == "flex"
     assert rules[".board-navigation a"]["max-width"] == "100%"
     assert rules[".board-navigation a"]["overflow-wrap"] == "anywhere"
+    sub = rules[".board-subnav"]
+    assert sub["display"] == "flex" and sub["flex-wrap"] == "wrap" and float(sub["gap"].removesuffix("px")) >= 8
+    assert rules[".board-subnav .theme"]["margin-left"] == "auto"
 
 
 @pytest.mark.parametrize("appearance", [False, True])
