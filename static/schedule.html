@@ -216,7 +216,7 @@ function showDay(iso){
   let h="<h2>"+m+"月"+d+"日（"+w+"）</h2>";
   if(!list.length) h+='<p class="empty">この日に入っているものはありません。</p>';
   else h+="<ul>"+list.map(it=>"<li>"+esc(shortTitle(it.summary))
-      +'<span class="k">'+esc(it.child)+"・"+(KIND[it.kind]||it.kind||"")
+      +'<span class="k">'+esc(it.child)+"・"+esc(KIND[it.kind]||it.kind||"")
       +(it.status==="done"?"・済":"")+(it.points?"・"+it.points+"pt":"")+"</span></li>").join("")+"</ul>";
   $("#pick").innerHTML=h; $("#pick").hidden=false;
 }
