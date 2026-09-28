@@ -355,3 +355,28 @@ assert.equal(posts()[0].url,'/api/redeem/reject');
 assert.equal(text('#p-note'),'みおくりにして、ポイントを戻しました');
 assert.equal(text('#balance'),'34');
 ''')
+
+
+@pytest.mark.parametrize("status", ["approved", "handed", "rejected"])
+def test_unknown_reply_matches_request_already_decided_by_parent(status):
+    # QA #41：たしかめるまでに親が決めていても「送れた」。「おくれなかったよ」で再申込させない
+    run_js(r'''
+load({bal:100});
+await card(G.label).querySelector('[data-ask]').click();
+replies.push(new Error('offline'));
+replies.push({items:[{id:'new',label:G.label,cost:30,status:STATUS,at:new Date().toISOString()}]});
+reload({bal:70,items:[{id:'new',label:G.label,cost:30,status:STATUS,at:new Date().toISOString()}]});
+await card(G.label).querySelector('[data-go]').click();
+assert.equal(text('#send-note'),'おうちの人に おくったよ');
+assert.equal(posts().length,1);
+'''.replace("STATUS", repr(status)))
+
+
+def test_match_sent_ignores_known_and_other_rewards():
+    run_js(r'''
+const sent={label:G.label,cost:30};
+assert.equal(matchSent(['a'],[{id:'a',label:G.label,cost:30,status:'requested'}],sent),0);
+assert.equal(matchSent([],[{id:'b',label:W.label,cost:100,status:'requested'}],sent),0);
+assert.equal(matchSent([],[{id:'c',label:G.label,cost:20,status:'requested'}],sent),0);
+assert.equal(matchSent([],[{id:'d',label:G.label,cost:30,status:'approved'}],sent),1);
+''')

@@ -276,10 +276,11 @@ function activeReqs(items,now){
   return (items||[]).filter(r=>r.status==="requested"||r.status==="approved"||
     (r.status==="rejected"&&String(r.decided_at||r.at||"").slice(0,10)>=since));
 }
-// 送ったあと返事が分からないとき：送る前になかった申込で、同じものが1件あれば「送れた」
+// 送ったあと返事が分からないとき：送る前になかった申込で、同じものがあれば「送れた」。
+// たしかめるまでに親が OK・手渡し・見送りにしていることがあるので、状態は問わない（QA #41）
 function matchSent(before,after,sent){
   const known=new Set(before);
-  const hits=(after||[]).filter(r=>!known.has(r.id)&&r.label===sent.label&&Number(r.cost)===Number(sent.cost)&&r.status==="requested");
+  const hits=(after||[]).filter(r=>!known.has(r.id)&&r.label===sent.label&&Number(r.cost)===Number(sent.cost));
   return hits.length;
 }
 
