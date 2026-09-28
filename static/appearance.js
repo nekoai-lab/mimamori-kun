@@ -283,7 +283,7 @@
     var card = document.createElement("div");
     card.className = "ap-card";
     card.appendChild(art(t, "ap-stamp", "stamp"));
-    card.appendChild(text("span", "", "きょうの ドリル"));
+    card.appendChild(text("span", "ap-card-name", "きょうの ドリル"));
     card.appendChild(text("span", "ap-go", "おわった"));
     box.appendChild(card);
     box.appendChild(text("p", "ap-muted", "これは みほん。まだ かわっていないよ。"));

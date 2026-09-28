@@ -136,8 +136,10 @@ html:root[data-audience="kid"][data-kid-theme] body { font-family: var(--kid-fon
 .ap-preview { padding: 16px; border-radius: var(--kid-radius-card); background: var(--kid-bg); color: var(--kid-text); border: 1px solid var(--kid-line);
   font-family: var(--kid-font); display: grid; gap: 10px; }
 .ap-preview .ap-art { width: 120px; height: 120px; margin: 0 auto; }
-.ap-preview .ap-card { display: flex; align-items: center; gap: 10px; padding: 12px; background: var(--kid-card); border: 1px solid var(--kid-line); border-radius: var(--kid-radius-card); font-size: 18px; }
+.ap-preview .ap-card { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-width: 0; max-width: 100%; box-sizing: border-box; padding: 12px; background: var(--kid-card); border: 1px solid var(--kid-line); border-radius: var(--kid-radius-card); font-size: 18px; }
 .ap-preview .ap-card .ap-stamp { width: 32px; height: 32px; flex: none; }
+/* 見本のタスク名：狭い幅・文字拡大でも1文字ずつ縦に並ばないよう、最低 5 文字ぶんの幅を取り、足りなければ「おわった」を次の行へ（PR-34 A1追補） */
+.ap-preview .ap-card .ap-card-name { flex: 1 1 5em; min-width: min(5em, 100%); word-break: keep-all; overflow-wrap: anywhere; }
 .ap-preview .ap-card .ap-go { margin-left: auto; min-height: 48px; padding: 8px 16px; border-radius: var(--kid-radius-button); background: var(--kid-accent); color: var(--kid-on-accent); font-weight: 700; display: inline-flex; align-items: center; white-space: nowrap; }
 .ap-preview .ap-muted { color: var(--kid-muted); font-size: 14px; margin: 0; }
 .ap-actions { display: flex; gap: 8px; flex-wrap: wrap; }

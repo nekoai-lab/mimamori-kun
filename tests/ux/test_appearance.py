@@ -501,3 +501,17 @@ def test_theme_cards_wrap_instead_of_overflowing():
     assert "flex-wrap: wrap" in card and "min-width: 0" in card and "grid-template-columns: 96px" not in CSS
     assert re.search(r"\.ap-choice > \.ap-info \{[^}]*min-width: 0", CSS)
     assert re.search(r"\.ap-mini \{[^}]*flex-wrap: wrap", CSS)
+
+
+def test_preview_sample_card_wraps_instead_of_squeezing_the_task_name():
+    """A1追補：「試す」の見本カードも、320px・文字200% で横にはみ出さず、タスク名が1文字ずつ縦に並ばない。
+
+    ブラウザでの実測（320×568・375×667・390×844 の文字200%、3テーマ適用済み、PC）は PR #34 に記録。
+    ここでは、その結果を支える作りを守る：カードは折り返す・親より広がらない、タスク名は最低幅を持つ。
+    """
+    card = re.search(r"\.ap-preview \.ap-card \{([^}]*)\}", CSS).group(1)
+    assert "flex-wrap: wrap" in card and "min-width: 0" in card and "max-width: 100%" in card
+    name = re.search(r"\.ap-preview \.ap-card \.ap-card-name \{([^}]*)\}", CSS).group(1)
+    assert "min-width: min(5em, 100%)" in name and "word-break: keep-all" in name and "overflow-wrap: anywhere" in name
+    js = (STATIC / "appearance.js").read_text(encoding="utf-8")
+    assert 'text("span", "ap-card-name", "きょうの ドリル")' in js
