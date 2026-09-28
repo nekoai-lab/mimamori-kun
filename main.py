@@ -495,7 +495,10 @@ class NoticeSeen(BaseModel):
 
 @app.post("/api/notices/seen", dependencies=[Depends(parent_only)])
 def api_notices_seen(req: NoticeSeen):
-    return {"seen": notify_mod.mark_seen(req.id)}
+    if req.id and not any(n["id"] == req.id for n in notify_mod.notices()):
+        raise HTTPException(404, "その知らせが見つかりませんでした。")
+    seen = notify_mod.mark_seen(req.id)
+    return {"seen": 1 if req.id else seen}
 
 
 class UndoRequest(BaseModel):
@@ -552,6 +555,14 @@ def tasks(request: Request, days: int = 14):
 class StatusRequest(BaseModel):
     event_id: str
     status: str  # todo / doing / done
+
+
+@app.get("/api/status", dependencies=[Depends(parent_only)])
+def api_status(event_id: str):
+    meta = event_meta(event_id)
+    if meta is None:
+        raise HTTPException(404, "その予定が見つかりませんでした。")
+    return {"id": event_id, "status": meta["status"]}
 
 
 @app.post("/api/status")

@@ -153,6 +153,7 @@ def test_child_cannot_open_the_parent_board():
     ("post", "/api/redeem/hand", {"id": "x"}),
     ("post", "/api/redeem/cap", {"yen": 100}),
     ("post", "/api/auth/logout_all", None),
+    ("get", "/api/status?event_id=d1", None),   # 予定の今の状態（/board の再確認。PR #35）
 ])
 def test_child_cannot_use_parent_only_api(method, path, body):
     c = login(YOUNGER)
