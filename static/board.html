@@ -209,7 +209,11 @@ button:focus-visible,a:focus-visible,summary:focus-visible,select:focus-visible,
 #readingForm label{display:block;margin:10px 0}
 #readingPreview{line-height:2.5}
 #readingForm select,#reload,.notice-card button{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line-strong);border-radius:6px;padding:8px}
-[data-family-nav]:not(:empty) + .fallback-links{display:none}
+.board-navigation{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.board-navigation [data-family-nav]{flex-wrap:wrap;max-width:100%}
+.fallback-links{display:flex;flex-wrap:wrap;gap:8px;margin:0;max-width:100%}
+.board-navigation a{max-width:100%;overflow-wrap:anywhere}
+[data-family-nav]:not(:empty) + .fallback-links .fallback-primary{display:none}
 #exceptions{margin-top:16px}
 .action-feedback{color:var(--ink)}
 .action-feedback.is-warning{color:var(--late-ink)}
@@ -321,9 +325,11 @@ button:focus-visible,a:focus-visible,summary:focus-visible,select:focus-visible,
     </span>
   </footer>
   </details>
-  <div data-family-nav></div>
-  <p class="fallback-links"><a href="/?mode=parent">撮る</a> · <a href="/reward?view=parent">ごほうび</a> · <a href="/schedule">予定表</a> · <a href="/plan">計画</a> · <a href="/kid">やりとり</a></p>
-  <button class="theme" id="theme" type="button">☾ 暗く</button>
+  <div class="board-navigation">
+    <div data-family-nav></div>
+    <p class="fallback-links"><a class="fallback-primary" href="/?mode=parent">撮る</a><a class="fallback-primary" href="/reward?view=parent">ごほうび</a><a href="/schedule">予定表</a><a href="/plan">計画</a><a href="/kid">やりとり</a></p>
+    <button class="theme" id="theme" type="button">☾ 暗く</button>
+  </div>
 </main>
 <script src="/static/appearance.js"></script>
 

@@ -85,6 +85,7 @@ function fetch(url,opts){
 const doc={querySelector:el,querySelectorAll:sel=>doc.body.querySelectorAll(sel),hidden:false,addEventListener(ev,fn){this[ev]=fn;},documentElement:{style:{setProperty(){}}}};
 doc.body=node('body');doc.activeElement=doc.body;
 const context=vm.createContext({document:doc,fetch,console,assert,el,calls,responses,reply,task,tasks,notice,
+  node,boardHTML:input.html,boardCSS:input.css,
   confirm:()=>true,alert:()=>{},FormData:class{append(){}},
   // 共通ライブラリの固定境界だけを模す。A がなくても同じ処理が動く。
   ...(input.appearance?{Appearance:{setChild(){}},AppearanceStore:{read:async()=>({}),write:async()=>{throw Error('未接続');}}}:{}),
@@ -101,7 +102,10 @@ vm.runInContext(input.script,context);
 def run_js(test, appearance=False):
     if NODE is None:
         pytest.skip("node が無い")
-    proc = subprocess.run([NODE, "-e", HARNESS], input=json.dumps({"script": SCRIPT, "test": test, "appearance": appearance}),
+    proc = subprocess.run([NODE, "-e", HARNESS], input=json.dumps({
+        "script": SCRIPT, "test": test, "appearance": appearance,
+        "html": HTML, "css": re.search(r"<style>([\s\S]*?)</style>", HTML)[1],
+    }),
                           text=True, capture_output=True, timeout=20)
     assert proc.returncode == 0, proc.stderr
 
@@ -145,6 +149,79 @@ def test_layout_and_integration_contract():
     assert "過去14日〜未来14日" in HTML
     assert "保存はまだ利用できません" in HTML
     assert '<script>\n/* ---- ログアウト（#16） ---- */' in HTML
+
+
+@pytest.mark.parametrize("populated", [False, True])
+def test_family_navigation_visible_links(populated):
+    run_js(r"""
+// 実 HTML を読み、A が描く親用リンクだけをスタブで追加する。
+const root=node('main');
+root.innerHTML=boardHTML.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)[1];
+const nav=root.querySelector('[data-family-nav]');
+if(POPULATED)nav.innerHTML='<a data-ap-nav href="/board">一覧</a><a data-ap-nav href="/?mode=parent">撮る</a><a data-ap-nav href="/reward?view=parent">ごほうび</a>';
+// 描画エンジンではなく、この退行に関係する CSS の子孫・隣接・空判定を評価。
+// 祖先の display:none も確認し、元の「行ごと隠す」ルールの復活を検出する。
+function matches(element,selector){
+  const parts=selector.trim().split(/\s+/);
+  function matchAt(e,i){
+    if(!e)return false;
+    const q=parts[i],nonempty=q.includes(':not(:empty)');
+    if(nonempty&&!e.children.length&&!e.textContent)return false;
+    if(!e.matches(q.replace(':not(:empty)','')))return false;
+    if(i===0)return true;
+    if(parts[i-1]==='+'){
+      const siblings=e.parentElement.children;
+      return matchAt(siblings[siblings.indexOf(e)-1],i-2);
+    }
+    for(let p=e.parentElement;p;p=p.parentElement)if(matchAt(p,i-1))return true;
+    return false;
+  }
+  return matchAt(element,parts.length-1);
+}
+const rules=[...boardCSS.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+function visible(e){
+  for(let p=e;p;p=p.parentElement){
+    if(p.hidden||'hidden' in p.attrs)return false;
+    let display='';
+    for(const [,selectors,body] of rules){
+      const value=body.match(/(?:^|;)\s*display:\s*([^;!]+)/);
+      if(value&&selectors.split(',').some(s=>matches(p,s)))display=value[1].trim();
+    }
+    if(display==='none')return false;
+  }
+  return true;
+}
+const fallback=root.querySelector('.fallback-links');
+assert.ok(visible(fallback));
+for(const href of ['/schedule','/plan','/kid','/?mode=parent','/reward?view=parent']){
+  const links=root.querySelectorAll('a').filter(a=>a.attrs.href===href&&visible(a));
+  assert.equal(links.length,1,href+' must have exactly one visible link');
+  if(POPULATED&&['/?mode=parent','/reward?view=parent'].includes(href))
+    assert.ok('data-ap-nav' in links[0].attrs);
+  else assert.ok(fallback.contains(links[0]));
+}
+if(!POPULATED)assert.equal(fallback.querySelectorAll('a').filter(visible).length,5);
+const group=root.querySelector('.board-navigation');
+assert.equal(nav.parentElement,group);
+assert.equal(fallback.parentElement,group);
+assert.equal(root.querySelector('#theme').parentElement,group);
+""".replace("POPULATED", json.dumps(populated)))
+
+
+def test_navigation_spacing_and_wrapping_css():
+    css = re.search(r"<style>([\s\S]*?)</style>", HTML)[1]
+    rules = {selector.strip(): dict(re.findall(r"([\w-]+):\s*([^;]+)", body))
+             for selector, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css)}
+    group = rules[".board-navigation"]
+    assert group["display"] == "flex"
+    assert group["flex-direction"] == "column"
+    assert float(group["gap"].removesuffix("px")) >= 8
+    for selector in (".board-navigation [data-family-nav]", ".fallback-links"):
+        assert rules[selector]["flex-wrap"] == "wrap"
+        assert rules[selector]["max-width"] == "100%"
+    assert rules[".fallback-links"]["display"] == "flex"
+    assert rules[".board-navigation a"]["max-width"] == "100%"
+    assert rules[".board-navigation a"]["overflow-wrap"] == "anywhere"
 
 
 @pytest.mark.parametrize("appearance", [False, True])
