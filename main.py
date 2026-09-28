@@ -301,6 +301,32 @@ class RegisterRequest(BaseModel):
     source: str = "parent"         # "kid" なら、子が入れたものとして親に知らせる
 
 
+KINDS = ("event", "deadline", "homework", "bring")
+_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_TIME = re.compile(r"\d{2}:\d{2}")
+
+
+def _check_item(item: Dict[str, Any]) -> None:
+    """登録する1件の形を確かめる（#16）。**親から来たものも同じ**。
+
+    おたよりの読み取り結果は画像の中身に左右されるし、子どもも入れられる。
+    画面に出る値（種類・日付・時刻）に、決まった形以外のものを入れさせない。
+    """
+    if item.get("kind") not in KINDS:
+        raise HTTPException(400, "種類は event / deadline / homework / bring のどれかです。")
+    for key in ("date", "end_date"):
+        v = item.get(key)
+        if v is not None and not (isinstance(v, str) and _DATE.fullmatch(v)):
+            if key == "date" or v != "":
+                raise HTTPException(400, "日付は YYYY-MM-DD の形で入れてください。")
+    for key in ("time_start", "time_end"):
+        v = item.get(key)
+        if v not in (None, "") and not (isinstance(v, str) and _TIME.fullmatch(v)):
+            raise HTTPException(400, "時刻は HH:MM の形で入れてください。")
+    if not isinstance(item.get("title"), str) or not item["title"].strip():
+        raise HTTPException(400, "件名がありません。")
+
+
 @app.post("/api/register")
 def register(req: RegisterRequest, request: Request):
     """カレンダーに入れる。
@@ -312,6 +338,8 @@ def register(req: RegisterRequest, request: Request):
     """
     if not req.items:
         raise HTTPException(400, "登録するものがありません。")
+    for i in req.items:
+        _check_item(i)
     user = _user(request)
     if not auth.is_parent(user):
         # 子どもは自分のぶんだけ入れられる。「子が入れた」として親に知らせる。保留にはできない

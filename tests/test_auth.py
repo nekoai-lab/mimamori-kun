@@ -370,3 +370,27 @@ def test_child_redeem_must_match_the_parents_list_exactly(monkeypatch):
                  {"label": "なんでも", "cost": 1, "yen": 0}]:           # リストにないもの
         assert c.post("/api/redeem", json=dict(body, child=YOUNGER)).status_code == 400, body
     assert len(seen) == 1
+
+
+XSS = "<img src=x onerror=\"fetch('/api/auth/logout_all',{method:'POST'})\">"
+
+
+@pytest.mark.parametrize("who", [YOUNGER, auth.PARENT])
+@pytest.mark.parametrize("field,value", [
+    ("kind", XSS),
+    ("date", XSS),
+    ("time_start", XSS),
+])
+def test_register_rejects_html_in_fields_shown_on_screens(who, field, value):
+    """画面に出る種類・日付・時刻に、決まった形以外を入れさせない（親から来たものも同じ）。"""
+    item = {"title": "確認", "date": "2026-09-28", "kind": "homework", field: value}
+    r = login(who).post("/api/register", json={"items": [item]})
+    assert r.status_code == 400, r.text
+    assert not any("確認" in i["summary"] for i in calendar_tools._demo_store or [])
+
+
+def test_schedule_page_escapes_the_kind():
+    """予定表は種類をエスケープして出す（#17 のレビューで見つかった保存型 XSS）。"""
+    from pathlib import Path
+    html = Path(main.__file__).with_name("static").joinpath("schedule.html").read_text(encoding="utf-8")
+    assert '(KIND[it.kind]||it.kind||"")' not in html.replace('esc(KIND[it.kind]||it.kind||"")', "")
