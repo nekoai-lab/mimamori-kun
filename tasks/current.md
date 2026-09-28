@@ -4,7 +4,7 @@
 
 - 更新日: 2026-09-28
 - 担当エージェント: Claude Code（#16）
-- レビュー: PR #17 のR1追補を再確認（2026-09-28、6b66e97）。`design/inbox/UX_REVIEW.md` に前回本文を保持して追記。直すものなし、ux-pass でよい。見た目は塊 A に持ち越し。ラベル・マージは未操作。
+- レビュー: PR #17 のR1追補を ChatGPT が再確認（2026-09-28、6b66e97）。直すものなし、ux-pass でよい。`design/UX_REVIEW.md` の末尾「再確認：R1追補のみ」に反映し、inbox は空にした。見た目は塊 A に持ち越し。
 
 <!-- 上限で交代するときは、次のエージェントがこのファイルだけ読めば続きができるように書く -->
 
@@ -18,12 +18,12 @@
 
 ## やり残し
 
-- #16：PR #17 のR1追補はUX再確認済み、ux-pass でよい。次は inbox の確認・正本への反映と、QA／ラベル等の受け渡し（人が頼む）。
+- #16：PR #17 は ux-pass を付けた。UX のあとにコミットを足したので request-qa を取り直す。qa-pass・CI がそろったらマージ（人の指示を待つ）
 - **デプロイ前にやること**（deploy.sh の実行は人が確認してから）
   - [x] ① デプロイ先のプロジェクト作成と課金 → 済（`mimamorikun-family`、番号 932685100691。2026-09-28）
   - `.env`：`GOOGLE_CLOUD_PROJECT=mimamorikun-family` は入れた（2026-09-28）
   - [x] `.env` に `MIMAMORI_CALENDAR_ID`（アプリ専用のカレンダー）を入れた（2026-09-28）
-  - リマインダー：終日と時刻つきを分ける（Issue #31、実装 Codex）。終日は `MIMAMORI_REMINDERS_ALLDAY=360`（前の日 18:00）、時刻つきは `MIMAMORI_REMINDERS_TIMED=1080,60`（`MIMAMORI_REMINDERS` は時刻つきの既定として残す）。**#31 がマージされてから `.env` に2つを入れる**（人が決めた。2026-09-28。`1200,60` はやめた）
+  - [x] リマインダー：終日と時刻つきを分けた（#31 → PR #32 マージ、実装 Codex）。`.env` に `MIMAMORI_REMINDERS_ALLDAY=360`（前の日 18:00）と `MIMAMORI_REMINDERS_TIMED=1080,60` を入れた（2026-09-28）。deploy.sh が2つを Cloud Run に渡す
   - `.gcloudignore` に `.gitignore` を取り込む（`asetts/`・`.env.*` などがアップロードされる）
   - 通知の Webhook（Slack の #みまもりくん。ローカルは `.env` の `MIMAMORI_NOTIFY_WEBHOOK` で送信確認済み 2026-09-28）を Secret Manager（mimamorikun-family）に入れ、deploy.sh から Cloud Run に渡す（`--set-secrets MIMAMORI_NOTIFY_WEBHOOK=…:latest`。Secret Manager の API 有効化と、実行用 SA に `roles/secretmanager.secretAccessor` を足す）。値は `--set-env-vars` に入れない
   - 実行後に gcloud の既定プロジェクトを戻す（今は okane-kenko-507122）
@@ -34,5 +34,5 @@
 
 ## 次の1手
 
-- #17 はR1追補のUX再確認済み。inbox反映・QAとux-passの確認 → 別途マージ判断 → 塊 A・C・D・F（今回のレビュー作業ではマージしない）。
+- #17 マージ（人の指示を待つ）→ #29 を main に合わせ直して request-qa → 塊 A・C・D・F
 - ARCHITECTURE.md と CLAUDE.md のコマンドを埋める
