@@ -22,20 +22,22 @@
     ':root[data-role="child"] .parent-only,:root[data-role="child"] a[href="/board"]{display:none!important}' +
     // 子どもの端末で親に切り替えているときの帯（#16 ①）。どの画面でも上に出す
     "#who-switched{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:10px;flex-wrap:wrap;" +
-    "padding:8px 16px;background:#1F2422;color:#fff;font-size:14px}" +
+    "padding:8px 16px;background:var(--parent-text,#1F2422);color:var(--parent-bg,#fff);font-size:14px}" +
     "#who-switched b{font-weight:700}#who-switched span{flex:1;min-width:12em}" +
     "#who-switched button{font:inherit;font-weight:700;padding:8px 16px;min-height:44px;border-radius:999px;" +
-    "border:0;background:#fff;color:#1F2422;cursor:pointer}" +
-    "#who-switched .who-err{flex-basis:100%;color:#FFBD8A;font-weight:700}" +
+    "border:0;background:var(--parent-bg,#fff);color:var(--parent-text,#1F2422);cursor:pointer}" +
+    "#who-switched .who-err{flex-basis:100%;color:var(--parent-bg,#fff);font-weight:700;text-decoration:underline}" +
+    // 帯も各画面のヘッダーも sticky で上に付くので、帯の高さだけヘッダーを下げて重ねない（UX_REVIEW PR-17 A3）
+    "html[data-who-switched] header{top:var(--who-bar-h,0px)}" +
     "#who-switched button:disabled{opacity:.6;cursor:default}" +
     // 戻れたか分からないとき（R1 追補）。画面全体をおおう
     "#who-unknown{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;" +
-    "padding:16px;background:#1F2422;color:#fff}" +
+    "padding:16px;background:var(--parent-text,#1F2422);color:var(--parent-bg,#fff)}" +
     "#who-unknown>div{max-width:28em;text-align:center}" +
     "#who-unknown p{margin:0 0 12px;font-size:15px;line-height:1.7}" +
     "#who-unknown #who-unknown-t{font-size:18px;font-weight:700}" +
     "#who-unknown button{font:inherit;font-weight:700;margin-top:8px;padding:10px 20px;min-height:44px;" +
-    "border-radius:999px;border:0;background:#fff;color:#1F2422;cursor:pointer}" +
+    "border-radius:999px;border:0;background:var(--parent-bg,#fff);color:var(--parent-text,#1F2422);cursor:pointer}" +
     "#who-unknown button:disabled{opacity:.6;cursor:default}" +
     "#who-parent{display:block;margin:28px auto 16px;text-align:center;font-size:14px}" +
     // 押せる場所を 44px 以上に（UX_REVIEW R5）
@@ -188,6 +190,10 @@
     barErr.className = "who-err"; barErr.setAttribute("role", "alert");
     bar.appendChild(text); bar.appendChild(barBtn); bar.appendChild(barErr);
     document.body.insertBefore(bar, document.body.firstChild);
+    root.setAttribute("data-who-switched", "");
+    function barHeight() { root.style.setProperty("--who-bar-h", (bar.offsetHeight || 0) + "px"); }
+    barHeight();
+    if (window.ResizeObserver) new ResizeObserver(barHeight).observe(bar);
 
     var last = Date.now(), touched = Date.now();
     function active() {
@@ -218,10 +224,15 @@
     .then(function (me) {
       if (!me) return;
       root.dataset.role = me.role;
+      // 親子の境界（見た目の色の切り替え）。画面が自分で決めていれば、それに従う
+      var aud = root.getAttribute("data-audience");
+      if (aud !== "kid" && aud !== "parent") root.setAttribute("data-audience", me.role === "child" ? "kid" : "parent");
       window.mimamoriMe = me;
       var ready = function () {
         if (me.switched) showSwitched(me);
-        else if (me.role === "child" && me.auth) showParentEntry();
+        // 親への入口は、プロフィールのある画面ではその中（appearance.js）。ない画面では下に置く（UX_REVIEW PR-17 A2）
+        else if (me.role === "child" && me.auth &&
+                 !(window.Appearance && document.querySelector("[data-profile-menu]"))) showParentEntry();
       };
       if (document.body) ready();
       else document.addEventListener("DOMContentLoaded", ready);
@@ -280,9 +291,11 @@
     var back = document.createElement("div");
     back.id = "who-back";
     back.setAttribute("role", "dialog");
-    back.setAttribute("aria-label", "だれが つかう？");
-    back.innerHTML =
-      '<div id="who-box"><p id="who-q">だれが つかう？</p><div id="who-list"></div></div>';
+    // 親は「どの子のぶんか」を選ぶ（親が子になりかわるわけではない。UX_REVIEW PR-29 A3）
+    var q = root.dataset.role === "parent" ? "どの子の ぶんですか？" : "だれが つかう？";
+    back.setAttribute("aria-label", q);
+    back.innerHTML = '<div id="who-box"><p id="who-q"></p><div id="who-list"></div></div>';
+    back.querySelector("#who-q").textContent = q;
 
     var box = back.querySelector("#who-list");
     list.forEach(function (name) {

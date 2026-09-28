@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-hidden="true">
+  <!-- しろい小鳥の相棒：丸い白い体・長い尾（オリジナル。既存マスコットの顔やポーズは写さない） -->
+  <path d="M88 70 Q110 74 116 92 Q100 84 86 80 Z" fill="#6F6258" stroke="#8C8C8C" stroke-width="1.5"/>
+  <ellipse cx="56" cy="64" rx="36" ry="32" fill="#FFFFFF" stroke="#9AA3AA" stroke-width="2.5"/>
+  <path d="M62 62 Q80 58 88 74 Q76 84 62 76 Z" fill="#8A7B70" stroke="#9AA3AA" stroke-width="1.5"/>
+  <path d="M66 66 Q76 66 82 74" fill="none" stroke="#B9AEA5" stroke-width="1.5"/>
+  <circle cx="42" cy="56" r="3.6" fill="#1D1D1F"/>
+  <circle cx="60" cy="56" r="3.6" fill="#1D1D1F"/>
+  <path d="M48 62 L54 62 L51 66 Z" fill="#3A3A3A"/>
+  <ellipse cx="36" cy="66" rx="5" ry="3" fill="#F6C3A6"/>
+  <ellipse cx="66" cy="66" rx="5" ry="3" fill="#F6C3A6"/>
+  <path d="M46 95 v8 M44 103 h5 M62 95 v8 M60 103 h5" stroke="#8C8C8C" stroke-width="2" stroke-linecap="round"/>
+</svg>
