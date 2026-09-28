@@ -653,3 +653,125 @@ assert.equal(document.querySelector('#recheck').disabled,false);
 assert.ok(uncertain);
 assert.doesNotMatch(text('#rewards'),/もうしこめる|もうしこむ/);
 ''')
+
+
+@pytest.mark.parametrize("reverse_ready", [False, True])
+def test_cap_saves_are_serial_and_keep_latest_value(reverse_ready):
+    run_js(r'''
+setAudience(true);
+load({list:[]});
+const firstReply=deferred(), secondReply=deferred();
+let server={yen:0,count:5}, active=0, peak=0;
+const received=[];
+const response=()=>({ok:true,status:200,json:async()=>({})});
+const save=gate=>async(url,options)=>{
+  active++; peak=Math.max(peak,active);
+  const cap=JSON.parse(options.body); received.push(cap);
+  await gate.promise;
+  server=cap; active--;
+  return response();
+};
+// 2本目が先に応答できる状態でも、1本目が終わるまで送信しない。
+routes={
+  '/api/redeem/cap':[save(firstReply),save(secondReply)],
+};
+routes['/api/points?child='+encodeURIComponent(child)]=[{balance:34},{balance:34}];
+const read=async()=>({ok:true,json:async()=>({items:[],remaining:{cap:{...server}}})});
+routes['/api/redeem?child='+encodeURIComponent(child)]=[read,read];
+document.querySelector('#capcount').value='0';
+const first=saveCap();
+document.querySelector('#capcount').value='2';
+const second=saveCap();
+assert.equal(document.querySelector('#capcount').disabled,false);
+assert.equal(document.querySelector('#capyen').disabled,false);
+assert.equal(posts().length,1);
+assert.equal(text('#capnote'),'保存しています');
+if(REVERSE) secondReply.resolve();
+firstReply.resolve();
+await new Promise(r=>setImmediate(r));
+assert.equal(posts().length,2);
+assert.equal(Number(document.querySelector('#capcount').value),2);
+if(!REVERSE){
+  assert.equal(text('#capnote'),'保存しています');
+  secondReply.resolve();
+}
+await first;
+await second;
+assert.equal(peak,1);
+assert.deepEqual(received,[{yen:0,count:0},{yen:0,count:2}]);
+assert.deepEqual(server,{yen:0,count:2});
+assert.deepEqual(remaining.cap,server);
+assert.equal(Number(document.querySelector('#capcount').value),server.count);
+assert.equal(text('#capnote'),'保存しました');
+'''.replace("REVERSE", str(reverse_ready).lower()))
+
+
+@pytest.mark.parametrize("phase", ["post", "reload"])
+def test_cap_changes_while_saving_send_only_latest(phase):
+    run_js(r'''
+setAudience(true);
+load({list:[]});
+const slow=deferred();
+const ok={ok:true,json:async()=>({})};
+if(PHASE==='post') replies.push(()=>slow.promise);
+else replies.push({});
+if(PHASE==='reload') replies.push(()=>slow.promise);
+else replies.push({balance:34});
+replies.push({items:[],remaining:{cap:{yen:0,count:0}}});
+replies.push({});
+reload({bal:34,rem:{cap:{yen:500,count:2}}});
+document.querySelector('#capcount').value='0';
+const work=saveCap();
+await new Promise(r=>setImmediate(r));
+document.querySelector('#capcount').value='1'; await saveCap();
+document.querySelector('#capcount').value='2'; await saveCap();
+document.querySelector('#capyen').value='500'; await saveCap();
+assert.equal(posts().length,1);
+slow.resolve(PHASE==='post'?ok:{ok:true,json:async()=>({balance:34})});
+await work;
+assert.deepEqual(posts().map(c=>JSON.parse(c.options.body)),[{yen:0,count:0},{yen:500,count:2}]);
+assert.equal(Number(document.querySelector('#capyen').value),500);
+assert.equal(Number(document.querySelector('#capcount').value),2);
+assert.deepEqual(remaining.cap,{yen:500,count:2});
+assert.equal(text('#capnote'),'保存しました');
+'''.replace("PHASE", repr(phase)))
+
+
+@pytest.mark.parametrize("outcome", ["count_mismatch", "yen_mismatch", "missing", "read_failed", "editing"])
+def test_cap_success_requires_readback_matching_inputs(outcome):
+    run_js(r'''
+setAudience(true);
+load({list:[]});
+const slow=deferred();
+replies.push(()=>slow.promise);
+document.querySelector('#capyen').value='500';
+document.querySelector('#capcount').value='2';
+const work=saveCap();
+const outcome=OUTCOME;
+if(outcome==='read_failed') replies.push({balance:34},new Error('offline'));
+else reload({bal:34,rem:outcome==='missing'?{}:{cap:{yen:outcome==='yen_mismatch'?0:500,count:outcome==='count_mismatch'?0:2}}});
+// change（blur）前の入力も、読み直しで消さず画面の値と照合する。
+if(outcome==='editing') document.querySelector('#capcount').value='3';
+slow.resolve({ok:true,json:async()=>({})});
+await work;
+assert.match(text('#capnote'),/^保存できたか分かりません/);
+assert.equal(Number(document.querySelector('#capyen').value),500);
+assert.equal(Number(document.querySelector('#capcount').value),outcome==='editing'?3:2);
+'''.replace("OUTCOME", repr(outcome)))
+
+
+@pytest.mark.parametrize("status", [400, 403, 422])
+def test_cap_rejected_save_reports_failure_and_allows_next_save(status):
+    run_js(r'''
+setAudience(true);
+load({list:[]});
+document.querySelector('#capcount').value='2';
+replies.push({ok:false,status:STATUS,body:{detail:'上限を保存できません'}});
+await saveCap();
+assert.match(text('#capnote'),/^保存できませんでした/);
+replies.push({});
+reload({bal:34,rem:{cap:{yen:0,count:2}}});
+await saveCap();
+assert.equal(posts().length,2);
+assert.equal(text('#capnote'),'保存しました');
+'''.replace("STATUS", str(status)))

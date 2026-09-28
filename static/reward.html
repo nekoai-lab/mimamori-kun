@@ -566,7 +566,7 @@ function paintParent(){
   if(rem.yen_left!=null) bits.push(rem.yen_left<0?"今月の上限を "+(-rem.yen_left)+"円 こえています":"今月あと "+rem.yen_left+"円");
   if(rem.count_left!=null) bits.push(rem.count_left<0?"今月の回数を "+(-rem.count_left)+"回 こえています":"あと "+rem.count_left+"回");
   $("#left").textContent=bits.join("／");
-  if(rem.cap){ $("#capyen").value=rem.cap.yen; $("#capcount").value=rem.cap.count; }
+  if(rem.cap&&!capSaving){ $("#capyen").value=rem.cap.yen; $("#capcount").value=rem.cap.count; }
 }
 function showReject(row,r){
   if(row.querySelector("textarea")) return;
@@ -635,13 +635,29 @@ async function loadPace(){
     list.appendChild(element("li",reward.label+"（"+cost+"pt）："+text));
   }
 }
+let capSaving=false, pendingCap=null;
+function capInput(){ return {yen:Number($("#capyen").value||0),count:Number($("#capcount").value||0)}; }
 async function saveCap(){
-  $("#capnote").textContent="保存しています";
+  pendingCap=capInput();
+  if(capSaving) return;
+  capSaving=true;
   try{
-    await postJSON("/api/redeem/cap",{yen:Number($("#capyen").value||0),count:Number($("#capcount").value||0)});
-    $("#capnote").textContent="保存しました";
-    await loadChild(true);
-  }catch(err){ $("#capnote").textContent=err.unknown?"保存できたか分かりません。読み直して確かめてください":"保存できませんでした："+err.message; }
+    // 読み直しまで1本ずつ。待っている間の変更は最新の値だけ送る。
+    while(pendingCap){
+      const sent=pendingCap;
+      pendingCap=null;
+      $("#capnote").textContent="保存しています";
+      let done;
+      try{
+        await postJSON("/api/redeem/cap",sent);
+        const verified=await loadChild(true);
+        const current=capInput(), cap=verified?.cap;
+        done=cap&&cap.yen===current.yen&&cap.count===current.count
+          ?"保存しました":"保存できたか分かりません。読み直して確かめてください";
+      }catch(err){ done=err.unknown?"保存できたか分かりません。読み直して確かめてください":"保存できませんでした："+err.message; }
+      if(!pendingCap) $("#capnote").textContent=done;
+    }
+  }finally{ capSaving=false; }
 }
 $("#capyen").addEventListener("change",saveCap);
 $("#capcount").addEventListener("change",saveCap);
@@ -687,6 +703,7 @@ async function loadChild(keep){
     const saved=pendingGet("kid:"+me);
     if(saved&&saved.sent&&Array.isArray(saved.before)){ uncertain=saved.sent; lastSent=saved; recheck(); }
   }
+  return remaining;
 }
 $("#reload").addEventListener("click",()=>loadChild(false));
 // 文字を大きくしてナビが画面の3割をこえたら、下に固定しない（kid と同じ）
