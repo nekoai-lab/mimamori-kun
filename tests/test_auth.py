@@ -241,3 +241,96 @@ def test_auth_can_be_turned_off_only_locally(monkeypatch):
     assert client().get("/api/tasks").status_code == 200
     monkeypatch.setenv("K_SERVICE", "test-service")        # Cloud Run では外せない
     assert client().get("/api/tasks").status_code == 401
+
+
+# ---------------------------------------------------------------- レビューで見つかった穴（#17）
+
+def test_child_reading_does_not_see_sibling_events():
+    """子どもが撮ったときの重複チェックに、兄弟の予定（件名・id・日付）が出ない。"""
+    from mimamori import agent
+    sibling = next(i for i in calendar_tools.list_tasks(days=14)["items"]
+                   if i["child"] == OLDER and "三者面談" in i["summary"])
+    item = {"title": sibling["summary"].split("｜")[-1], "date": sibling["date"], "kind": "deadline",
+            "child": YOUNGER}
+    as_family = agent._review([dict(item)])
+    as_child = agent._review([dict(item)], YOUNGER)
+    leaked = json.dumps(as_child, ensure_ascii=False)
+    assert sibling["id"] not in leaked and OLDER not in leaked
+    # 親として見たときは、兄弟の予定とも突き合わせる（比べ方そのものは変えていない確認）
+    assert sibling["id"] in json.dumps(as_family, ensure_ascii=False) or as_family["skipped"]
+
+
+def test_child_reading_tool_lists_only_their_events():
+    from mimamori import agent
+    rows = agent._scoped_list_events(YOUNGER)("2000-01-01", "2100-01-01")
+    titles = [r["summary"] for r in rows]
+    assert titles and all(t.startswith(YOUNGER) for t in titles)
+
+
+def test_extract_passes_the_logged_in_child(monkeypatch):
+    seen = {}
+
+    async def fake_read(data, content_type, hint="", child=None):
+        seen["child"] = child
+        return {"items": []}
+
+    monkeypatch.setattr(main, "read_otayori", fake_read)
+    monkeypatch.setattr(main.images_mod, "normalize", lambda data, ct: (data, "image/jpeg"))
+    files = {"image": ("a.jpg", b"x", "image/jpeg")}
+    assert login(YOUNGER).post("/api/extract", files=files).status_code == 200
+    assert seen["child"] == YOUNGER
+    assert login(auth.PARENT).post("/api/extract", files=files).status_code == 200
+    assert seen["child"] is None
+
+
+def test_child_can_undo_only_what_they_just_added(monkeypatch):
+    c = login(YOUNGER)
+    # 親が入れた自分の予定は取り消せない（/api/status の「取り消しは親だけ」の抜け道にしない）
+    calendar_tools.list_tasks(days=14)                     # デモの台帳を作らせる
+    by_parent = next(i["id"] for i in calendar_tools._demo_store if i["child"] == YOUNGER)
+    assert c.post("/api/register/undo", json={"ids": [by_parent]}).status_code == 403
+    # 自分で入れた直後なら取り消せる
+    r = c.post("/api/register", json={"items": [{"title": "音読", "date": "2026-10-01", "kind": "homework"}]})
+    mine = r.json()["results"][0]["id"]
+    assert c.post("/api/register/undo", json={"ids": [mine]}).json()["undone"] == 1
+    # 10分を過ぎたら取り消せない
+    r = c.post("/api/register", json={"items": [{"title": "計算", "date": "2026-10-01", "kind": "homework"}]})
+    old = r.json()["results"][0]["id"]
+    row = next(i for i in calendar_tools._demo_store if i["id"] == old)
+    row["created"] -= main.UNDO_SECONDS + 1
+    assert c.post("/api/register/undo", json={"ids": [old]}).status_code == 403
+
+
+def test_parallel_wrong_logins_compare_at_most_max_fails(monkeypatch):
+    """同時に何回投げても、ロックまでに合言葉を比べるのは MAX_FAILS 回だけ。回数も消えない。"""
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+
+    compared = []
+    lock = threading.Lock()
+    real = auth._hash
+
+    def counting(passcode, salt):
+        with lock:
+            compared.append(passcode)
+        return real(passcode, salt)
+
+    monkeypatch.setattr(auth, "_hash", counting)
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        results = list(pool.map(lambda _: auth.check(YOUNGER, "0000")[0], range(24)))
+    assert len(compared) <= auth.MAX_FAILS
+    assert results.count("wrong") + results.count("locked") == 24
+    assert auth.locked_seconds(YOUNGER) > 0
+    # ロック中は正しい合言葉でも比べない
+    assert auth.check(YOUNGER, CODES[YOUNGER])[0] == "locked"
+
+
+def test_another_persons_failures_do_not_clear_a_lock(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    for _ in range(auth.MAX_FAILS):
+        auth.check(YOUNGER, "0000")
+    assert auth.locked_seconds(YOUNGER) > 0
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda _: auth.check(OLDER, "0000"), range(8)))
+    assert auth.locked_seconds(YOUNGER) > 0

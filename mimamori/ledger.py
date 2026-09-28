@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 JST = timezone(timedelta(hours=9))
 _LOCAL_PATH = Path(os.getenv("MIMAMORI_LEDGER_PATH", ".data/ledger.json"))
@@ -37,6 +38,10 @@ def _now() -> str:
 
 
 # ------------------------------------------------------------------ 保存先
+
+# JSON ファイル1本を丸ごと読み書きするので、同時に書くと片方が消える。1つの鍵でまとめて守る（#16）
+_LOCAL_LOCK = threading.RLock()
+
 
 class _LocalStore:
     """開発用。JSON ファイル1本。Cloud Run はステートレスなので本番では使わない。"""
@@ -61,9 +66,10 @@ class _LocalStore:
         )
 
     def append(self, entry: Dict[str, Any]) -> Dict[str, Any]:
-        data = self._read()
-        data["entries"].append(entry)
-        self._write(data)
+        with _LOCAL_LOCK:
+            data = self._read()
+            data["entries"].append(entry)
+            self._write(data)
         return entry
 
     def entries(self, child: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -71,21 +77,32 @@ class _LocalStore:
         return [r for r in rows if child is None or r.get("child") == child]
 
     def update(self, entry_id: str, patch: Dict[str, Any]) -> bool:
-        data = self._read()
-        for r in data["entries"]:
-            if r.get("id") == entry_id:
-                r.update(patch)
-                self._write(data)
-                return True
+        with _LOCAL_LOCK:
+            data = self._read()
+            for r in data["entries"]:
+                if r.get("id") == entry_id:
+                    r.update(patch)
+                    self._write(data)
+                    return True
         return False
 
     def get_setting(self, key: str) -> Any:
-        return self._read().get("settings", {}).get(key)
+        with _LOCAL_LOCK:
+            return self._read().get("settings", {}).get(key)
 
     def set_setting(self, key: str, value: Any) -> None:
-        data = self._read()
-        data.setdefault("settings", {})[key] = value
-        self._write(data)
+        with _LOCAL_LOCK:
+            data = self._read()
+            data.setdefault("settings", {})[key] = value
+            self._write(data)
+
+    def transact_setting(self, key: str, fn: Callable[[Any], Any]) -> Any:
+        with _LOCAL_LOCK:
+            data = self._read()
+            new = fn(data.setdefault("settings", {}).get(key))
+            data["settings"][key] = new
+            self._write(data)
+            return new
 
 
 class _FirestoreStore:
@@ -122,6 +139,21 @@ class _FirestoreStore:
 
     def set_setting(self, key: str, value: Any) -> None:
         self._family.collection("settings").document(key).set({"value": value})
+
+    def transact_setting(self, key: str, fn: Callable[[Any], Any]) -> Any:
+        """読んで・変えて・書くを1つのトランザクションで。ぶつかったら Firestore がやり直す（fn は何度か呼ばれうる）。"""
+        from google.cloud import firestore
+
+        ref = self._family.collection("settings").document(key)
+
+        @firestore.transactional
+        def run(tx):
+            snap = ref.get(transaction=tx)
+            new = fn(snap.to_dict().get("value") if snap.exists else None)
+            tx.set(ref, {"value": new})
+            return new
+
+        return run(self._db.transaction())
 
 
 _store = None
@@ -212,3 +244,11 @@ def get_setting(key: str, default: Any = None) -> Any:
 def set_setting(key: str, value: Any) -> Dict[str, Any]:
     store().set_setting(key, value)
     return {"ok": True, "key": key, "stored_in": store().kind}
+
+
+def transact_setting(key: str, fn: Callable[[Any], Any]) -> Any:
+    """設定を1つ、ほかの書き込みとぶつからないように書き換える。fn(今の値) -> 新しい値。
+
+    fn はやり直しで何度か呼ばれることがあるので、外の状態を変えないこと（結果は返り値で受け取る）。
+    """
+    return store().transact_setting(key, fn)

@@ -22,6 +22,7 @@ from mimamori import ledger
 from mimamori.kid_agent import talk
 from mimamori.calendar_tools import (
     create_events,
+    event_meta,
     event_owner,
     list_events,
     list_raw,
@@ -111,6 +112,24 @@ def _own_event(request: Request, event_id: str) -> None:
         return
     if event_owner(event_id) != user:
         raise HTTPException(403, "自分のやることだけ変えられます。")
+
+
+UNDO_SECONDS = 10 * 60      # 子どもが自分で入れたものを取り消せるのは、入れてから10分（D-3）
+
+
+def _child_can_undo(request: Request, event_id: str) -> None:
+    """子どもが取り消せるのは、**自分が入れて、10分以内のもの**だけ（#16）。
+
+    それ以外（親が入れた自分の予定・古いもの）を消せると、/api/status の「取り消しは親だけ」の抜け道になる。
+    だれが・いつ入れたかは、画面から来た値ではなく予定に残っている記録で確かめる。
+    """
+    user = _user(request)
+    if auth.is_parent(user):
+        return
+    meta = event_meta(event_id)
+    fresh = bool(meta) and (dt.datetime.now(dt.timezone.utc).timestamp() - meta["created"]) <= UNDO_SECONDS
+    if not meta or meta["child"] != user or meta["source"] != "kid" or not fresh:
+        raise HTTPException(403, "取り消せるのは、自分で入れてから10分のあいだだけです。")
 
 
 def _own_assignment(request: Request, assignment_id: str) -> None:
@@ -246,7 +265,7 @@ def get_config(request: Request):
 
 
 @app.post("/api/extract")
-async def extract(image: UploadFile = File(...), hint: str = Form("")):
+async def extract(request: Request, image: UploadFile = File(...), hint: str = Form("")):
     data = await image.read()
     if not data:
         raise HTTPException(400, "画像が空です。")
@@ -258,7 +277,9 @@ async def extract(image: UploadFile = File(...), hint: str = Form("")):
     except ValueError as e:
         raise HTTPException(415, str(e)) from e
     try:
-        result = await read_otayori(data, content_type, hint)
+        user = _user(request)
+        result = await read_otayori(data, content_type, hint,
+                                    child=None if auth.is_parent(user) else user)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"読み取りに失敗しました: {e}") from e
     return JSONResponse(result)
@@ -361,7 +382,7 @@ def api_register_undo(req: UndoRequest, request: Request):
     if len(req.ids) > 60:
         raise HTTPException(400, "一度に取り消せるのは60件までです。")
     for eid in req.ids:
-        _own_event(request, eid)
+        _child_can_undo(request, eid)
     done, failed = 0, []
     for eid in req.ids:
         try:

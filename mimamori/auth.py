@@ -134,20 +134,51 @@ def set_passcode(user: str, passcode: str) -> None:
     _clear_fails(user)
 
 
-def _fails() -> Dict[str, Any]:
-    return dict(ledger.get_setting(K_FAILS) or {})
+# ------------------------------------------------------------------ 間違いの回数とロック
+#
+# **人ごとに別の記録にして、1回ずつ原子的に数える**（台帳の transact_setting）。
+# 同時に何回試しても回数が消えないように、また別の人の書き込みでロックが消えないように。
+# さらに、**合言葉を比べる前に「1回ぶん」を確保する**。並列で投げても、ロックまでに比べるのは MAX_FAILS 回だけ。
+
+def _fail_key(user: str) -> str:
+    return f"{K_FAILS}:{user}"
 
 
 def _clear_fails(user: str) -> None:
-    f = _fails()
-    if user in f:
-        f.pop(user)
-        ledger.set_setting(K_FAILS, f)
+    ledger.set_setting(_fail_key(user), {})
 
 
 def locked_seconds(user: str) -> int:
-    until = float((_fails().get(user) or {}).get("until") or 0)
+    until = float((ledger.get_setting(_fail_key(user)) or {}).get("until") or 0)
     return max(0, int(until - _now() + 0.999))
+
+
+def _reserve(user: str) -> Tuple[bool, Dict[str, Any]]:
+    """比べてよいか。よければ回数を1つ進めて True。ロック中・使い切ったなら False（使い切ったらロックする）。"""
+    decision = {"ok": False}
+
+    def step(row):
+        row = dict(row or {})
+        now = _now()
+        until = float(row.get("until") or 0)
+        if until > now:
+            decision["ok"] = False
+            return row
+        if until:                               # ロックが明けた
+            row = {}
+        count = int(row.get("count") or 0)
+        if count >= MAX_FAILS:                  # もう5回ぶん使っている（同時に投げられた分も含む）
+            decision["ok"] = False
+            return {"count": 0, "until": now + LOCK_SECONDS}
+        decision["ok"] = True
+        return {"count": count + 1}
+
+    row = ledger.transact_setting(_fail_key(user), step)
+    return decision["ok"], row
+
+
+def _lock_now(user: str) -> None:
+    ledger.transact_setting(_fail_key(user), lambda row: {"count": 0, "until": _now() + LOCK_SECONDS})
 
 
 def check(user: str, passcode: str) -> Tuple[str, int]:
@@ -157,27 +188,21 @@ def check(user: str, passcode: str) -> Tuple[str, int]:
     """
     if user not in users():
         return "unknown", 0
-    wait = locked_seconds(user)
-    if wait:
-        return "locked", wait
     rec = _records().get(user)
     if not rec:
         return "unset", 0
+    allowed, row = _reserve(user)
+    if not allowed:
+        return "locked", max(1, locked_seconds(user))
     salt = base64.b64decode(rec["salt"])
     if hmac.compare_digest(_hash(passcode, salt), base64.b64decode(rec["hash"])):
         _clear_fails(user)
         return "ok", 0
-
-    f = _fails()
-    row = dict(f.get(user) or {})
-    row["count"] = int(row.get("count") or 0) + 1
-    if row["count"] >= MAX_FAILS:
-        f[user] = {"count": 0, "until": _now() + LOCK_SECONDS}
-        ledger.set_setting(K_FAILS, f)
+    used = int(row.get("count") or 0)
+    if used >= MAX_FAILS:
+        _lock_now(user)
         return "locked", LOCK_SECONDS
-    f[user] = row
-    ledger.set_setting(K_FAILS, f)
-    return "wrong", MAX_FAILS - row["count"]
+    return "wrong", MAX_FAILS - used
 
 
 # ------------------------------------------------------------------ Cookie

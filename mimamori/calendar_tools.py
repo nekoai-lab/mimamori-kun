@@ -93,23 +93,39 @@ def list_raw(start_date: str, end_date: str) -> List[Dict[str, Any]]:
     return rows
 
 
-def event_owner(event_id: str) -> Optional[str]:
-    """その予定がだれのものか（#16）。みまもりくんの予定でなければ、見つからなければ None。
+def event_meta(event_id: str) -> Optional[Dict[str, Any]]:
+    """その予定がだれのもので、だれが・いつ入れたか（#16）。みまもりくんの予定でなければ None。
 
-    子どもが id を指定して状態を変えるときに、自分のものかを確かめるために使う。
+    子どもが id を指定して状態を変えたり取り消したりするときに、サーバー側の記録で確かめる。
+    created は UNIX 秒（カレンダーが付ける作成時刻。デモは足したとき）。
     """
     if not event_id:
         return None
     if DEMO:
         today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
         row = next((e for e in _demo_state(today) if e["id"] == event_id), None)
-        return row["child"] if row else None
+        if not row:
+            return None
+        return {"child": row.get("child", ""), "source": row.get("source", "parent"),
+                "created": float(row.get("created") or 0)}
     try:
         ev = _svc().events().get(calendarId=config.calendar_id, eventId=event_id).execute()
     except Exception:  # noqa: BLE001
         return None
     priv = (ev.get("extendedProperties") or {}).get("private") or {}
-    return priv.get("child") if priv.get("app") == MARK else None
+    if priv.get("app") != MARK:
+        return None
+    try:
+        created = dt.datetime.fromisoformat((ev.get("created") or "").replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        created = 0.0
+    return {"child": priv.get("child", ""), "source": priv.get("source", "parent"), "created": created}
+
+
+def event_owner(event_id: str) -> Optional[str]:
+    """その予定がだれのものか（#16）。見つからなければ None。"""
+    meta = event_meta(event_id)
+    return meta["child"] if meta else None
 
 
 def _raw(start_date: str, end_date: str) -> List[Dict[str, Any]]:
@@ -346,6 +362,7 @@ def _demo_add(item: Dict[str, Any], status: str = "todo") -> str:
             "batch": item.get("batch", ""),
             "minutes": minutes_for(item),
             "source": item.get("source", "parent"),
+            "created": dt.datetime.now(dt.timezone.utc).timestamp(),   # 取り消せる時間を確かめるため（#16）
             "mine": True,
             "link": "",
             "description": item.get("note", "") or "",
