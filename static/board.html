@@ -408,11 +408,20 @@ function validPayload(key,j){
     (n.items===undefined || (Array.isArray(n.items) && n.items.every(i=>i && typeof i.id==="string" && i.id))));
 }
 async function load(){
-  const version=++loadVersion, received={};
+  const version=++loadVersion, received={}, statuses={};
+  for(const [key,state] of actionStates) if(state.resolved) actionStates.delete(key);
+  const checks=[...actionStates].filter(([,state])=>state.checking);
   const previousAt=Object.fromEntries(Object.entries(sources).map(([k,s])=>[k,s.at]));
   Object.values(sources).forEach(s=>s.state="loading");
   renderConclusion();
-  await Promise.all(["tasks","notices"].map(async key=>{
+  await Promise.all([...checks.filter(([key])=>!key.startsWith("seen:")).map(async ([key])=>{
+    const id=key.slice(key.indexOf(":")+1);
+    try{
+      const j=await readJSON("/api/status?event_id="+encodeURIComponent(id));
+      if(j.id!==id || !["pending","todo","doing","done","rejected"].includes(j.status)) throw new Error("形式が不正です");
+      statuses[key]=j.status;
+    }catch(e){ /* 不明な結果を成功として扱わない。カードと再確認を残す。 */ }
+  }), ...["tasks","notices"].map(async key=>{
     try{
       const j=await readJSON(key==="tasks"?"/api/tasks":"/api/notices?unseen=true");
       if(!validPayload(key,j)) throw new Error("形式が不正です");
@@ -420,14 +429,24 @@ async function load(){
       received[key]=j;
       sources[key]={state:"ready",at:new Date().toLocaleString("ja-JP",{timeZone:"Asia/Tokyo"})+"（日本時間）"};
     }catch(e){if(version!==loadVersion) return; sources[key].state="error";}
-  }));
+  })]);
   if(version!==loadVersion) return;
-  // 取消の再確認には予定と知らせの両方が必要。片方だけではカードを消さない。
+  // 一覧の取得成功と操作結果の確定を分け、個別状態が不明ならカードを保持する。
   const retain=new Set();
   for(const [key,state] of actionStates){
     if(!state.checking) continue;
-    if(state.sources.every(k=>sources[k].state==="ready")) actionStates.delete(key);
-    else {state.checking=false;state.sources.forEach(k=>retain.add(k));}
+    state.checking=false;
+    const seen=key.startsWith("seen:"), id=key.slice(key.indexOf(":")+1);
+    if(state.sources.every(k=>sources[k].state==="ready") && (seen || statuses[key])){
+      state.resolved=true;
+      state.confirmed=seen?!received.notices.items.some(n=>n.id===id):statuses[key]===state.expected;
+      const words=seen?["既読にしました","既読にできていませんでした"]:
+        state.expected==="rejected"?["を取り消しました","は取り消せていませんでした"]:
+        state.expected==="done"?["対応済みにしました","対応済みにできていませんでした"]:
+        ["未対応に戻しました","未対応に戻せていませんでした"];
+      state.message='「'+state.title+'」'+words[state.confirmed?0:1];
+      if(!seen) state.currentStatus=statuses[key];
+    }else {state.sources.forEach(k=>retain.add(k));}
   }
   for(const key of retain) sources[key]={state:"error",at:previousAt[key]};
   if(received.tasks && !retain.has("tasks")){
@@ -566,21 +585,26 @@ function preserveView(draw){
   const target=same||current[Math.min(cards.indexOf(card),current.length-1)];
   const slot=action && same?[...same.querySelectorAll("[data-action]")].find(a=>a.dataset.action===action.dataset.action):null;
   const unchanged=!action && same?same.querySelectorAll(active.tagName)[ordinal]:null;
-  const next=unchanged || slot?.querySelector('[data-recheck]') || slot?.querySelector('button:not(:disabled)') ||
+  const next=unchanged || slot?.querySelector('[data-recheck]') || (actionStates.get(action?.dataset.action)?.resolved?slot?.querySelector('[tabindex]'):null) || slot?.querySelector('button:not(:disabled)') ||
     slot?.querySelector('[tabindex]') || (target?[...target.querySelectorAll('button:not(:disabled), summary, a')].find(b=>!b.closest('details') || b.tagName==='SUMMARY' || b.closest('details').open):null) || $("#headline");
   next.focus({preventScroll:!!same && !active.matches('[role="status"]')});
 }
 const actionStates=new Map();
 function actionHtml(key,button){
   const state=actionStates.get(key);
-  return '<div data-action="'+esc(key)+'">'+(state?.busy?button.replaceAll('<button ', '<button disabled '):button)+
+  const controls=state && !state.resolved?"":state?.confirmed?'<span class="chip">'+(state.expected==="rejected"?"取り消し済み":key.startsWith("seen:")?"既読":state.expected==="todo"?"未対応":"対応済み")+'</span>':button;
+  return '<div data-action="'+esc(key)+'">'+(state?.busy?button.replaceAll('<button ', '<button disabled '):controls)+
     '<p class="action-feedback" role="status" tabindex="-1">'+esc(state?.message||"")+'</p>'+
-    (state && !state.busy?'<button type="button" data-recheck="'+esc(key)+'">状態を再確認する</button>':"")+'</div>';
+    (state && !state.busy && !state.resolved?'<button type="button" data-recheck="'+esc(key)+'">状態を再確認する</button>':"")+(state && !state.resolved && key.startsWith('cancel:')?'<a href="https://calendar.google.com/" target="_blank" rel="noopener">Google カレンダーで確かめる</a>':'')+'</div>';
 }
 function beginAction(btn,key,title,needed){
   document.documentElement.style.setProperty("--board-header-height", document.querySelector("header").getBoundingClientRect().height+"px");
   const slot=btn.closest("[data-action]");
-  const state={message:'「'+title+'」の状態を確認しています…',sources:needed,busy:true};
+  const state={message:'「'+title+'」の状態を確認しています…',sources:needed,busy:true,title,
+    expected:key.startsWith("cancel:")?"rejected":null,
+    task:data?.items.find(i=>"status:"+i.id===key),
+    notice:notices.find(n=>"seen:"+n.id===key || (n.items||[]).some(i=>"cancel:"+i.id===key)),
+    root:btn.closest("[data-cards]")?.id};
   actionStates.set(key,state);
   const status=slot.querySelector('[role="status"]');
   status.textContent=state.message;
@@ -613,7 +637,10 @@ function renderBoard(){
   renderNotices();
   if(!data) return;
   renderKidButtons();
-  $("#exceptions").innerHTML=exceptions(data.items).map(it=>rowHtml(it,exceptionReason(it))).join("");
+  const pinned=[...actionStates.values()].filter(s=>s.resolved && s.task);
+  const ex=exceptions(data.items);
+  for(const s of pinned) if(s.root==="exceptions" && !ex.some(i=>i.id===s.task.id)) ex.push({...s.task,status:s.currentStatus});
+  $("#exceptions").innerHTML=ex.map(it=>rowHtml(it,exceptionReason(it))).join("");
   let items=data.items;
   if(filter.startsWith("kid:")) items=items.filter(i=>i.child===filter.slice(4));
   const g=group(items);
@@ -624,6 +651,8 @@ function renderBoard(){
   for(const [key,label] of secs){
     if(g[key].length) h+='<h2>'+label+'<span class="cnt">'+g[key].length+'</span></h2><div class="list">'+g[key].map(it=>rowHtml(it)).join("")+'</div>';
   }
+  const visibleIds=new Set(secs.flatMap(([key])=>g[key]).map(i=>i.id));
+  for(const s of pinned) if(s.root==="body" && !visibleIds.has(s.task.id)) h+=rowHtml({...s.task,status:s.currentStatus});
   $("#body").innerHTML=h||'<p class="empty">この表示条件の予定はありません。</p>';
 }
 for(const selector of ["#exceptions","#body"]){
@@ -669,6 +698,7 @@ async function onStatus(e){
   const next=(it.status===btn.dataset.status)?"todo":btn.dataset.status;
   statusBusy.add(id);
   const key="status:"+id, state=beginAction(btn,key,it.summary||it.title||"予定",["tasks"]);
+  state.expected=next;
   try{
     const result=await readJSON("/api/status",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({event_id:id,status:next})});
@@ -888,10 +918,12 @@ function noticeHtml(n){
     +actionHtml('seen:'+n.id,'<button type="button" class="seen" data-n="'+esc(n.id)+'">見た</button>')+'</article>';
 }
 function renderNotices(){
-  const news=dailyNotices();
+  const displayed=[...notices];
+  for(const s of actionStates.values()) if(s.resolved && s.notice && !displayed.some(n=>n.id===s.notice.id)) displayed.push(s.notice);
+  const news=displayed.filter(n=>["kid_added","redeem"].includes(n.kind));
   $("#notice").hidden=!news.length;
   $("#notice").innerHTML=news.length?'<h2>新しい知らせ '+news.length+'件</h2>'+news.map(noticeHtml).join(""):"";
-  $("#systemNotices").innerHTML=notices.filter(n=>!["kid_added","redeem"].includes(n.kind)).map(noticeHtml).join("");
+  $("#systemNotices").innerHTML=displayed.filter(n=>!["kid_added","redeem"].includes(n.kind)).map(noticeHtml).join("");
 }
 const noticeBusy=new Set();
 async function onNotice(e){

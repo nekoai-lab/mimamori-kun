@@ -354,6 +354,7 @@ assert.equal(document.activeElement,retry);
 assert.match(el('#headline').textContent,/確認でき/);
 // 同じ場所から再取得のみを行い、サーバーの現状へ戻す。
 const posts=calls.filter(c=>c.method==='POST').length;
+responses.set('/api/status?event_id=t6',[reply({id:'t6',status:action==='undo'?'done':'todo'})]);
 await retry.click();
 assert.equal(calls.filter(c=>c.method==='POST').length,posts);
 assert.equal(card().querySelector('[data-recheck]'),null);
@@ -423,9 +424,12 @@ await el('#notice').querySelector('[data-recheck]').click();
 assert.ok(el('#notice').querySelector('[data-card]'));
 assert.equal(el('#notice').querySelector('details').open,true);
 assert.equal(document.activeElement,el('#notice').querySelector('[data-recheck]'));
+responses.set('/api/status?event_id=t',[reply({id:'t',status:'rejected'})]);
 await document.activeElement.click();
-assert.equal(el('#notice').querySelector('[data-card]'),null);
-assert.equal(document.activeElement,el('#headline'));
+assert.ok(el('#notice').querySelector('[data-card]'));
+assert.match(el('#notice').innerHTML,/取り消しました/);
+assert.equal(el('#notice').querySelector('.cancel-task'),null);
+assert.notEqual(document.activeElement,document.body);
 '''.replace('SOURCE', json.dumps(failed_source)))
 
 
@@ -441,3 +445,56 @@ release(reply({status:'done'}));await pending;
 assert.equal(document.activeElement,el('#exceptions').querySelector('[data-status]'));
 assert.equal(document.activeElement.dataset.id,'t1');
 ''')
+
+
+@pytest.mark.parametrize('action', ['cancel', 'seen', 'done'])
+@pytest.mark.parametrize('outcome', ['confirmed', 'unchanged', 'error', 'missing'])
+@pytest.mark.parametrize('moved', [False, True])
+def test_recheck_names_actual_result_and_keeps_it_in_card(action, outcome, moved):
+    run_js(r'''
+const action=ACTION,outcome=OUTCOME,moved=MOVED;
+setDefaults(tasks([task()]),{items:[notice()]});await load();
+const root=el(action==='done'?'#exceptions':'#notice');
+if(action==='cancel')root.querySelector('details').open=true;
+const btn=root.querySelector(action==='done'?'[data-status]':action==='seen'?'.seen':'.cancel-task');btn.focus();
+responses.set(action==='seen'?'/api/notices/seen':'/api/status',[new Error('response lost')]);
+await (action==='done'?onStatus({currentTarget:btn}):onNotice({target:btn}));
+// 実契約：取消済みは tasks にない。知らせは登録時の項目を保持したまま。
+setDefaults(tasks(outcome==='confirmed'?(action==='cancel'?[]:action==='done'?[task({status:'done'})]:[task()]):[task()]),
+ {items:outcome==='confirmed'&&action==='seen'?[]:[notice()]});
+const url=action==='seen'?'/api/notices?unseen=true':'/api/status?event_id=t';
+let release;responses.set(url,[new Promise(r=>release=r)]);
+const retry=root.querySelector('[data-recheck]');retry.focus();
+const posts=calls.filter(c=>c.method==='POST').length;
+const pending=retry.click();await tick();
+assert.notEqual(document.activeElement,document.body);
+if(moved)el('#reload').focus();
+release(outcome==='error'?reply({},500):outcome==='missing'?reply({},404):
+ reply(action==='seen'?{items:outcome==='confirmed'?[]:[notice()]}:{id:'t',status:outcome==='confirmed'?(action==='cancel'?'rejected':'done'):'todo'}));
+await pending;
+assert.equal(calls.filter(c=>c.method==='POST').length,posts);
+assert.ok(root.querySelector('[data-card]'));
+assert.notEqual(document.activeElement,document.body);
+if(moved)assert.equal(document.activeElement,el('#reload'));
+else assert.equal(document.activeElement.closest('[data-card]'),root.querySelector('[data-card]'));
+const failed=['error','missing'].includes(outcome);
+if(failed){
+ assert.match(root.innerHTML,/確認できませんでした/);
+ assert.ok(root.querySelector('[data-recheck]'));
+ if(action==='cancel')assert.match(root.innerHTML,/Google カレンダーで確かめる/);
+}else{
+ const expected=action==='cancel'?(outcome==='confirmed'?'「提出物」を取り消しました':'「提出物」は取り消せていませんでした'):
+ action==='seen'?(outcome==='confirmed'?'既読にしました':'既読にできていませんでした'):
+ outcome==='confirmed'?'対応済みにしました':'対応済みにできていませんでした';
+ assert.ok(root.innerHTML.includes(expected),root.innerHTML);
+ assert.equal(root.querySelector('[data-recheck]'),null);
+ assert.equal(!!root.querySelector(action==='done'?'[data-status]':action==='seen'?'.seen':'.cancel-task'),outcome==='unchanged');
+ if(outcome==='confirmed'&&action==='cancel')assert.match(root.innerHTML,/取り消し済み/);
+ if(!moved)assert.equal(document.activeElement.attrs.tabindex,'-1');
+ render();assert.ok(root.innerHTML.includes(expected));
+ if(outcome==='confirmed'&&action!=='cancel'){
+   await load();assert.equal(root.querySelector('[data-card]'),null);
+   assert.notEqual(document.activeElement,document.body);
+ }
+}
+'''.replace('ACTION', json.dumps(action)).replace('OUTCOME', json.dumps(outcome)).replace('MOVED', json.dumps(moved)))
