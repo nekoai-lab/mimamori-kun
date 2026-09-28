@@ -58,7 +58,7 @@ def test_accessible_initial_actions_and_safe_fallback_navigation():
     assert 'やりとりは おうちの人も見られます' in HTML
     assert '#today{display:flex;flex-direction:column' in HTML
     assert 'min-height:48px' in HTML
-    assert 'body.large-controls #companion{position:static}' in HTML
+    assert 'body.large-controls #companion{position:static;' in HTML
     assert 'prefers-reduced-motion:reduce' in HTML
     assert 'data-kid-theme="monochrome"' in HTML
 
@@ -373,4 +373,58 @@ def test_record_undo_after_reload_preserves_previous_doing():
       undoItem(task('one','done'));await new Promise(setImmediate);
       const statuses=calls.filter(x=>x.options?.method==='POST').map(x=>JSON.parse(x.options.body).status);
       assert.deepEqual(statuses,['done','doing']);
+    ''')
+
+
+@pytest.mark.parametrize('status,container', [('doing', '#today'), ('done', '#records-list')])
+def test_child_prefix_is_display_only_and_task_words_are_preserved(status, container):
+    run_js(r'''
+      setup();
+      const titles=[
+        ['下の子｜図工 ペットボトル2本｜持参', '図工 ペットボトル2本｜持参'],
+        ['✓ 下の子｜国語 教科書の名前を確認', '国語 教科書の名前を確認'],
+        ['図工｜ペットボトル2本', '図工｜ペットボトル2本'],
+        ['下の子と読む本', '下の子と読む本'],
+        ['上の子｜連絡', '上の子｜連絡'],
+      ];
+      snapshot.items=titles.map(([summary],i)=>({...task(String(i),STATUS),summary}));
+      const original=JSON.stringify(snapshot.items);
+      renderCards();
+      const rows=$(CONTAINER).children;
+      assert.equal(rows.length,titles.length);
+      rows.forEach((row,i)=>{
+        assert.equal(row.querySelector('.tx').textContent,titles[i][1]);
+        assert.ok(row.querySelector('p').textContent.includes(titles[i][0]));
+      });
+      assert.equal(JSON.stringify(snapshot.items),original);
+    '''.replace('STATUS', json.dumps(status)).replace('CONTAINER', json.dumps(container)))
+
+
+def test_long_list_uses_page_scroll_with_space_for_fixed_conversation_controls():
+    css = HTML.split('<style>')[1].split('</style>')[0]
+    def declarations(selector):
+        match = re.search(re.escape(selector) + r'\{([^}]+)\}', css)
+        assert match, selector
+        return dict(part.split(':', 1) for part in match[1].split(';') if part)
+
+    today = declarations('#today')
+    assert today['height'] == 'auto'
+    assert today['max-height'] == 'none'
+    assert today['overflow'] == 'visible'
+    companion = declarations('body.many #companion')
+    assert companion['position'] == 'fixed'
+    assert companion['bottom'] == 'calc(80px + env(safe-area-inset-bottom))'
+    assert declarations('body.many .page-bottom')['padding-bottom'] == (
+        'calc(110px + 190px + env(safe-area-inset-bottom))')
+    # Short screens and large text must restore normal flow to avoid overlap.
+    assert '@media(max-width:340px),(max-height:500px){body.many #companion{position:static;' in css
+    assert declarations('body.large-controls #companion')['position'] == 'static'
+    run_js('''
+      setup();snapshot.items=Array.from({length:7},(_,i)=>task(String(i)));
+      renderCards();
+      assert.equal($('#today').children.length,7);
+      assert.equal(document.body.classList.contains('many'),true);
+      assert.equal($('#today').children[6].querySelector('.finish').textContent,'おわった');
+      snapshot.items=snapshot.items.slice(0,3);renderCards();
+      assert.equal(document.body.classList.contains('many'),false);
     ''')
