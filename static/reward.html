@@ -103,7 +103,8 @@ th{font-weight:500}td{text-align:right}
 .pace li{padding:6px 0;border-top:1px solid var(--line)}
 
 /* 下の3ナビ（A の [data-family-nav]） */
-.page-bottom{height:88px}
+.page-bottom{height:var(--nav-space,88px)}
+#send-note,#p-note{scroll-margin-block:16px calc(var(--nav-space,88px) + 16px)}
 [data-family-nav]{position:fixed;bottom:0;left:0;right:0;z-index:10;background:var(--surface);border-top:1px solid var(--line);padding:8px 12px calc(8px + env(safe-area-inset-bottom));display:flex;gap:8px;justify-content:center}
 [data-family-nav] a{flex:1;max-width:200px;min-height:48px;text-align:center;padding:10px 4px;text-decoration:none}
 [data-family-nav] [aria-current]{font-weight:700;border-bottom:3px solid currentColor}
@@ -140,6 +141,7 @@ body.nav-in-flow .page-bottom{display:none}
   <p class="balance" id="balance-line" role="group" aria-label="いまの ポイント"><b id="balance">—</b><span id="balance-unit" aria-hidden="true">pt</span></p>
   <p id="status" role="status">よみこんでいるよ</p>
   <p id="error" role="alert" hidden></p>
+  <button id="auth-retry" type="button" hidden>もういちど たしかめる</button>
   <button id="reload" type="button" hidden>もういちど よみこむ</button>
 
   <!-- 子の画面 -->
@@ -155,7 +157,7 @@ body.nav-in-flow .page-bottom{display:none}
     </div>
     <section aria-labelledby="rewards-heading">
       <h2 id="rewards-heading">ごほうび</h2>
-      <p id="send-note" role="status"></p>
+      <p id="send-note" role="status" tabindex="-1"></p>
       <button id="recheck" type="button" hidden>もういちど たしかめる</button>
       <div id="rewards" class="cards"></div>
     </section>
@@ -172,7 +174,7 @@ body.nav-in-flow .page-bottom{display:none}
   <div id="parent-view" hidden>
     <section aria-labelledby="p-reqs-heading">
       <h2 id="p-reqs-heading">もうしこみ</h2>
-      <p id="p-note" role="status"></p>
+      <p id="p-note" role="status" tabindex="-1"></p>
       <div id="p-reqs"></div>
     </section>
     <section class="caps" aria-labelledby="caps-heading">
@@ -262,6 +264,8 @@ function capped(reward,rem){
 // カードの状態：unknown（分からない）／capped／saving（ためている）／ready（もうしこめる）
 function cardState(reward,ctx){
   const cost=costOf(reward);
+  // §2.4.2 の表「申込の応答不明」の行と、その直後の段落に合わせた。
+  if(ctx.uncertain||ctx.sending) return {kind:"checking",can:false,text:ctx.uncertain?CHECKING:SENDING};
   if(ctx.balance==null||ctx.reqs==null||ctx.remaining==null) return {kind:"unknown",can:false};
   if(capped(reward,ctx.remaining)) return {kind:"capped",can:false,text:CAPPED};
   if(ctx.balance<cost) return {kind:"saving",can:false,text:"ポイントを ためているよ"};
@@ -354,7 +358,7 @@ function paintCards(){
     if(m.left) num.appendChild(element("span","あと"+m.left+"pt","muted"));
     mt.appendChild(num);
     card.appendChild(mt);
-    if(st.kind==="saving"||st.kind==="capped") card.appendChild(element("p",st.text,"say"));
+    if(st.kind==="saving"||st.kind==="capped"||st.kind==="checking") card.appendChild(element("p",st.text,"say"));
     if(st.kind==="ready"){
       if(open===reward.label){
         const ex=element("div",undefined,"explain");
@@ -455,6 +459,17 @@ function pendingSave(all){ try{ localStorage.setItem(PENDING_KEY,JSON.stringify(
 function pendingGet(key){ return pendingAll()[key]||null; }
 function pendingSet(key,value){ const all=pendingAll(); if(value) all[key]=value; else delete all[key]; pendingSave(all); }
 
+// 結果欄は再描画で取り除かない。待つ間に別の場所へ移った人からは奪わない。
+function resultFocus(selector){
+  const node=$(selector);
+  node.focus({preventScroll:true});
+  node.scrollIntoView({block:"start"});
+  return ()=>{
+    if(document.activeElement!==node) return;
+    node.focus({preventScroll:true});
+    node.scrollIntoView({block:"start"});
+  };
+}
 // ---------------------------------------------------------------- もうしこむ（2タップ：入口 → 確定）
 async function askFor(reward){
   if(sending||uncertain||open!==reward.label) return;
@@ -462,7 +477,9 @@ async function askFor(reward){
   const sent={label:reward.label,cost:costOf(reward),yen:yenOf(reward)};
   const before=(reqs||[]).map(r=>r.id);
   sending=true; lastSent={sent,before,at:Date.now()};
-  paintSendNote(SENDING); paintCards();
+  paintSendNote(SENDING);
+  const finishFocus=resultFocus("#send-note");
+  paintCards();
   try{
     await postJSON("/api/redeem",{child:me,label:sent.label,cost:sent.cost,yen:sent.yen});
     if(id!==epoch) return;
@@ -473,34 +490,47 @@ async function askFor(reward){
   }catch(err){
     if(id!==epoch) return;
     sending=false;
-    if(err.unknown){ uncertain=sent; open=""; pendingSet("kid:"+me,lastSent); await recheck(); return; }
+    if(err.unknown){ uncertain=sent; open=""; pendingSet("kid:"+me,lastSent); await recheck(false); return; }
     // 断られた（残高・上限など）。理由を出して、今の状態を取り直す
     open="";
     await loadChild(true);
     if(id!==epoch) return;
     paintSendNote("もうしこめなかったよ："+err.message);
-  }
+  }finally{ if(id===epoch) finishFocus(); }
 }
 // 送れたか分からないとき：連打・自動再送はしない。申込一覧と残高を取り直して照合する
-async function recheck(){
-  if(!uncertain||!lastSent) return;
+let checking=false;
+async function recheck(focus=true){
+  if(checking||!uncertain||!lastSent) return;
+  checking=true;
+  $("#recheck").disabled=true;
   const id=epoch;
-  paintSendNote(CHECKING); paintCards();
-  let after;
-  try{ after=(await getJSON("/api/redeem?child="+encodeURIComponent(child))).items; }
-  catch(e){ if(id===epoch) paintSendNote(UNKNOWN); return; }
-  if(id!==epoch) return;
-  const hits=matchSent(lastSent.before,after,lastSent.sent);
-  if(!hits&&Date.now()-lastSent.at<SETTLE_MS){
-    // 見つからなくても、まだ処理中かもしれない。送れていないとは決めず、申込を止めたまま
-    paintSendNote(NOT_FOUND_YET); paintCards();
-    return;
+  paintSendNote(CHECKING);
+  const finishFocus=focus?resultFocus("#send-note"):()=>{};
+  paintCards();
+  try{
+    await loadChild(true);
+    if(id!==epoch) return;
+    if(reqs==null||balance==null){ paintSendNote(UNKNOWN); return; }
+    const after=reqs;
+    const hits=matchSent(lastSent.before,after,lastSent.sent);
+    if(hits>1){ paintSendNote(UNKNOWN); return; }
+    const matched=hits===1?after.find(r=>!lastSent.before.includes(r.id)&&r.label===lastSent.sent.label&&Number(r.cost)===Number(lastSent.sent.cost)):null;
+    if(matched&&!KID_ST[matched.status]){ paintSendNote(UNKNOWN); return; }
+    if(!hits&&Date.now()-lastSent.at<SETTLE_MS){
+      // 見つからなくても、まだ処理中かもしれない。送れていないとは決めず、申込を止めたまま
+      paintSendNote(NOT_FOUND_YET);
+      return;
+    }
+    uncertain=null; open=""; lastSent=null;
+    pendingSet("kid:"+child,null);
+    paintCards();
+    paintSendNote(matched?KID_ST[matched.status]:"おくれなかったよ。もうしこむなら、もういちど えらんでね");
+  }finally{
+    checking=false;
+    $("#recheck").disabled=false;
+    if(id===epoch) finishFocus();
   }
-  uncertain=null; open=""; lastSent=null;
-  pendingSet("kid:"+child,null);
-  await loadChild(true);
-  if(id!==epoch) return;
-  paintSendNote(hits?KID_ST.requested:"おくれなかったよ。もうしこむなら、もういちど えらんでね");
 }
 $("#recheck").addEventListener("click",recheck);
 
@@ -570,6 +600,8 @@ async function decide(what,id,note){
   if(deciding) return;
   const before=(reqs||[]).find(x=>x.id===id)?.status||"";
   deciding=true;
+  $("#p-note").textContent="送っています";
+  const finishFocus=resultFocus("#p-note");
   paintParent();   // 送っているあいだは どの申込のボタンも押せない
   const s=epoch;
   $("#p-note").textContent="送っています";
@@ -587,6 +619,7 @@ async function decide(what,id,note){
   if(s!==epoch) return;
   paintParent();
   $("#p-note").textContent=done;
+  finishFocus();
 }
 async function loadPace(){
   const list=$("#pace"), s=seq;
@@ -640,10 +673,10 @@ async function loadChild(keep){
   if(p.status==="fulfilled"){ balance=Number(p.value.balance); history=p.value.history||[]; rules=p.value.rules||rules; }
   else{ balance=null; history=null; }
   if(r.status==="fulfilled") rewards=Array.isArray(r.value.rewards)?r.value.rewards:[];
-  if(q.status==="fulfilled"){ reqs=q.value.items||[]; remaining=q.value.remaining||{}; }
+  if(q.status==="fulfilled"&&Array.isArray(q.value?.items)){ reqs=q.value.items; remaining=q.value.remaining||{}; }
   else{ reqs=null; remaining=null; }
   $("#status").textContent="";
-  const failed=[p,r,q].some(x=>x.status!=="fulfilled");
+  const failed=[p,r,q].some(x=>x.status!=="fulfilled")||reqs==null;
   if(failed){
     $("#error").textContent=parentView?"一部を読み込めませんでした。もう一度読み込んでください。":"よみこめない ところが あったよ。もうしこみは おやすみ するね。";
     $("#error").hidden=false; $("#reload").hidden=false;
@@ -660,9 +693,14 @@ $("#reload").addEventListener("click",()=>loadChild(false));
 function placeNav(){
   const nav=$("#nav");
   document.body.classList.remove("nav-in-flow");
-  if(nav.getBoundingClientRect().height>window.innerHeight*0.3) document.body.classList.add("nav-in-flow");
+  // rect はナビの safe-area padding も含む。フォーカス枠の分も余裕を取る。
+  const height=nav.getBoundingClientRect().height;
+  const inFlow=height>window.innerHeight*0.3;
+  if(inFlow) document.body.classList.add("nav-in-flow");
+  document.documentElement.style.setProperty("--nav-space",inFlow?"0px":Math.ceil(height+16)+"px");
 }
 window.addEventListener("resize",placeNav);
+if(typeof ResizeObserver!=="undefined") new ResizeObserver(placeNav).observe($("#nav"));
 
 function showChild(){
   const next=$("#child").value||"";
@@ -684,21 +722,35 @@ function setAudience(parent){
   $("#balance-label").textContent=parent?"選んでいる子の ポイント":"いまの ポイント";
   document.querySelector("[data-appearance-picker]").hidden=parent;
   document.querySelector("[data-profile-menu]").hidden=parent;
+  if(!parent) $("#nav").innerHTML='<a href="/kid">きょう</a><a href="/?mode=kid">とる</a><a href="/reward" aria-current="page">ごほうび</a>';
   if(parent) $("#nav").innerHTML='<a href="/board">一覧</a><a href="/?mode=parent">撮る</a><a href="/reward?view=parent" aria-current="page">ごほうび</a>';
 }
+let authRetry=false;
 async function boot(){
   const sel=$("#child");
-  const [config,me]=await Promise.all([
-    getJSON("/api/config").catch(()=>null),
-    getJSON("/api/auth/me").catch(()=>null),
-  ]);
+  setAudience(false);
+  $("#kid-view").hidden=true;
+  $("#auth-retry").hidden=true;
+  $("#error").hidden=true;
+  $("#to-parent").href="/login?switch=parent&next=%2Freward%3Fview%3Dparent";
+  let me;
+  try{
+    me=await getJSON("/api/auth/me");
+    if(!me || !(me.auth===false || (me.auth===true && ["parent","child"].includes(me.role)))) throw new Error("role");
+  }catch(err){
+    $("#status").textContent="";
+    if(err.status===401){ location.href="/login?next="+encodeURIComponent(location.pathname+location.search+location.hash); return; }
+    $("#error").textContent="だれが つかっているか たしかめられないよ";
+    $("#error").hidden=false;
+    $("#auth-retry").hidden=false;
+    authRetry=true;
+    return;
+  }
   const wantParent=new URLSearchParams(location.search).get("view")==="parent";
-  // 親の領域は、親でログインしているときだけ。認証のない環境（401/404）は ?view=parent に従う
-  // 認証が無効な環境では /api/auth/me が role:"parent"・auth:false を返す。そのときは ?view=parent に従う（コードレビュー #41）
-  const parent=me?.auth?me.role==="parent":wantParent;
+  const parent=me.auth===false?wantParent:me.role==="parent";
   setAudience(parent);
-  // 子どもの端末でログインしていないとき（認証なし）は、親への入口を ?view=parent にする
-  if(!me?.auth) $("#to-parent").href="/reward?view=parent";
+  if(me.auth===false) $("#to-parent").href="/reward?view=parent";
+  const config=await getJSON("/api/config").catch(()=>null);
   if(!config){
     $("#status").textContent="";
     $("#error").textContent="よみこめなかったよ。もういちど 画面を ひらいてね。";
@@ -707,10 +759,21 @@ async function boot(){
   }
   const kids=config.children||[];
   if(!kids.length){ $("#status").textContent="おうちの人に 子の せっていを たのんでね"; return; }
-  sel.addEventListener("change",showChild);
-  sel.addEventListener("who:ready",showChild);
+
   sel.replaceChildren(...kids.map(k=>{const o=element("option",k.name);o.value=k.name;return o;}));
+  if(authRetry){
+    // who.js の初回監視（15秒）が終了していても、再確認から復帰する。
+    let saved="";
+    try{ saved=localStorage.getItem("mimamori-child")||""; }catch(e){}
+    sel.value=kids.find(k=>k.name===(me.role==="child"?me.name:saved))?.name||kids[0].name;
+    child="";
+    showChild();
+    authRetry=false;
+  }
 }
+$("#auth-retry").addEventListener("click",boot);
+$("#child").addEventListener("change",showChild);
+$("#child").addEventListener("who:ready",showChild);
 boot();
 </script>
 </body>

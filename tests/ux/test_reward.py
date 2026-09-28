@@ -38,7 +38,7 @@ def test_parent_entry_and_no_pace_or_companion_on_kid_screen():
 HARNESS = r'''
 const assert = require('node:assert/strict');
 class Element {
-  constructor(tag='div'){this.tagName=tag.toUpperCase();this.children=[];this.dataset={};this.attrs={};this.listeners={};this.style={};this.value='';this.hidden=false;this.disabled=false;this._text='';this.className='';this.parent=null;
+  constructor(tag='div'){this.tagName=tag.toUpperCase();this.children=[];this.dataset={};this.attrs={};this.listeners={};this.style={setProperty(k,v){this[k]=v;}};this.value='';this.hidden=false;this.disabled=false;this._text='';this.className='';this.parent=null;
     this.classList={add:(...xs)=>{this.className=[...new Set(this.className.split(' ').filter(Boolean).concat(xs))].join(' ')},remove:(...xs)=>{this.className=this.className.split(' ').filter(x=>!xs.includes(x)).join(' ')},toggle:(x,on)=>{if(on??!this.classList.contains(x))this.classList.add(x);else this.classList.remove(x)},contains:x=>this.className.split(' ').includes(x)};}
   set textContent(x){this._text=String(x);this.children=[];}
   get textContent(){return this._text+this.children.map(x=>x.textContent).join('');}
@@ -46,14 +46,15 @@ class Element {
   get innerHTML(){return this._html||'';}
   append(...xs){for(const x of xs){this.children.push(x);x.parent=this;}}
   appendChild(x){this.append(x);return x;}
-  replaceChildren(...xs){this.children=[];this._text='';this.append(...xs);}
+  replaceChildren(...xs){if(this.all.includes(document.activeElement))document.activeElement=document.body;this.children=[];this._text='';this.append(...xs);}
   remove(){if(this.parent)this.parent.children=this.parent.children.filter(x=>x!==this);}
   setAttribute(k,v){this.attrs[k]=String(v);}
   getAttribute(k){return this.attrs[k]??null;}
   addEventListener(k,fn){(this.listeners[k]??=[]).push(fn);}
   async click(){for(const fn of this.listeners.click||[])await fn({target:this});}
   focus(){document.activeElement=this;}
-  getBoundingClientRect(){return {height:60};}
+  scrollIntoView(options){this.scrolled=options;}
+  getBoundingClientRect(){return {height:this.height??60};}
   get all(){return this.children.flatMap(x=>[x,...x.all]);}
   matches(s){if(s==='[data-ask]')return this.dataset.ask==='1';if(s==='[data-go]')return this.dataset.go==='1';if(s.startsWith('.'))return this.classList.contains(s.slice(1));return this.tagName===s.toUpperCase();}
   querySelectorAll(s){return this.all.filter(x=>x.matches(s));}
@@ -69,9 +70,9 @@ const window={innerHeight:667,addEventListener(){}};
 const store=new Map();
 const localStorage={getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,String(v))};
 let search='';
-const location={get search(){return search;}};
-let replies=[],calls=[];
-async function fetch(url,options){calls.push({url,options});if(!replies.length)throw Error('unexpected fetch '+url);const r=replies.shift();if(typeof r==='function')return r(url,options);if(r instanceof Error)throw r;return {ok:r.ok??true,status:r.status??200,json:async()=>{if(r.bad)throw Error('bad json');return r.body??r;}};}
+const location={pathname:'/reward',hash:'#main',get search(){return search;}};
+let replies=[],calls=[],routes=null;
+async function fetch(url,options){calls.push({url,options});if(!replies.length&&!routes?.[url]?.length)throw Error('unexpected fetch '+url);const r=routes?.[url]?.length?routes[url].shift():replies.shift();if(typeof r==='function')return r(url,options);if(r instanceof Error)throw r;return {ok:r.ok??true,status:r.status??200,json:async()=>{if(r.bad)throw Error('bad json');return r.body??r;}};}
 function deferred(){let resolve;const promise=new Promise(x=>resolve=x);return {promise,resolve};}
 const posts=()=>calls.filter(c=>c.options?.method==='POST');
 const G={label:'ゲームの時間を30分のばす',points:30}, W={label:'週末に行きたいところを1つ決められる',points:100};
@@ -207,9 +208,9 @@ replies.push(()=>slow.promise);
 const go=card(G.label).querySelector('[data-go]');
 const first=go.click();
 assert.equal(sending,true);
-assert.equal(card(G.label).querySelector('[data-go]').disabled,true);
+assert.equal(card(G.label).querySelector('[data-go]'),null);
 assert.equal(card(W.label).querySelectorAll('[data-ask]').length,0);  // 100pt はまだ ためている
-await card(G.label).querySelector('[data-go]').click();   // 連打しても
+await go.click();   // 古いボタンから連打しても
 await askFor(G);
 assert.equal(posts().length,1);
 assert.deepEqual(JSON.parse(posts()[0].options.body),{child:'下の子',label:G.label,cost:30,yen:0});
@@ -255,7 +256,6 @@ load({bal:34,items:[{id:'old',label:G.label,cost:30,status:'handed',at:'2026-09-
 await card(G.label).querySelector('[data-ask]').click();
 replies.push(REPLY);
 // たしかめる：前になかった申込が1件 → 送れた
-replies.push({items:[{id:'old',label:G.label,cost:30,status:'handed'},{id:'new',label:G.label,cost:30,status:'requested',at:new Date().toISOString()}]});
 reload({bal:4,items:[{id:'new',label:G.label,cost:30,status:'requested',at:new Date().toISOString()}]});
 await card(G.label).querySelector('[data-go]').click();
 assert.equal(posts().length,1);
@@ -271,7 +271,7 @@ def test_unknown_reply_not_found_and_check_failure():
 load({bal:34});
 await card(G.label).querySelector('[data-ask]').click();
 replies.push(new Error('offline'));
-replies.push(new Error('offline'));   // 取り直しも失敗
+replies.push(new Error('offline'),new Error('offline'));   // 残高と申込の取り直しも失敗
 await card(G.label).querySelector('[data-go]').click();
 assert.match(text('#send-note'),/^おくれたか まだ わからないよ/);
 assert.equal(document.querySelector('#recheck').hidden,false);
@@ -279,19 +279,18 @@ assert.equal(card(G.label).querySelectorAll('[data-ask]').concat(card(G.label).q
 await askFor(G);                      // 送り直させない
 assert.equal(posts().length,1);
 // もういちど たしかめる：申込がない → 送れていなかった
-replies.push({items:[]});
+reload({bal:34});
 await document.querySelector('#recheck').click();
 // 見つからなくても、まだ処理中かもしれない：送れていないとは決めない（コードレビュー #41）
 assert.equal(text('#send-note'),'まだ みつからないよ。すこし まってから「もういちど たしかめる」を おしてね。');
 assert.ok(uncertain);
-assert.equal(card(G.label).querySelector('[data-ask]').disabled,true);
+assert.equal(card(G.label).querySelector('[data-ask]'),null);
 await askFor(G);
 assert.equal(posts().length,1);
 // 再読込しても（端末に覚えている）止まったまま
 assert.ok(JSON.parse(localStorage.getItem('mimamori-reward-pending'))['kid:下の子']);
 // サーバーの処理が終わるはずの時間をこえても見つからなければ、送れていない
 lastSent.at-=SETTLE_MS;
-replies.push({items:[]});
 reload({bal:34});
 await document.querySelector('#recheck').click();
 assert.match(text('#send-note'),/^おくれなかったよ/);
@@ -331,7 +330,7 @@ assert.equal(sending,false);
     ("child", "", False),
     ("parent", "?view=parent", True),
     ("parent", "", True),
-    (None, "?view=parent", True),
+    (None, "?view=parent", False),
     (None, "", False),
     # 認証が無効な環境の実際の返事（role:"parent"・auth:false）
     ("noauth", "?view=parent", True),
@@ -343,14 +342,13 @@ def test_parent_area_only_for_parent(role, view, parent):
           "{role:'%s',auth:true,name:'x'}" % role)
     run_js(r'''
 search=VIEW;
-replies.push({children:[{name:'下の子'}]});
-replies.push(ME);
+routes={'/api/auth/me':[ME],'/api/config':[{children:[{name:'下の子'}]}]};
 await boot();
 assert.equal(parentView,PARENT);
 assert.equal(document.querySelector('#parent-view').hidden,!PARENT);
-assert.equal(document.querySelector('#kid-view').hidden,PARENT);
+assert.equal(document.querySelector('#kid-view').hidden,UNAUTH||PARENT);
 assert.equal(document.documentElement.dataset.audience,PARENT?'parent':'kid');
-'''.replace("VIEW", repr(view)).replace("ME", me).replace("PARENT", "true" if parent else "false"))
+'''.replace("VIEW", repr(view)).replace("ME", me).replace("UNAUTH", "true" if role is None else "false").replace("PARENT", "true" if parent else "false"))
 
 
 def test_parent_reject_needs_reason_and_decisions_reload():
@@ -384,10 +382,9 @@ def test_unknown_reply_matches_request_already_decided_by_parent(status):
 load({bal:100});
 await card(G.label).querySelector('[data-ask]').click();
 replies.push(new Error('offline'));
-replies.push({items:[{id:'new',label:G.label,cost:30,status:STATUS,at:new Date().toISOString()}]});
 reload({bal:70,items:[{id:'new',label:G.label,cost:30,status:STATUS,at:new Date().toISOString()}]});
 await card(G.label).querySelector('[data-go]').click();
-assert.equal(text('#send-note'),'おうちの人に おくったよ');
+assert.equal(text('#send-note'),KID_ST[STATUS]);
 assert.equal(posts().length,1);
 '''.replace("STATUS", repr(status)))
 
@@ -466,4 +463,193 @@ load({bal:4,items:[],rem:{cap:{yen:1000,count:2},yen_left:-500,count_left:-1}});
 assert.equal(text('#left'),'今月の上限を 500円 こえています／今月の回数を 1回 こえています');
 load({bal:4,items:[],rem:{cap:{yen:1000,count:2},yen_left:300,count_left:1}});
 assert.equal(text('#left'),'今月あと 300円／あと 1回');
+''')
+
+
+@pytest.mark.parametrize("reply", [
+    "{ok:false,status:401}", "{ok:false,status:500}", "new Error('offline')",
+    "{bad:true}", "{}", "{auth:true,role:'unexpected'}", "{role:'parent'}",
+])
+def test_auth_failure_hides_parent_actions_and_retry_restores_role(reply):
+    run_js(r'''
+search='?view=parent';
+routes={'/api/auth/me':[REPLY],'/api/config':[{children:[{name:'下の子'}]}]};
+await boot();
+assert.equal(document.querySelector('#parent-view').hidden,true);
+assert.equal(parentView,false);
+assert.notEqual(document.querySelector('#to-parent').href,'/reward?view=parent');
+assert.equal(calls.length,1);  // 未確認のまま設定や残高を読まない
+if(REPLY401){
+  assert.equal(location.href,'/login?next='+encodeURIComponent('/reward?view=parent#main'));
+}else{
+  assert.equal(text('#error'),'だれが つかっているか たしかめられないよ');
+  assert.equal(document.querySelector('#auth-retry').hidden,false);
+  for(const role of ['parent','child']){
+    routes={'/api/auth/me':[{auth:true,role,name:'下の子'}],'/api/config':[{children:[{name:'下の子'}]}]};
+    rewards=[G,W];
+    reload({bal:100});
+    if(role==='parent') replies.push({days:0},{days:0});
+    await document.querySelector('#auth-retry').click();
+    for(let i=0;i<5;i++) await new Promise(r=>setImmediate(r));
+    assert.equal(parentView,role==='parent');
+    assert.equal(document.querySelector('#parent-view').hidden,role!=='parent');
+    assert.equal(document.querySelector('#kid-view').hidden,role==='parent');
+    assert.equal(document.querySelector('#auth-retry').hidden,true);
+  }
+}
+'''.replace("REPLY401", "true" if "401" in reply else "false").replace("REPLY", reply))
+
+
+@pytest.mark.parametrize("outcome", ["requested", "approved", "handed", "rejected", "multiple", "missing", "failed"])
+def test_uncertain_card_reconciliation_and_actual_status(outcome):
+    run_js(r'''
+load({bal:200});
+uncertain={label:W.label,cost:100};
+lastSent={sent:uncertain,before:['old'],at:Date.now()};
+pendingSet('kid:'+child,lastSent);
+paintCards();
+for(const c of cards()){
+  assert.doesNotMatch(c.textContent,/もうしこめる|もうしこむ/);
+  assert.match(c.textContent,/おくれたか たしかめているよ/);
+  assert.ok(c.querySelector('h3'));
+  assert.ok(c.querySelector('.meter'));
+}
+const outcome=OUTCOME;
+const item={id:'new',label:W.label,cost:100,status:outcome,at:new Date().toISOString()};
+const unresolved=['multiple','missing','failed'].includes(outcome);
+const items=outcome==='multiple'?[{...item,status:'requested'},{...item,id:'other',status:'approved'}]:outcome==='missing'?[]:[item];
+if(outcome==='multiple') lastSent.at-=SETTLE_MS;  // 時間が過ぎても複数候補なら解除しない
+if(outcome==='failed') replies.push(new Error('offline'),new Error('offline'));
+else reload({bal:100,items});
+await recheck();
+assert.equal(posts().length,0);
+assert.equal(!!uncertain,unresolved);
+assert.equal(document.querySelector('#recheck').hidden,!unresolved);
+assert.equal(!!pendingGet('kid:'+child),unresolved);
+if(unresolved){
+  assert.doesNotMatch(text('#rewards'),/もうしこめる|もうしこむ/);
+  await askFor(W);
+  assert.equal(posts().length,0);
+}else assert.equal(text('#send-note'),KID_ST[outcome]);
+'''.replace("OUTCOME", repr(outcome)))
+
+
+@pytest.mark.parametrize("index", [0, 1])
+@pytest.mark.parametrize("outcome", ["success", "refused", "unknown", "recheck_failed", "reload_failed"])
+def test_request_result_keeps_focus_and_scrolls_from_each_card(index, outcome):
+    run_js(r'''
+load({bal:200});
+const reward=[G,W][INDEX];
+await card(reward.label).querySelector('[data-ask]').click();
+const go=card(reward.label).querySelector('[data-go]');
+go.focus();
+const outcome=OUTCOME;
+if(outcome==='unknown'||outcome==='recheck_failed'){
+  replies.push(new Error('offline'));
+  if(outcome==='unknown') reload({bal:200});
+  else replies.push(new Error('offline'),new Error('offline'));
+}else{
+  replies.push(outcome==='refused'?{ok:false,status:400,body:{detail:'上限'}}:{request:{id:'a'}});
+  if(outcome==='reload_failed') replies.push(new Error('offline'),new Error('offline'));
+  else reload({bal:100});
+}
+await go.click();
+assert.equal(document.activeElement,document.querySelector('#send-note'));
+assert.notEqual(document.activeElement,document.body);
+assert.ok(text('#send-note'));
+assert.equal(document.activeElement.scrolled.block,'start');
+assert.match(HTML_STYLE,/scroll-margin-block:16px calc\(var\(--nav-space,88px\) \+ 16px\)/);
+'''.replace("INDEX", str(index)).replace("OUTCOME", repr(outcome)).replace("HTML_STYLE", repr(HTML.split('</style>')[0])))
+
+
+@pytest.mark.parametrize("action", ["approve", "hand", "reject"])
+@pytest.mark.parametrize("outcome", ["success", "refused", "unknown", "reload_failed"])
+def test_parent_decision_result_keeps_focus(action, outcome):
+    run_js(r'''
+setAudience(true);
+load({bal:100,items:[{id:'a',label:G.label,cost:30,status:'requested'}]});
+const row=document.querySelector('#p-reqs').children[0];
+const action=ACTION, outcome=OUTCOME;
+let go=row.buttons.find(b=>b.textContent===({approve:'OK',hand:'わたした',reject:'みおくる'}[action]));
+if(action==='reject'){
+  await go.click();
+  row.querySelector('textarea').value='また今度';
+  go=row.buttons.find(b=>b.textContent==='みおくる（ポイントを戻す）');
+}
+go.focus();
+replies.push(outcome==='unknown'?new Error('offline'):outcome==='refused'?{ok:false,status:400,body:{detail:'できませんでした'}}:{request:{id:'a'}});
+if(outcome==='reload_failed') replies.push(new Error('offline'),new Error('offline'));
+else reload({bal:100});
+replies.push({days:0},{days:0});
+await go.click();
+assert.equal(document.activeElement,document.querySelector('#p-note'));
+assert.ok(text('#p-note'));
+assert.equal(document.activeElement.scrolled.block,'start');
+'''.replace("ACTION", repr(action)).replace("OUTCOME", repr(outcome)))
+
+
+@pytest.mark.parametrize("parent", [False, True])
+@pytest.mark.parametrize("unknown", [False, True])
+def test_slow_response_does_not_take_focus_from_another_control(parent, unknown):
+    run_js(r'''
+setAudience(PARENT);
+load({bal:200,items:[{id:'a',label:G.label,cost:30,status:'requested'}]});
+const slow=deferred();
+replies.push(()=>slow.promise);
+let work;
+if(PARENT) work=decide('approve','a');
+else{
+  await card(W.label).querySelector('[data-ask]').click();
+  work=card(W.label).querySelector('[data-go]').click();
+}
+const elsewhere=document.querySelector('#theme');
+elsewhere.focus();
+reload({bal:100});
+if(PARENT) replies.push({days:0},{days:0});
+slow.resolve({ok:!UNKNOWN,status:UNKNOWN?500:200,json:async()=>({})});
+await work;
+assert.equal(document.activeElement,elsewhere);
+assert.equal(elsewhere.scrolled,undefined);
+'''.replace("PARENT", str(parent).lower()).replace("UNKNOWN", str(unknown).lower()))
+
+
+@pytest.mark.parametrize("height,viewport", [(145, 568), (80, 667), (180, 375), (60, 900)])
+def test_nav_padding_tracks_measured_height_and_flow_policy(height, viewport):
+    run_js(r'''
+const nav=document.querySelector('#nav');
+nav.height=HEIGHT; window.innerHeight=VIEWPORT;
+placeNav();
+const space=parseFloat(document.documentElement.style['--nav-space']);
+if(HEIGHT>VIEWPORT*.3){
+  assert.equal(document.body.classList.contains('nav-in-flow'),true);
+  assert.equal(space,0);
+}else{
+  assert.equal(document.body.classList.contains('nav-in-flow'),false);
+  assert.ok(space>=HEIGHT+6); // 最後のリンクのフォーカス枠もナビより上へ
+}
+nav.height=70; window.innerHeight=667;
+placeNav();
+assert.equal(document.body.classList.contains('nav-in-flow'),false);
+assert.ok(parseFloat(document.documentElement.style['--nav-space'])>=70);
+'''.replace("HEIGHT", str(height)).replace("VIEWPORT", str(viewport)))
+
+
+def test_recheck_cannot_overlap_or_resend_while_waiting():
+    run_js(r'''
+load({bal:200});
+uncertain={label:W.label,cost:100};
+lastSent={sent:uncertain,before:[],at:Date.now()};
+const slow=deferred();
+replies.push(()=>slow.promise,{items:[],remaining:{}});
+const first=recheck();
+assert.equal(document.querySelector('#recheck').disabled,true);
+await recheck();
+await askFor(W);
+assert.equal(calls.length,2);  // 残高と申込を各1回だけ取得
+assert.equal(posts().length,0);
+slow.resolve({ok:true,json:async()=>({balance:200,history:[]})});
+await first;
+assert.equal(document.querySelector('#recheck').disabled,false);
+assert.ok(uncertain);
+assert.doesNotMatch(text('#rewards'),/もうしこめる|もうしこむ/);
 ''')
