@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@700&family=Noto+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <script src="/static/theme.js"></script>
+<link rel="stylesheet" href="/static/appearance.css">
 <script src="/static/who.js" defer></script>
 <style>
 :root{
@@ -71,7 +72,7 @@ h2{font-family:"Zen Old Mincho",serif;font-size:19px;margin:32px 0 6px;letter-sp
   background:var(--surface-2);border:1px solid var(--line);border-radius:4px;padding:10px 12px;margin-bottom:16px}
 .trace div+div{margin-top:3px}
 .items{display:flex;flex-direction:column;gap:12px}
-.item{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);
+.item{min-width:0;margin-inline:0;background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);
   border-radius:0 4px 4px 0;box-shadow:var(--shadow);padding:14px}
 .item.dup{border-left-color:var(--line-strong);opacity:.72}
 .item.review{border-left-color:var(--warn)}
@@ -159,46 +160,68 @@ footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);
 .qgo button:disabled{opacity:.45;cursor:default}
 .qnote{font-size:13px;color:var(--ink-3,#7c8783);border:0;background:none;padding:0}
 .qnote.ok{color:var(--accent,#0f6b62);font-weight:700}
+[hidden]{display:none!important}
+body:not([data-audience="parent"]) .parent-only{display:none!important}
+.photo-choice{display:inline-block;margin-top:12px;position:relative}
+label.file{position:relative}
+label.file:has(input:disabled),.photo-choice:has(input:disabled){opacity:.5;cursor:wait}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.item-title{min-width:0}
+.fields input{max-width:100%;min-width:0}
+.owner-choice{display:flex;gap:12px;flex-wrap:wrap;margin:12px 0}
+.owner-choice button{min-height:48px}
+#capture-title{margin-top:0}
+#preview{max-height:320px;object-fit:contain}
+#photo-dialog{max-width:95vw;max-height:95vh;background:var(--surface);color:var(--ink)}
+#photo-dialog img{display:block;max-width:100%;max-height:75vh;object-fit:contain}
 </style>
 </head>
-<body>
+<body data-audience="pending">
 <header><div class="hdr">
   <h1>みまもりくん</h1>
-  <span class="tag">SCHOOL NOTICE → CALENDAR</span>
-  <nav class="nav" aria-label="画面を切り替える">
+  <span id="audience">確認中</span>
+  <span data-profile-menu></span><span data-appearance-picker></span>
+  <select id="child" aria-label="だれのプリントか" hidden></select>
+  <nav data-family-nav class="nav" aria-label="画面を切り替える">
     <a href="/" class="on" aria-current="page">撮る</a>
-    <a href="/board">一覧</a>
-      <a href="/schedule">予定表</a>
-      <a href="/plan">計画</a>
-    <a href="/kid">やりとり</a>
+    <a class="parent-only" href="/board">一覧</a>
+      <a class="parent-only" href="/schedule">予定表</a>
+      <a class="parent-only" href="/plan">計画</a>
+    <a href="/kid">きょう</a>
     <a href="/reward">ごほうび</a>
     <button class="theme" id="theme" type="button">☾ 暗く</button>
   </nav>
 </div></header>
 
 <div class="wrap">
-  <p class="lead">ランドセルから出てきたプリントを撮るだけ。日付・持ち物・提出期限を読み取って、
-  重複を確かめてから Google カレンダーに並べます。<strong>登録はあなたが確認してから。</strong></p>
+  <h2 id="capture-title">だれが使っているか確かめています</h2>
+  <p class="lead" id="capture-lead">確認できるまで待ってね。</p>
+  <p id="identity-note" role="status"></p>
+  <button type="button" class="btn ghost" id="identity-retry" hidden>もう一度確かめる</button>
 
   <div class="panel">
     <label class="file" for="file">
-      <span class="big">📷 おたよりを撮る / 選ぶ</span>
+      <span class="big" id="camera-label">📷 撮る／ファイルを選ぶ</span>
       <span class="sm">プリント、連絡帳、学校アプリのスクリーンショット</span>
-      <input type="file" id="file" accept="image/*" capture="environment">
+      <input type="file" id="file" disabled accept="image/*" capture="environment">
     </label>
+    <label class="btn ghost photo-choice" for="album"><span id="album-label">写真を選ぶ</span>
+      <input type="file" id="album" disabled accept="image/*">
+    </label>
+    <p class="summary">カメラが使えないときは、写真を選ぶか、手でいれられます。</p>
     <img id="preview" alt="選択したおたより">
-    <div class="hintwrap">
+    <details class="hintwrap parent-only"><summary>補足を加える</summary>
       <label for="hint">補足メモ（任意）</label>
       <input type="text" id="hint" placeholder="例：下の子のぶん / 4月に配られた古いプリント">
-    </div>
+    </details>
     <div class="row">
       <button class="btn primary" id="go" disabled>読み取る</button>
-      <span id="note" class="tag"></span>
+      <span id="note" role="status" aria-live="polite"></span>
     </div>
   </div>
 
   <div class="quick">
-    <button type="button" class="qtoggle" id="qtoggle" aria-expanded="false">✍️ 手で入力する（パソコンを開けなかった日）</button>
+    <button type="button" class="qtoggle" id="qtoggle" aria-expanded="false">手で入力する</button>
     <div class="qbox" id="qbox" hidden>
       <div class="qrow" id="qchild"><span class="lab">だれ</span></div>
       <div class="qrow" id="qsubj"><span class="lab">きょうか</span></div>
@@ -213,77 +236,245 @@ footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);
         <button type="button" data-k="deadline" aria-pressed="false">ていしゅつ</button>
         <button type="button" data-k="bring" aria-pressed="false">もちもの</button>
       </div>
-      <div class="qrow"><span class="lab">やること</span>
+      <div class="qrow"><label class="lab" for="qtitle">やること</label>
         <input type="text" id="qtitle" placeholder="例：ドリル p.12（空でもOK）" enterkeyhint="done">
       </div>
       <div class="qgo">
-        <button type="button" class="add" id="qadd">追加する</button>
-        <button type="button" class="same" id="qsame">昨日と同じ</button>
+        <button type="button" class="add" id="qadd" disabled>追加する</button>
+        <button type="button" class="same" id="qsame" disabled>昨日と同じ</button>
         <span class="qnote" id="qnote"></span>
       </div>
     </div>
   </div>
 
-  <div id="result"></div>
+  <div id="result" tabindex="-1" role="region" aria-label="読み取り結果" aria-live="polite"></div>
+  <div id="completion" tabindex="-1" role="region" aria-label="登録結果" aria-live="polite"></div>
+  <p><a id="return-link" href="/board">一覧で確認する</a></p>
 
-  <footer id="meta"></footer>
+  <footer id="meta" class="parent-only"></footer>
 </div>
 
+<dialog id="photo-dialog" aria-label="撮ったものを拡大">
+  <form method="dialog"><button class="btn ghost">閉じる</button></form>
+  <img id="photo-large" alt="撮ったものの原本">
+</dialog>
 <script>
 const $ = s => document.querySelector(s);
-let picked = null, extraction = null;
-
-fetch("/api/config").then(r=>r.json()).then(c=>{
-  window.CHILDREN = (c.children||[]).map(x=>x.name);
-  qSetup(c.children);
-  $("#meta").innerHTML =
-    "CALENDAR  " + esc(c.calendar_id) + "<br>" +
-    "MODEL     " + esc(c.model) + "<br>" +
-    "AGENT SA  " + esc(c.service_account) + "<br>" +
-    "CHILDREN  " + c.children.map(x=>esc(x.name)+"/"+esc(x.school_level)).join("  ");
-}).catch(()=>{});
+let picked = null, extraction = null, previewURL = "";
+let audience = "pending", currentChild = "", generation = 0, busy = false;
+let photoConsumed = false, manualLocked = false, undoTick = null;
+const isKid = () => audience === "kid";
+const current = token => token === generation;
 
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 
-$("#file").addEventListener("change", e => {
-  const f = e.target.files[0];
-  if(!f) return;
-  picked = f;
-  const img = $("#preview");
-  img.src = URL.createObjectURL(f);
-  img.style.display = "block";
-  $("#go").disabled = false;
-  $("#note").textContent = f.name;
-});
-
-$("#go").addEventListener("click", async () => {
-  if(!picked) return;
-  $("#go").disabled = true;
-  $("#note").innerHTML = '<span class="spinner"></span> 読み取り中（カレンダー照会を含むので20秒ほど）';
-  $("#result").innerHTML = "";
-  const fd = new FormData();
-  fd.append("image", picked);
-  fd.append("hint", $("#hint").value);
+// URL や保存された表示モードはログインの役割を上書きしない。
+let identityLoading = false, configReady = false;
+const identityStarted = Date.now();
+const canAct = () => (audience === "kid" || audience === "parent") && configReady && !!currentChild;
+async function confirmIdentity(){
+  if(identityLoading) return;
+  identityLoading = true;
+  audience = "pending";
+  document.body.dataset.audience = audience;
+  $("#audience").textContent = "確認中";
+  $("#identity-note").textContent = "だれが使っているか確かめています。";
+  $("#identity-retry").hidden = true;
+  controls();
   try{
+    const res = await fetch("/api/auth/me");
+    if(!res.ok) throw new Error();
+    const me = await res.json();
+    if(!me || !["child", "parent"].includes(me.role)) throw new Error();
+    audience = me.role === "child" ? "kid" : "parent";
+  }catch(err){
+    audience = "unknown";
+    document.body.dataset.audience = audience;
+    $("#audience").textContent = "確認できません";
+    $("#capture-title").textContent = "だれが使っているか確認できませんでした";
+    $("#capture-lead").textContent = "もう一度確かめてから、撮影・登録してね。";
+    $("#identity-note").textContent = "だれかを確かめられなかったよ。";
+    $("#identity-retry").hidden = false;
+    identityLoading = false;
+    controls();
+    return;
+  }
+  document.documentElement.dataset.audience = audience;
+  document.body.dataset.audience = audience;
+  $("#audience").textContent = isKid() ? "こども" : "おうちの人";
+  $("#capture-title").textContent = isKid() ? "プリントを とろう" : "おたよりを取り込む";
+  $("#capture-lead").textContent = isKid() ? "とったら、やることに 入るよ" : "読み取った内容を確認して、登録します。";
+  $("#camera-label").textContent = isKid() ? "📷 しゃしんを とる" : "📷 撮る／ファイルを選ぶ";
+  $("#album-label").textContent = isKid() ? "しゃしんを えらぶ" : "写真を選ぶ";
+  $("#qtoggle").textContent = isKid() ? "手でいれる" : "手で入力する";
+  $("#qsame").textContent = isKid() ? "きのうと おなじ" : "昨日と同じ";
+  $("#return-link").href = isKid() ? "/kid" : "/board";
+  $("#return-link").textContent = isKid() ? "きょうを みる" : "一覧で確認する";
+  try{
+    if(!configReady){
+      const res = await fetch("/api/config");
+      if(!res.ok) throw new Error();
+      const c = await res.json();
+      if(!Array.isArray(c.children) || !c.children.length) throw new Error();
+      qSetup(c.children);
+      window.CHILDREN = qChildren.map(x => x.name);
+      $("#child").innerHTML = qChildren.map(x => '<option value="'+esc(x.name)+'">'+esc(x.name)+'</option>').join("");
+      configReady = true;
+      if(!currentChild && Date.now() - identityStarted >= 15000){
+        $("#child").insertAdjacentHTML("afterbegin", '<option value="">だれのプリントか選んでね</option>');
+        $("#child").value = "";
+        $("#child").hidden = false;
+      }
+    }
+    $("#identity-note").textContent = "";
+  }catch(err){
+    $("#identity-note").textContent = "設定を読み込めませんでした。もう一度確かめてね。";
+    $("#identity-retry").hidden = false;
+  }finally{
+    identityLoading = false;
+    controls();
+  }
+}
+$("#identity-retry").addEventListener("click", confirmIdentity);
+
+function controls(){
+  $("#file").disabled = busy || !canAct();
+  $("#album").disabled = busy || !canAct();
+  $("#go").disabled = busy || !picked || !canAct() || photoConsumed;
+  $("#qadd").disabled = busy || !canAct() || manualLocked;
+  $("#qsame").disabled = busy || !canAct() || manualLocked;
+}
+function selectedChild(){
+  const child = $("#child").value;
+  if(!child || child === currentChild) return;
+  currentChild = child; qChild = child; generation++;
+  busy = false; photoConsumed = false; manualLocked = false;
+  extraction = null; picked = null;
+  if(previewURL) URL.revokeObjectURL(previewURL);
+  previewURL = "";
+  $("#preview").removeAttribute("src"); $("#preview").style.display = "none";
+  $("#file").value = ""; $("#album").value = "";
+  $("#hint").value = ""; $("#qtitle").value = "";
+  $("#qnote").textContent = ""; $("#note").textContent = "";
+  $("#result").innerHTML = ""; $("#completion").innerHTML = "";
+  clearInterval(undoTick);
+  $("#qchild").textContent = "だれ：" + child;
+  qRenderSubjects(); controls();
+  // 共通基盤が未導入でもこの画面の業務処理は動く。
+  try {
+    if(window.Appearance && typeof window.Appearance.setChild === "function") {
+      Promise.resolve(window.Appearance.setChild(child)).catch(() => {});
+    }
+  } catch(err) { /* 見た目の失敗で撮影を止めない */ }
+}
+$("#child").addEventListener("who:ready", selectedChild);
+$("#child").addEventListener("change", selectedChild);
+
+function exits(){
+  return '<p><a class="btn primary" href="'+(isKid() ? '/kid' : '/board')+'">'+(isKid() ? 'きょうを みる' : '一覧で確認する')+'</a></p>';
+}
+function openManual(){
+  $("#qbox").hidden = false; $("#qtoggle").setAttribute("aria-expanded", "true");
+  $("#qtitle").focus();
+}
+function revealResult(origin, selector){
+  // 別の操作に移った人からフォーカスを奪わない。
+  if(document.activeElement !== origin && document.activeElement !== document.body) return;
+  const target = selector ? $(selector) : ($("#completion").innerHTML ? $("#completion") : $("#result"));
+  if(!target.innerHTML) return;
+  target.focus({preventScroll:true});
+  target.scrollIntoView({block:"start", behavior:"instant"});
+}
+function readFailure(){
+  $("#result").innerHTML = '<div class="err">うまく読めなかったよ。文字がはっきり写っているか見てね。'
+    + '<div class="row"><button class="btn ghost" id="retake">とりなおす</button>'
+    + '<button class="btn ghost" id="qfall">手でいれる</button></div></div>';
+  $("#retake").addEventListener("click", () => $("#file").click());
+  $("#qfall").addEventListener("click", openManual);
+}
+async function choosePhoto(e){
+  if(busy || !canAct()) return;
+  const f = e.target.files[0];
+  if(!f){ $("#note").textContent = "写真を選ぶか、手でいれられます。"; return; }
+  if(f.type && !f.type.startsWith("image/")){ readFailure(); revealResult(document.activeElement); return; }
+  extraction = null; photoConsumed = false;
+  picked = f;
+  if(previewURL) URL.revokeObjectURL(previewURL);
+  previewURL = URL.createObjectURL(f);
+  $("#preview").src = previewURL; $("#preview").style.display = "block";
+  $("#result").innerHTML = "";
+  $("#note").textContent = "写真を選びました。まだ送っていません。";
+  controls();
+  if(isKid()) await readPhoto();
+}
+for(const id of ["#file", "#album"]){
+  $(id).addEventListener("change", choosePhoto);
+  $(id).addEventListener("cancel", () => { $("#note").textContent = "写真を選ぶか、手でいれられます。"; });
+}
+$("#go").addEventListener("click", readPhoto);
+async function readPhoto(){
+  if(!canAct() || !picked || busy || photoConsumed) return;
+  if(navigator.onLine === false){
+    $("#note").textContent = "つながったら、よみとろう。写真はこのページにだけ残ります。閉じると失われます。";
+    return;
+  }
+  const token = generation, origin = document.activeElement;
+  $("#completion").innerHTML = "";
+  busy = true; controls();
+  $("#note").textContent = "写真を送る準備をしているよ";
+  $("#result").innerHTML = "";
+  const fd = new FormData(); fd.append("image", picked);
+  fd.append("hint", isKid() ? "" : $("#hint").value);
+  const timer = setTimeout(() => { if(current(token)) $("#note").textContent = "もう少しかかっているよ"; }, 15000);
+  try{
+    $("#note").textContent = "よみとっているよ";
     const res = await fetch("/api/extract", {method:"POST", body:fd});
     const data = await res.json();
-    if(!res.ok) throw new Error(data.detail || "読み取りに失敗しました");
+    if(!current(token)) return;
+    if(!res.ok || !Array.isArray(data.items)) throw new Error();
+    clearTimeout(timer); $("#note").textContent = "";
     extraction = data;
-    render(data);
-    $("#note").textContent = "";
-  }catch(err){
-    $("#result").innerHTML = '<div class="err">' + esc(err.message) +
-      ' <button type="button" class="qtoggle" id="qfall">手で入力する</button></div>';
-    $("#qfall").addEventListener("click", () => {
-      $("#qbox").hidden = false;
-      $("#qtoggle").setAttribute("aria-expanded", "true");
-      $("#qbox").scrollIntoView({block: "center"});
-      $("#qtitle").focus();
+    if(isKid()) await kidCandidates(data, token);
+    else render(data);
+  }catch(err){ if(current(token)){ readFailure(); $("#note").textContent = ""; } }
+  finally { clearTimeout(timer); if(current(token)){ busy = false; controls(); revealResult(origin, $("#result").innerHTML ? "#result" : "#completion"); } }
+}
+
+async function kidCandidates(data, token){
+  photoConsumed = true;
+  const items = data.items.filter(it => it.branch !== "same");
+  if(!items.length){ emptyResult(data); return; }
+  const ready = items.filter(it => it.child === currentChild);
+  const unsure = items.filter(it => it.child !== currentChild);
+  // 普通の候補はそのまま登録。不明・別の子の候補だけ本人に確かめる。
+  if(ready.length) await registerItems(ready, token, false);
+  if(!current(token)) return;
+  if(unsure.length){
+    $("#result").innerHTML = '<h2>だれの ぶん？</h2><p>自分のぶんだけ、入れてね。ほかの子のぶんは、おうちの人に見てもらおう。</p>';
+    unsure.forEach(it => {
+      const row = document.createElement("div"); row.className = "item";
+      row.innerHTML = '<p>'+esc(it.title)+'</p><p>'+esc(it.date)+' · '+esc(it.child || '不明')+'</p>'
+        + '<div class="owner-choice"><button class="btn primary">'+esc(currentChild)+'の ぶん</button>'
+        + '<button class="btn ghost">いれない</button></div>';
+      const buttons = row.querySelectorAll("button");
+      buttons[0].addEventListener("click", async () => {
+        if(busy || !current(token)) return;
+        buttons.forEach(b => b.disabled = true); busy = true; controls();
+        // 帰属の確認はこの候補だけ。兄弟の選択・切替UIにはしない。
+        await registerItems([{...it, child:currentChild}], token);
+        if(current(token)){ row.remove(); busy = false; controls(); }
+      });
+      buttons[1].addEventListener("click", () => row.remove());
+      $("#result").appendChild(row);
     });
-    $("#note").textContent = "";
+    $("#result").insertAdjacentHTML("beforeend", exits());
   }
-  $("#go").disabled = false;
-});
+}
+function emptyResult(data){
+  $("#result").innerHTML = '<div class="ok">'+(data.skipped ? 'もう入っていたよ' : 'やることは見つからなかったよ')+'</div>'
+    + exits() + '<button class="btn ghost" id="another-photo">別の写真</button>';
+  $("#another-photo").addEventListener("click", () => $("#album").click());
+}
 
 function render(d){
   const KIND = {event:"行事", deadline:"提出期限", homework:"宿題", bring:"持ち物"};
@@ -297,49 +488,42 @@ function render(d){
        + '<button type="button" id="showskip">見る</button>'
        + '<span id="skiplist"></span></p>';
   }
-  if(d.trace && d.trace.length){
-    h += '<div class="trace">' + d.trace.map(t=>"<div>› "+esc(t)+"</div>").join("") + "</div>";
-  }
-  if(!d.items.length){
-    h += '<div class="ok">新しく入れるものはありませんでした。</div>';
-    $("#result").innerHTML = h;
-    if(d.skipped) bindSkip(d);
-    return;
-  }
+  if(!d.items.length){ emptyResult(d); return; }
 
   // 原本を横に置いたまま確かめる（画面設計 12-1）。撮り直さないと確かめられない、をなくす。
   h += '<div class="withshot"><div class="shot">'
-     + (picked ? '<img id="shot" src="'+URL.createObjectURL(picked)+'" alt="撮ったもの">' : "")
+     + (picked ? '<button type="button" id="shot" class="btn ghost" aria-label="原本を拡大"><img src="'+esc(previewURL)+'" alt="撮ったもの"></button>' : "")
      + '<p class="cap">撮ったもの</p></div><div class="list"><div class="items">';
 
-  d.items.forEach(it => {
+  d.items.forEach((it, index) => {
+    const fieldId = "candidate-" + index;
     const br = it.branch || "new";
     const cls = (br==="diff" ? "b_diff" : br==="moved" ? "b_moved" : "") + (it.needs_review ? " review" : "");
-    h += '<div class="item ' + cls + '" data-id="' + it.id + '">'
+    h += '<fieldset class="item ' + cls + '" data-id="' + esc(it.id) + '">'
+      + '<legend>候補 ' + (index + 1) + "：" + esc(it.title) + "</legend>"
       + '<div class="item-head">'
-        + '<input type="checkbox" data-f="selected"' + (it.selected ? " checked" : "") + ' aria-label="登録する">'
-        + '<input class="item-title" data-f="title" value="' + esc(it.title) + '">'
+        + '<input type="checkbox" data-f="selected"' + (it.selected ? " checked" : "") + ' aria-label="' + esc(it.title) + 'を登録する">'
+        + '<label for="'+fieldId+'-title">内容</label><input id="'+fieldId+'-title" class="item-title" data-f="title" value="' + esc(it.title) + '">'
       + "</div>"
       + '<div class="badges">'
         + '<span class="badge ' + (BR[br]||"b-dim") + '">' + esc(it.branch_label || "新規") + "</span>"
         + '<span class="badge b-kind">' + esc(KIND[it.kind] || it.kind) + "</span>"
         + '<button type="button" class="who" data-f="child">' + esc(it.child || "不明") + "</button>"
         + (it.needs_review ? '<span class="badge b-warn">要確認</span>' : "")
-        + '<span class="badge b-dim">確度 ' + Math.round((it.confidence||0)*100) + "%</span>"
       + "</div>"
       + (br==="moved"
-          ? '<div class="changes">前は <b>' + esc(it.matched_date||"") + '</b> に入っています（' + esc(it.duplicate_of||"") + "）</div>"
+          ? '<div class="changes">前は <b>' + esc(it.matched_date||"") + '</b> → <b>' + esc(it.date) + '</b>（' + esc(it.duplicate_of||"") + "）</div>"
           : "")
       + ((it.changes && it.changes.length)
           ? '<div class="changes">' + it.changes.map(c=>"・"+esc(c)).join("<br>") + "</div>"
           : "")
       + '<div class="fields">'
-        + '<div><label>日付</label><input type="date" data-f="date" value="' + esc(it.date) + '"></div>'
-        + '<div><label>開始時刻</label><input type="text" data-f="time_start" placeholder="終日" value="' + esc(it.time_start||"") + '"></div>'
-        + '<div><label>持ち物・補足</label><input type="text" data-f="note" value="' + esc([...(it.bring||[]), it.note].filter(Boolean).join(" / ")) + '"></div>'
+        + '<div><label for="'+fieldId+'-date">日付</label><input id="'+fieldId+'-date" type="date" data-f="date" value="' + esc(it.date) + '"></div>'
+        + '<div><label for="'+fieldId+'-time_start">開始時刻</label><input id="'+fieldId+'-time_start" type="text" data-f="time_start" placeholder="終日" value="' + esc(it.time_start||"") + '"></div>'
+        + '<div><label for="'+fieldId+'-note">持ち物・補足</label><input id="'+fieldId+'-note" type="text" data-f="note" value="' + esc([...(it.bring||[]), it.note].filter(Boolean).join(" / ")) + '"></div>'
       + "</div>"
       + (it.source_text ? '<div class="src">' + esc(it.source_text) + "</div>" : "")
-    + "</div>";
+    + "</fieldset>";
   });
   h += "</div>";
   h += '<div class="row"><button class="btn primary" id="reg">カレンダーに登録する</button>'
@@ -348,6 +532,9 @@ function render(d){
   $("#result").innerHTML = h;
 
   if(d.skipped) bindSkip(d);
+  if($("#shot")) $("#shot").addEventListener("click", () => {
+    $("#photo-large").src = previewURL; $("#photo-dialog").showModal();
+  });
   $("#all").addEventListener("click", () => {
     document.querySelectorAll('.item input[data-f="selected"]').forEach(c => c.checked = true);
   });
@@ -374,31 +561,31 @@ function bindSkip(d){
   });
 }
 
-// 10分だけ「取り消す」を出しておく。押し忘れたまま残り続けるより、消えたほうがいい。
+// 成功したIDだけを10分間取り消せる。部分失敗は成功扱いにしない。
+let undoIds = [], undoUntil = 0;
 function armUndo(ids){
-  const btn = document.getElementById("undo");
+  const btn = $("#undo"), note = $("#undonote"), token = generation;
   if(!btn) return;
-  const until = Date.now() + 10*60*1000;
-  const tick = setInterval(() => {
-    const left = Math.max(0, Math.round((until - Date.now())/1000));
-    if(left <= 0){ clearInterval(tick); btn.remove(); document.getElementById("undonote").textContent=""; return; }
-    document.getElementById("undonote").textContent = "あと" + Math.ceil(left/60) + "分";
+  clearInterval(undoTick);
+  undoIds = ids; undoUntil = Date.now() + 10*60*1000;
+  undoTick = setInterval(() => {
+    const left = undoUntil - Date.now();
+    if(left <= 0 || !btn.isConnected){ clearInterval(undoTick); btn.remove(); note.textContent = ""; return; }
+    note.textContent = "あと" + Math.ceil(left/60000) + "分";
   }, 1000);
   btn.addEventListener("click", async () => {
-    btn.disabled = true;
-    document.getElementById("undonote").textContent = "取り消しています…";
+    if(busy || Date.now() >= undoUntil) return;
+    busy = true; controls(); btn.disabled = true; note.textContent = "取り消しています…";
     try{
-      const res = await fetch("/api/register/undo", {method:"POST",
-        headers:{"Content-Type":"application/json"}, body: JSON.stringify({ids})});
+      const res = await fetch("/api/register/undo", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ids:undoIds})});
       const j = await res.json();
-      if(!res.ok) throw new Error(j.detail || "取り消せませんでした");
-      clearInterval(tick);
-      document.getElementById("regdone").innerHTML =
-        j.undone + " 件を取り消しました。カレンダーには記録として残ります。";
-    }catch(err){
-      btn.disabled = false;
-      document.getElementById("undonote").textContent = err.message;
-    }
+      if(!current(token)) return;
+      if(!res.ok || !Array.isArray(j.failed)) throw new Error();
+      undoIds = j.failed;
+      note.textContent = j.undone + "件を取り消しました。" + (j.failed.length ? j.failed.length + "件は取り消せませんでした。一覧で確認してください。" : "");
+      clearInterval(undoTick); btn.remove();
+    }catch(err){ if(current(token)){ clearInterval(undoTick); note.textContent = "取り消せたか確認できません。一覧で確認してください。"; btn.remove(); } }
+    finally { if(current(token)){ busy = false; controls(); } }
   });
 }
 
@@ -422,37 +609,50 @@ function collect(){
 }
 
 async function doRegister(){
+  if(!canAct() || busy || photoConsumed) return;
   const items = collect();
   if(!items.length){ $("#regnote").textContent = "チェックが入っていません"; return; }
-  $("#reg").disabled = true;
-  $("#regnote").innerHTML = '<span class="spinner"></span> 登録中';
+  photoConsumed = true;
+  busy = true; controls(); $("#reg").disabled = true;
+  const token = generation;
+  await registerItems(items, token);
+  if(current(token)){ $("#result").innerHTML = ""; busy = false; controls(); }
+}
+async function registerItems(items, token, reveal = true){
+  if(!canAct() || !current(token)) return;
+  const origin = document.activeElement;
+  // 呼出側で写真・手入力をロックし、応答不明でも一括再送しない。
+  $("#note").textContent = "入れているよ";
   try{
-    const res = await fetch("/api/register", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({items})
-    });
-    const data = await res.json();
-    if(!res.ok) throw new Error(data.detail || "登録に失敗しました");
-    const ok = data.results.filter(r=>r.status==="ok");
-    const ng = data.results.filter(r=>r.status!=="ok");
-    // まとめて入れたものは、まとめて取り消せる（10分間・D-3）
-    const ids = ok.map(r=>r.id).filter(Boolean);
-    let h = '<div class="ok" id="regdone">' + ok.length + " 件をカレンダーに登録しました。"
-          + (ids.length ? ' <button type="button" class="btn ghost" id="undo">取り消す</button>'
-                          + '<span class="tag" id="undonote"></span>' : "")
-          + "<br>"
-          + ok.map(r=>'・<a href="'+esc(r.link)+'" target="_blank" rel="noopener">'+esc(r.title)+"</a>").join("<br>")
-          + "</div>";
-    if(ng.length) h += '<div class="err">' + ng.length + " 件が失敗しました。<br>"
-          + ng.map(r=>"・"+esc(r.title)+" — "+esc(r.error)).join("<br>") + "</div>";
-    $("#regnote").textContent = "";
-    $("#result").insertAdjacentHTML("beforeend", h);
-    if(ids.length) armUndo(ids);
+    const data = await qPost(items);
+    if(!current(token)) return;
+    showRegistered(data, items.length);
   }catch(err){
-    $("#regnote").textContent = "";
-    $("#result").insertAdjacentHTML("beforeend", '<div class="err">'+esc(err.message)+"</div>");
+    if(current(token)) $("#completion").insertAdjacentHTML("afterbegin", '<div class="err">入ったか たしかめられなかったよ。もう一度送る前に、一覧で確認してね。</div>'+exits());
+  }finally { if(current(token)){ $("#note").textContent = ""; if(reveal) revealResult(origin); } }
+}
+function showRegistered(data, expected){
+  const ok = data.results.filter(r => r.status === "ok");
+  const ng = data.results.filter(r => r.status !== "ok");
+  const missing = Math.max(0, expected - data.results.length);
+  let h = '';
+  if(ok.length){
+    h += '<div class="ok">'+(isKid() ? 'やることに 入ったよ' : ok.length+' 件をカレンダーに登録しました。')
+      + '<ul>'+ok.map(r => '<li>'+esc(isKid() ? (r.title || '').replace(/^[^｜]*｜/, '') : r.title)+'</li>').join('')+'</ul>';
+    if(isKid() && data.notice && data.notice.id) h += '<p>おうちの人への知らせをアプリに残したよ</p>';
+    h += '</div>';
   }
-  $("#reg").disabled = false;
+  if(ng.length || missing) h += '<div class="err">入ったか たしかめられなかったよ。未確認 '+(ng.length+missing)+'件。成功したぶんは送り直さず、一覧で確認してね。<ul>'
+    + ng.map(r => '<li>'+esc(r.title)+'</li>').join('')+'</ul></div>';
+  h += exits();
+  // 以前の成功表示も残す。undo は直近の成功したまとまりにだけ付ける。
+  if($("#undo")) $("#undo").remove();
+  if($("#undonote")) $("#undonote").remove();
+  clearInterval(undoTick);
+  const ids = ok.map(r => r.id).filter(Boolean);
+  if(ids.length) h += '<button class="btn ghost" id="undo">取り消す</button> <span id="undonote"></span>';
+  $("#completion").insertAdjacentHTML("afterbegin", h);
+  if(ids.length) armUndo(ids);
 }
 
 // ---- 手で入力する ---------------------------------------------------------
@@ -484,11 +684,7 @@ function qRenderSubjects(){
     '<button type="button" data-s="' + esc(x) + '" aria-pressed="' + (x === qSubj) + '">' + esc(x) + "</button>").join("");
 }
 function qSetup(children){
-  qChildren = children || [];
-  qChild = (localStorage.getItem("mimamori-child") || (qChildren[0] && qChildren[0].name) || "");
-  if (!qChildren.some(c => c.name === qChild)) qChild = (qChildren[0] && qChildren[0].name) || "";
-  $("#qchild").innerHTML = '<span class="lab">だれ</span>' + qChildren.map(c =>
-    '<button type="button" data-c="' + esc(c.name) + '" aria-pressed="' + (c.name === qChild) + '">' + esc(c.name) + "</button>").join("");
+  qChildren = children;
   qRenderSubjects();
 }
 
@@ -500,12 +696,6 @@ $("#qtoggle").addEventListener("click", () => {
 $("#qsubj").addEventListener("click", e => {
   const b = e.target.closest("button[data-s]"); if (!b) return;
   qSubj = b.dataset.s; qPress($("#qsubj"), b);
-});
-$("#qchild").addEventListener("click", e => {
-  const b = e.target.closest("button[data-c]"); if (!b) return;
-  qChild = b.dataset.c; qPress($("#qchild"), b);
-  try { localStorage.setItem("mimamori-child", qChild); } catch (err) {}
-  qRenderSubjects();
 });
 $("#qwhen").addEventListener("click", e => {
   const b = e.target.closest("button[data-o]"); if (!b) return;
@@ -521,53 +711,77 @@ $("#qkind").addEventListener("click", e => {
 });
 
 async function qPost(items){
+  if(!canAct()) throw new Error("だれかを確かめられません");
   const res = await fetch("/api/register", {
     method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({items: items, pending: false})
+    body: JSON.stringify({items: items, pending: false, source: isKid() ? "kid" : "parent"})
   });
   const j = await res.json();
-  if (!res.ok) throw new Error(j.detail || "登録できませんでした");
+  if (!res.ok || !Array.isArray(j.results)) throw new Error("登録を確認できませんでした");
   return j;
 }
 
 $("#qadd").addEventListener("click", async () => {
-  if (!qChild) { $("#qnote").textContent = "だれのぶんか選んでください"; return; }
+  if(!canAct() || busy || manualLocked || !qChild) return;
+  const token = generation;
   const extra = $("#qtitle").value.trim();
-  // やることが空でも入る。「算数の宿題」だけで足りる日がある。
   const title = qChild + "｜" + qSubj + (extra ? " " + extra : "");
-  const btn = $("#qadd"); btn.disabled = true; $("#qnote").textContent = "入れています…";
-  try {
-    await qPost([{title: title, child: qChild, kind: qKind, date: qDateISO(), note: "手で入力"}]);
-    $("#qnote").className = "qnote ok";
-    $("#qnote").textContent = "入れました：" + title.split("｜")[1];
-    $("#qtitle").value = "";            // 続けて打てるように、教科と日付は残す
-  } catch (err) {
-    $("#qnote").className = "qnote"; $("#qnote").textContent = err.message;
-  }
-  btn.disabled = false;
+  busy = true; manualLocked = true; controls();
+  await registerItems([{title, child:qChild, kind:qKind, date:qDateISO(), note:"手で入力"}], token);
+  if(current(token)){ busy = false; controls(); manualNext(); }
 });
+function manualNext(){
+  $("#qnote").innerHTML = '<button type="button" class="qtoggle" id="qnext">別の内容を入れる</button>';
+  $("#qnext").addEventListener("click", () => {
+    if(busy) return;
+    $("#qtitle").value = ""; $("#qnote").textContent = "";
+    manualLocked = false; controls(); $("#qtitle").focus();
+  });
+}
 
+// repeat の既存APIは source と個別の成否を返せないため、既存の予定取得と
+// register を組み合わせる。月初も昨日と今日の両方を読み、成功分を再送しない。
+function dateISO(date){
+  return date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
+}
+async function yesterdayItems(child){
+  const today = new Date(), yesterday = new Date(today);
+  yesterday.setDate(today.getDate()-1);
+  const dates = [dateISO(yesterday), dateISO(today)];
+  const months = [...new Set(dates.map(d => d.slice(0,7)))];
+  const pages = await Promise.all(months.map(async ym => {
+    const res = await fetch('/api/schedule?ym='+ym+'&child='+encodeURIComponent(child));
+    if(!res.ok) throw new Error();
+    const data = await res.json();
+    if(!Array.isArray(data.items)) throw new Error();
+    return data.items;
+  }));
+  const rows = pages.flat().filter(r => r.child === child);
+  const key = title => (title || '').replace(/[\s✓]/g, '');
+  const have = new Set(rows.filter(r => r.date === dates[1]).map(r => key(r.summary)));
+  return rows.filter(r => r.date === dates[0] && ['homework','bring'].includes(r.kind)).flatMap(r => {
+    const title = (r.summary || '').replace(/✓/g, '').trim();
+    if(have.has(key(title))) return [];
+    have.add(key(title));
+    return [{title, child, kind:r.kind, date:dates[1], note:'昨日と同じぶん'}];
+  });
+}
 $("#qsame").addEventListener("click", async () => {
-  if (!qChild) { $("#qnote").textContent = "だれのぶんか選んでください"; return; }
-  const btn = $("#qsame"); btn.disabled = true; $("#qnote").className = "qnote";
-  $("#qnote").textContent = "昨日のぶんを見ています…";
-  try {
-    const res = await fetch("/api/quick/repeat", {
-      method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({child: qChild})
-    });
-    const j = await res.json();
-    if (!res.ok) throw new Error(j.detail || "できませんでした");
-    if (j.created.length) {
-      $("#qnote").className = "qnote ok";
-      $("#qnote").textContent = j.created.length + "件 入れました：" +
-        j.created.map(t => t.split("｜")[1]).join("、");
-    } else {
-      $("#qnote").textContent = j.note || "入れるものがありませんでした";
-    }
-  } catch (err) { $("#qnote").textContent = err.message; }
-  btn.disabled = false;
+  if(!canAct() || busy || manualLocked || !qChild) return;
+  const token = generation, child = qChild;
+  busy = true; controls(); $("#qnote").textContent = "昨日のぶんを見ています…";
+  try{
+    const items = await yesterdayItems(child);
+    if(!current(token)) return;
+    if(items.length){ manualLocked = true; await registerItems(items, token); }
+    else $("#qnote").textContent = "新しく入れる昨日のぶんはありませんでした。";
+  }catch(err){ if(current(token)) $("#qnote").textContent = "昨日のぶんを読み込めませんでした。手でいれることもできます。"; }
+  finally { if(current(token)){ busy = false; controls(); if(manualLocked) manualNext(); } }
 });
+controls();
+confirmIdentity();
+
 </script>
+<script src="/static/appearance.js"></script>
 </body>
 </html>
