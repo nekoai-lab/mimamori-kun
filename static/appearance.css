@@ -98,7 +98,8 @@ html:root[data-audience="kid"][data-kid-theme] body { font-family: var(--kid-fon
 .ap-open { font: inherit; font-weight: 700; min-height: 48px; padding: 8px 16px; border-radius: 999px;
   border: 1px solid var(--line, #CFC9B9); background: var(--surface, #fff); color: var(--ink, inherit); cursor: pointer; }
 .ap-status { display: block; font-size: 14px; margin-top: 4px; }
-.ap-status:empty { display: none; }
+.ap-status[hidden] { display: none; }
+.ap-status-text:focus { outline: 3px solid var(--accent, #0F6B62); outline-offset: 2px; }
 .ap-status button { font: inherit; font-weight: 700; min-height: 44px; margin-left: 6px; padding: 6px 12px; border-radius: 999px;
   border: 1px solid currentColor; background: transparent; color: inherit; cursor: pointer; }
 
@@ -106,24 +107,28 @@ html:root[data-audience="kid"][data-kid-theme] body { font-family: var(--kid-fon
   background: var(--paper, #FAF7F0); color: var(--ink, #1F2422); overflow: auto; }
 .ap-sheet::backdrop { background: rgba(0,0,0,.45); }
 @media (min-width: 700px) { .ap-sheet { margin: auto; border-radius: 20px; } }
-.ap-sheet-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+.ap-sheet-head { position: sticky; top: 0; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
   padding: 12px 16px; background: inherit; border-bottom: 1px solid var(--line, #CFC9B9); }
 .ap-sheet-head h2 { margin: 0; font-size: 20px; }
-.ap-sheet-body { padding: 16px; display: grid; gap: 12px; }
+.ap-sheet-body { padding: 16px; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); overflow-wrap: anywhere; }
+.ap-sheet { box-sizing: border-box; max-width: 100vw; }
 .ap-sheet button.ap-btn { font: inherit; font-weight: 700; min-height: 48px; padding: 8px 18px; border-radius: 999px;
   border: 1px solid var(--line, #CFC9B9); background: var(--surface, #fff); color: var(--ink, inherit); cursor: pointer; }
 .ap-sheet button.ap-primary { background: var(--accent, #0F6B62); color: var(--me-ink, #fff); border-color: transparent; }
 .ap-choices { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
-.ap-choice { display: grid; grid-template-columns: 96px 1fr; gap: 12px; align-items: center; width: 100%; text-align: left;
+/* 狭い幅・文字拡大では、絵と説明を上下に並べる（横にはみ出さない。PR-34 A1） */
+.ap-choice { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; width: 100%; min-width: 0; box-sizing: border-box; text-align: left;
   font: inherit; padding: 12px; min-height: 48px; cursor: pointer;
   background: var(--kid-bg); color: var(--kid-text); border: 2px solid var(--kid-line); border-radius: var(--kid-radius-card); }
 .ap-choice[aria-pressed="true"] { border-color: var(--kid-accent); box-shadow: 0 0 0 2px var(--kid-accent) inset; }
-.ap-choice .ap-name { font-size: 20px; font-weight: 700; display: block; }
+.ap-choice > .ap-art { flex: none; margin: 0 auto; }
+.ap-choice > .ap-info { flex: 1 1 11em; min-width: 0; }
+.ap-choice .ap-name { font-size: 20px; font-weight: 700; display: block; overflow-wrap: anywhere; }
 .ap-choice .ap-picked { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 14px; font-weight: 700; color: var(--kid-done); }
 .ap-choice .ap-picked::before { content: "✓"; }
 .ap-art { display: block; width: 96px; height: 96px; }
 .ap-art-mono { background: var(--kid-text); -webkit-mask: var(--ap-mask) center / contain no-repeat; mask: var(--ap-mask) center / contain no-repeat; }
-.ap-mini { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 8px 10px; background: var(--kid-card); color: var(--kid-text);
+.ap-mini { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; margin-top: 8px; padding: 8px 10px; background: var(--kid-card); color: var(--kid-text);
   border: 1px solid var(--kid-line); border-radius: var(--kid-radius-button); font-size: 14px; }
 .ap-mini .ap-stamp { width: 24px; height: 24px; flex: none; }
 .ap-mini .ap-mini-done { margin-left: auto; color: var(--kid-done); font-weight: 700; white-space: nowrap; }

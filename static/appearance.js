@@ -109,6 +109,7 @@
     status: "",    // "" | saving | saved | failed | unconnected
     failed: null,  // 覚えられなかったテーマ（もういちど に使う）
     writeSeq: 0,
+    choice: 0,     // 本人がテーマを選ぶたびに増やす。選んだあとに届いた古い設定で戻さない（最後に選んだものが勝つ）
   };
 
   function audience() {
@@ -124,7 +125,7 @@
 
   function setChild(child) {
     child = child ? String(child) : null;
-    var seq = ++state.seq;
+    var seq = ++state.seq, choice = state.choice;
     state.child = child;
     state.status = "";
     state.failed = null;
@@ -134,6 +135,7 @@
     if (!child) return Promise.resolve(null);
     return window.AppearanceStore.read(child).then(function (s) {
       if (seq !== state.seq) return state.theme;           // 別の子に切り替わった
+      if (choice !== state.choice) return state.theme;     // 取得中に本人が選んだ。古い設定で戻さない（PR-34 A3）
       var id = s && theme(s.theme_id) ? s.theme_id : null; // 知らない ID は中立（設定は書き換えない）
       state.saved = id;
       state.theme = id;
@@ -141,7 +143,7 @@
       paint();
       return id;
     }, function (e) {
-      if (seq !== state.seq) return state.theme;
+      if (seq !== state.seq || choice !== state.choice) return state.theme;
       if (e && e.unconnected) cacheSet(child, null);       // 口がない：確かめられたものはない
       paint();
       return state.theme;
@@ -151,6 +153,7 @@
   function commit(id) {
     if (!theme(id) || !state.child) return Promise.resolve(false);
     var child = state.child, seq = state.seq, w = ++state.writeSeq;
+    state.choice++;
     state.theme = id;
     state.status = "saving";
     state.failed = null;
@@ -227,6 +230,10 @@
     d.appendChild(body);
     d.addEventListener("cancel", function (e) { e.preventDefault(); closeSheet(); });   // Esc
     document.body.appendChild(d);
+    // 上に貼り付く見出しの下に、フォーカスした候補が隠れないようにする（文字を大きくしても）
+    function pad() { d.style.scrollPaddingTop = (head.offsetHeight + 8) + "px"; }
+    if (window.ResizeObserver) new ResizeObserver(pad).observe(head);
+    pad();
     return { el: d, body: body };
   }
 
@@ -247,6 +254,7 @@
       b.setAttribute("aria-pressed", picked ? "true" : "false");
       b.appendChild(art(t, "ap-art", "art"));
       var info = document.createElement("span");
+      info.className = "ap-info";
       info.appendChild(text("span", "ap-name", t.name));
       if (picked) info.appendChild(text("span", "ap-picked", "えらんでいる"));
       info.appendChild(miniCard(t));
@@ -332,24 +340,39 @@
         btn.type = "button";
         btn.setAttribute("aria-haspopup", "dialog");
         btn.addEventListener("click", function () { openSheet(btn); });
+        // 状態の欄は作り直さない（押したボタンが消えてフォーカスが外れないように。PR-34 A2）
         status = document.createElement("span");
         status.className = "ap-status";
         status.setAttribute("role", "status");
+        var msg = text("span", "ap-status-text", "");
+        msg.tabIndex = -1;
+        var again = text("button", "ap-retry", "もういちど");
+        again.type = "button";
+        again.hidden = true;
+        again.addEventListener("click", function () { retry(slot); });
+        status.appendChild(msg);
+        status.appendChild(again);
         slot.appendChild(btn);
         slot.appendChild(status);
       }
       var t = theme(state.theme);
       btn.setAttribute("aria-label", "みため（いまは " + (t ? t.name : "ふつう") + "）");
-      status.replaceChildren();
-      if (state.status && STATUS[state.status]) {
-        status.appendChild(document.createTextNode(STATUS[state.status]));
-        if (state.status === "failed") {
-          var again = text("button", "", "もういちど");
-          again.type = "button";
-          again.addEventListener("click", function () { commit(state.failed); });
-          status.appendChild(again);
-        }
-      }
+      status.querySelector(".ap-status-text").textContent = STATUS[state.status] || "";
+      status.querySelector(".ap-retry").hidden = state.status !== "failed";
+      status.hidden = !STATUS[state.status];
+    });
+  }
+
+  // 「もういちど」：待っているあいだは結果の文言に、再失敗なら新しい「もういちど」に、
+  // 覚えられたら結果の文言にフォーカスを置く。待っているあいだに別の操作へ移ったら奪わない
+  function retry(slot) {
+    var msg = slot.querySelector(".ap-status-text"), again = slot.querySelector(".ap-retry");
+    msg.focus();
+    commit(state.failed).then(function () {
+      var here = document.activeElement;
+      if (here !== msg && here !== again && here !== document.body && here !== null) return;
+      if (state.status === "failed" && !again.hidden) again.focus();
+      else msg.focus();
     });
   }
 

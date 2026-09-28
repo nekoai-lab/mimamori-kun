@@ -416,3 +416,88 @@ def test_who_sets_audience_from_login_and_places_parent_entry(given, appearance,
             "slots": [{"attr": "data-profile-menu"}] if profile else []}
     out = run_who(case)
     assert out["audience"] == (given or "kid") and out["role"] == "child" and out["parentEntry"] is entry
+
+
+# ---------------------------------------------------------------- PR-34 のレビューで直したもの
+
+@needs_node
+@pytest.mark.parametrize("post", ["ok", "fail"])
+def test_late_setting_never_undoes_the_theme_the_child_just_chose(post):
+    """A3：設定の取得が遅れているあいだに選んだら、あとで届いた古い設定で戻さない（最後に選んだものが勝つ）。"""
+    out = run(scenario(
+        "{ htmlAttrs: {'data-audience': 'kid'}, slots: [{attr: 'data-appearance-picker'}], "
+        "api: (url, p) => p ? " + ("{status: 200, body: {settings: {theme_id: p.theme_id}}}" if post == "ok" else "{status: 500, body: {}}") + " : 'hold' }",
+        """
+        A.setChild('弟'); await settle();                 // 取得は保留
+        await A._commit('monochrome');                    // 本人が選んで「これにする」
+        env.pending[0].res({status: 200, body: {settings: {theme_id: 'rocket-lab'}}});   // 古い設定が遅れて届く
+        await settle();
+        const status = env.body.querySelector('.ap-status-text').textContent;
+        return { theme: env.html.getAttribute('data-kid-theme'), cur: A.current(), cache: env.store['mimamori-appearance:弟'] || null, status };
+        """))
+    assert out["theme"] == "monochrome" and out["cur"]["theme"] == "monochrome"
+    if post == "ok":
+        assert out["cur"]["saved"] == "monochrome" and out["cache"] == "monochrome" and out["status"] == "このみためを おぼえたよ"
+    else:   # この画面では変えた、を古い設定で取り消さない。覚えたことにもしない
+        assert out["cur"]["status"] == "failed" and out["cur"]["saved"] is None and out["cache"] is None
+        assert "まだ覚えられていない" in out["status"]
+
+
+@needs_node
+def test_switching_child_still_drops_the_old_childs_answer_after_a_choice():
+    out = run(scenario(
+        "{ htmlAttrs: {'data-audience': 'kid'}, api: (url, p) => p ? {status: 200, body: {settings: {theme_id: p.theme_id}}} : url.includes('%E5%85%84') ? 'hold' : {status: 200, body: {settings: {theme_id: 'snow-bird'}}} }",
+        """
+        A.setChild('兄'); await settle(); await A._commit('monochrome');
+        await A.setChild('弟');
+        env.pending[0].res({status: 200, body: {settings: {theme_id: 'rocket-lab'}}}); await settle();
+        return { theme: env.html.getAttribute('data-kid-theme'), child: A.current().child };
+        """))
+    assert out == {"theme": "snow-bird", "child": "弟"}
+
+
+RETRY = """
+        await A.setChild('弟');
+        await A._commit('snow-bird');                                   // 1回目は失敗
+        const slot = env.body.querySelector('[data-appearance-picker]');
+        const again = slot.querySelector('.ap-retry'), msg = slot.querySelector('.ap-status-text');
+        again.focus(); again.click(); await settle();
+        const waiting = env.doc.activeElement === msg && again.hidden;
+        MOVE
+        env.pending[env.pending.length - 1].res(RESULT); await settle();
+        const a = env.doc.activeElement;
+        return { waiting, focus: a === again ? 'retry' : a === msg ? 'message' : a && a.textContent, retryShown: !again.hidden, text: msg.textContent };
+"""
+
+
+def retry_case(result, move=""):
+    api = "{ htmlAttrs: {'data-audience': 'kid'}, slots: [{attr: 'data-appearance-picker'}], api: (url, p) => p ? ((globalThis.n = (globalThis.n || 0) + 1) === 1 ? {status: 500, body: {}} : 'hold') : {status: 200, body: {settings: {}}} }"
+    return run(scenario(api, RETRY.replace("MOVE", move).replace("RESULT", result)))
+
+
+@needs_node
+def test_retry_keeps_focus_on_the_message_then_on_the_next_retry_when_it_fails_again():
+    """A2：「もういちど」を押しても、フォーカスが外れない。再失敗なら新しい「もういちど」へ。"""
+    out = retry_case("{status: 500, body: {}}")
+    assert out["waiting"] is True and out["focus"] == "retry" and out["retryShown"] is True
+    assert "まだ覚えられていない" in out["text"]
+
+
+@needs_node
+def test_retry_success_leaves_focus_on_the_result_message():
+    out = retry_case("{status: 200, body: {settings: {theme_id: 'snow-bird'}}}")
+    assert out["waiting"] is True and out["focus"] == "message" and out["text"] == "このみためを おぼえたよ" and out["retryShown"] is False
+
+
+@needs_node
+def test_retry_does_not_take_focus_back_after_the_child_moved_on():
+    out = retry_case("{status: 500, body: {}}", move="const other = el('button'); other.textContent = 'べつの操作'; env.body.appendChild(other); other.focus();")
+    assert out["focus"] == "べつの操作"
+
+
+def test_theme_cards_wrap_instead_of_overflowing():
+    """A1：絵と説明を横に固定しない。狭い幅・文字拡大では上下に並ぶ（ブラウザの 320px・文字200% でも確かめる）。"""
+    card = re.search(r"\.ap-choice \{([^}]*)\}", CSS).group(1)
+    assert "flex-wrap: wrap" in card and "min-width: 0" in card and "grid-template-columns: 96px" not in CSS
+    assert re.search(r"\.ap-choice > \.ap-info \{[^}]*min-width: 0", CSS)
+    assert re.search(r"\.ap-mini \{[^}]*flex-wrap: wrap", CSS)
