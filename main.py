@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 import re
+from contextlib import asynccontextmanager
 
 from typing import Any, Dict, List, Optional
 
@@ -14,6 +15,7 @@ from pydantic import BaseModel
 
 from mimamori.agent import read_otayori, read_year_plan
 from mimamori import images as images_mod
+from mimamori import ledger
 from mimamori.kid_agent import talk
 from mimamori.calendar_tools import (
     create_events,
@@ -37,7 +39,15 @@ def _key(title: str) -> str:
     return re.sub(r"\s", "", (title or "").replace("✓", ""))
 
 
-app = FastAPI(title="みまもりくん")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # リクエストを受ける前に本番の台帳接続を確かめる。
+    if "K_SERVICE" in os.environ:
+        ledger.store()
+    yield
+
+
+app = FastAPI(title="みまもりくん", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 MAX_BYTES = 12 * 1024 * 1024

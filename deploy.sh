@@ -3,7 +3,7 @@
 #
 # 方針：みまもりくんは外部から来た画像を LLM に食わせるアプリなので、
 #       専用プロジェクト + 専用サービスアカウントで隔離する。
-#       SA には Vertex AI を呼ぶ権限しか与えない。カレンダーへの権限は
+#       SA には Vertex AI と Firestore の利用権限を与える。カレンダーへの権限は
 #       IAM ではなく「カレンダー側の共有設定」で個別に渡す。
 set -euo pipefail
 
@@ -24,21 +24,31 @@ echo "▶ 必要な API を有効化"
 gcloud services enable \
   run.googleapis.com \
   aiplatform.googleapis.com \
+  firestore.googleapis.com \
   calendar-json.googleapis.com \
   cloudbuild.googleapis.com \
   artifactregistry.googleapis.com \
   iam.googleapis.com
 
+echo "▶ Firestore のデフォルトデータベースを用意（既にあればそのまま）"
+gcloud firestore databases describe --database='(default)' --project="$PROJECT" >/dev/null || \
+  gcloud firestore databases create --database='(default)' --project="$PROJECT" \
+    --location="$REGION" --type=firestore-native
+
 echo "▶ 専用サービスアカウントを用意（既にあればそのまま）"
 gcloud iam service-accounts describe "$SA_EMAIL" >/dev/null 2>&1 || \
   gcloud iam service-accounts create "$SA_NAME" \
     --display-name="みまもりくん Cloud Run 実行用" \
-    --description="Vertex AI の呼び出しのみ。カレンダー権限はカレンダー側の共有設定で渡す"
+    --description="Vertex AI と Firestore を利用。カレンダー権限はカレンダー側の共有設定で渡す"
 
-echo "▶ Vertex AI を呼ぶ権限だけ付与"
+echo "▶ Vertex AI と Firestore の利用権限を付与"
 gcloud projects add-iam-policy-binding "$PROJECT" \
   --member="serviceAccount:${SA_EMAIL}" \
   --role="roles/aiplatform.user" \
+  --condition=None >/dev/null
+gcloud projects add-iam-policy-binding "$PROJECT" \
+  --member="serviceAccount:${SA_EMAIL}" \
+  --role="roles/datastore.user" \
   --condition=None >/dev/null
 
 echo "▶ デプロイ"
