@@ -37,5 +37,6 @@
 
 ## 次の1手
 
+- PR #36：`ba136d0` の指定3点（見出し書体・ログアウトの強弱・一覧の明暗ボタン位置）をUXレビューし、ux-passでよいと判定。`design/inbox/UX_REVIEW.md` を `design/reviews/PR-36.md` へ移して目次を更新する。対象外のA結合作業は未完のまま維持。
 - 塊 A（Claude Code）と D（Codex）→ F → C。それぞれ撮影 → ChatGPT の UX レビュー → `design/reviews/PR-<番号>.md` → ux-pass
 - ARCHITECTURE.md と CLAUDE.md のコマンドを埋める
