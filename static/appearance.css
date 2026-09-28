@@ -24,6 +24,14 @@ html:root[data-audience="parent"], html:root[data-audience="parent"][data-theme=
   --line: var(--parent-line); --accent: var(--parent-accent); --warn: var(--parent-warning);
 }
 
+/* 親の書体（§3.1）：本文も見出しも同じ日本語 sans。見出しに明朝体・等幅英字を混ぜない（A の結合） */
+html:root[data-audience="parent"] {
+  --parent-font: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+}
+html:root[data-audience="parent"] body { font-family: var(--parent-font); }
+html:root[data-audience="parent"] :is(h1, h2, h3, h4),
+html:root[data-audience="parent"] :is(h1, h2, h3, h4) * { font-family: var(--parent-font); letter-spacing: normal; }
+
 /* ---------------------------------------------------------------- 子：3テーマ×明暗（§3.2） */
 [data-kid-theme="rocket-lab"] {
   --kid-bg: #F3F7FF; --kid-text: #152744; --kid-accent: #2454B8; --kid-card: #FFFFFF;
@@ -62,6 +70,9 @@ html:root[data-audience="kid"][data-kid-theme], html:root[data-audience="kid"][d
   --accent: var(--kid-accent); --me: var(--kid-accent); --me-ink: var(--kid-on-accent);
 }
 html:root[data-audience="kid"][data-kid-theme] body { font-family: var(--kid-font); background: var(--kid-bg); color: var(--kid-text); }
+/* 子の見出しも本文と同じ書体（テーマがなければ各画面の本文の書体）。明朝体・等幅英字を混ぜない（A の結合） */
+html:root[data-audience="kid"] :is(h1, h2, h3, h4),
+html:root[data-audience="kid"] :is(h1, h2, h3, h4) * { font-family: var(--kid-font, inherit); letter-spacing: normal; }
 /* モノクロは紙吹雪を出さない（§3.2） */
 :root[data-kid-theme="monochrome"] #confetti { display: none; }
 
