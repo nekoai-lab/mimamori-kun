@@ -16,7 +16,7 @@ import datetime as dt
 import json
 import re
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from google.adk.agents import LlmAgent
 from google.adk.runners import InMemoryRunner
@@ -30,7 +30,7 @@ from .schema import Extraction
 APP_NAME = "mimamorikun"
 
 
-def _instruction() -> str:
+def _instruction(child: Optional[str] = None) -> str:
     today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
     return f"""あなたは「みまもりくん」。共働き家庭の保護者に代わって、学校からのおたよりを読み、
 カレンダーに載せるべきものを拾い出す担当です。
@@ -40,9 +40,7 @@ def _instruction() -> str:
 相対表現（来週金曜、今月末、明後日など）は必ずこの日付を起点に実日付へ直すこと。
 
 # 対象の子ども
-{config.children_label}
-おたよりの学年表記・校名・教科・持ち物から、どちらの子のものか推定する。
-判別できないときは child を「不明」にし、needs_review を true にする。
+{_children_part(child)}
 
 # 手順
 1. 画像を丁寧に読む。日付、提出期限、持ち物、集合時刻、金額を落とさない。
@@ -112,13 +110,41 @@ def _instruction() -> str:
 """
 
 
-def build_agent() -> LlmAgent:
+def _children_part(child: Optional[str]) -> str:
+    if child:
+        # 子どもが自分で撮ったとき（#16）。ほかの子の名前も予定も渡さない
+        return f"{child}（この子が自分で撮ったもの。child は必ず {child} にする）"
+    return (config.children_label + "\n"
+            "おたよりの学年表記・校名・教科・持ち物から、どちらの子のものか推定する。\n"
+            "判別できないときは child を「不明」にし、needs_review を true にする。")
+
+
+def _scoped_list_events(child: str):
+    """その子の予定だけを返す list_events（#16）。兄弟の予定はモデルにも見せない。"""
+
+    def list_events(start_date: str, end_date: str) -> List[Dict[str, Any]]:
+        """指定期間の、この子の既存予定を返す。重複登録を避けるために、書く前に必ず読む。
+
+        Args:
+            start_date: 期間の開始日 YYYY-MM-DD
+            end_date: 期間の終了日 YYYY-MM-DD（この日を含む）
+
+        Returns:
+            件名・日付だけに絞った予定のリスト。
+        """
+        return [{"summary": e["summary"], "date": e["date"]}
+                for e in list_raw(start_date, end_date) if e.get("child") == child]
+
+    return list_events
+
+
+def build_agent(child: Optional[str] = None) -> LlmAgent:
     return LlmAgent(
         name="mimamori_reader",
         model=config.model,
         description="学校のおたよりを読み、カレンダー登録候補を作る",
-        instruction=_instruction(),
-        tools=[list_events],
+        instruction=_instruction(child),
+        tools=[_scoped_list_events(child) if child else list_events],
     )
 
 
@@ -133,7 +159,7 @@ def _parse_json(text: str) -> Dict[str, Any]:
     return json.loads(text[start : end + 1])
 
 
-def _review(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _review(items: List[Dict[str, Any]], child: Optional[str] = None) -> Dict[str, Any]:
     """既存のカレンダーと突き合わせて4分岐に分ける（dedupe.py）。
 
     以前はモデルの duplicate_of と類似度照合を混ぜていたが、
@@ -152,12 +178,19 @@ def _review(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     except Exception:  # noqa: BLE001
         # 読めないときは、消さずに全部見せる。黙って飛ばすのは読めたときだけ。
         return {"items": items, "skipped": 0, "skipped_titles": []}
+    if child:
+        # 子どもが撮ったときは、その子の予定とだけ突き合わせる（兄弟の件名・id・日付を返さない。#16）
+        existing = [e for e in existing if e.get("child") == child]
     return dedupe.review(items, existing)
 
 
-async def read_otayori(image_bytes: bytes, mime_type: str, hint: str = "") -> Dict[str, Any]:
-    """画像を1枚渡して、登録候補を返す。カレンダーへの書き込みはしない。"""
-    runner = InMemoryRunner(agent=build_agent(), app_name=APP_NAME)
+async def read_otayori(image_bytes: bytes, mime_type: str, hint: str = "",
+                       child: Optional[str] = None) -> Dict[str, Any]:
+    """画像を1枚渡して、登録候補を返す。カレンダーへの書き込みはしない。
+
+    child を渡すと（子どもが自分で撮ったとき）、その子の予定だけを見て、候補もその子のものにする。
+    """
+    runner = InMemoryRunner(agent=build_agent(child), app_name=APP_NAME)
     user_id = "parent"
     session = await runner.session_service.create_session(app_name=APP_NAME, user_id=user_id)
 
@@ -186,7 +219,10 @@ async def read_otayori(image_bytes: bytes, mime_type: str, hint: str = "") -> Di
     data = _parse_json(final)
     parsed = Extraction.model_validate(data)
     out = parsed.model_dump()
-    verdict = _review(out["items"])
+    if child:
+        for item in out["items"]:
+            item["child"] = child
+    verdict = _review(out["items"], child)
     out["items"] = verdict["items"]
     out["skipped"] = verdict["skipped"]                 # 完全一致。数だけ伝える
     out["skipped_titles"] = verdict["skipped_titles"]
