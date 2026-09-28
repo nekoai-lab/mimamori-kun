@@ -68,7 +68,8 @@ def test_login_and_who_are_the_only_identity_inputs():
 HARNESS = r'''
 const assert = require('node:assert/strict');
 const nodes = new Map(), calls = [], routes = new Map(), timers = new Map();
-let timerId = 0;
+let timerId = 0, authValue = AUTH, configStatus = 200;
+const navigations = [];
 class Element {
   constructor(id='') {
     this.id=id; this.dataset={}; this.style={}; this.value=''; this.textContent='';
@@ -88,10 +89,11 @@ class Element {
   removeAttribute(key) { delete this.attrs[key]; }
   appendChild(el) { this.children.push(el); return el; }
   insertAdjacentHTML(where, value) {
-    const oldChildren = this.children; this.innerHTML = this._html + value; this.children=oldChildren;
+    const oldChildren = this.children; this.innerHTML = where === 'afterbegin' ? value + this._html : this._html + value; this.children=oldChildren;
   }
   remove() { this.isConnected=false; if(this.id) nodes.delete(this.id); }
-  focus() { this.focused=true; }
+  focus() { this.focused=true; document.activeElement=this; }
+  scrollIntoView(options) { navigations.push({id:this.id,options}); }
   click() { return this.emit('click'); }
   showModal() { this.open=true; }
 }
@@ -102,6 +104,7 @@ const document = {
   querySelectorAll:s => [], getElementById:id => nodes.get(id) || null,
   createElement:() => new Element(),
 };
+document.activeElement = document.body;
 globalThis.window = globalThis;
 const navigator = {onLine:true};
 const location = {search:'?mode=parent'};
@@ -115,10 +118,11 @@ const children = [{name:'下の子',school_level:'elementary'}, {name:'上の子
 const fetch = async (url, opts={}) => {
   calls.push({url,opts});
   if(url==='/api/auth/me') {
-    if(AUTH==='network') throw new Error('offline');
-    return response({role:AUTH}, typeof AUTH==='number' ? AUTH : 200);
+    if(authValue==='network') throw new Error('offline');
+    if(routes.has(url)) return await routes.get(url)(opts);
+    return response({role:authValue}, typeof authValue==='number' ? authValue : 200);
   }
-  if(url==='/api/config') return response({children});
+  if(url==='/api/config') return response({children},configStatus);
   if(!routes.has(url)) throw new Error('Unexpected fetch: '+url);
   return await routes.get(url)(opts);
 };
@@ -150,8 +154,7 @@ def run_js(scenario, auth="child"):
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("auth", ["parent", 401, 404, "network", "unknown"])
-def test_parent_and_missing_login_wait_for_confirmation(auth):
+def test_parent_waits_for_confirmation():
     run_js(r'''
       await start();
       routes.set('/api/extract',()=>response({items:[item()]}));
@@ -174,7 +177,7 @@ def test_parent_and_missing_login_wait_for_confirmation(auth):
       assert.equal(registrations()[0].items[0].child,'上の子');
       await doRegister(); await readPhoto();
       assert.equal(registrations().length,1);
-    ''', auth)
+    ''', 'parent')
 
 
 def test_child_auto_registration_keeps_branch_metadata_and_no_notification_claim_on_failure():
@@ -452,3 +455,161 @@ def test_manual_entry_does_not_consume_unsubmitted_parent_photo():
       assert.equal(photoConsumed,false);
       assert.equal($('#go').disabled,false);
     ''','parent')
+
+
+@pytest.mark.parametrize("auth", [401, 404, 500, "network", "unknown", None])
+@pytest.mark.parametrize("recovered", ["child", "parent"])
+def test_identity_failure_blocks_every_entry_and_retry_recovers(auth, recovered):
+    run_js(r"""
+      await start();
+      assert.equal(audience,'unknown');
+      assert.match($('#capture-title').textContent,/確認できませんでした/);
+      assert.match($('#identity-note').textContent,/だれかを確かめられなかった/);
+      assert.equal($('#identity-retry').hidden,false);
+      for(const id of ['file','album','go','qadd','qsame']) assert.equal(nodes.get(id).disabled,true);
+      await choose(); await readPhoto(); await doRegister();
+      await $('#qadd').click(); await $('#qsame').click();
+      await registerItems([item()],generation);
+      await assert.rejects(()=>qPost([item()]));
+      assert.equal(calls.filter(c=>['/api/extract','/api/register'].includes(c.url)).length,0);
+      authValue=RECOVERED;
+      await $('#identity-retry').click();
+      assert.equal(audience,RECOVERED==='child' ? 'kid' : 'parent');
+      assert.equal($('#file').disabled,false);
+      routes.set('/api/extract',()=>response({items:[item()]}));
+      routes.set('/api/register',registerOK);
+      await choose();
+      if(RECOVERED==='child') assert.equal(registrations()[0].source,'kid');
+      else {
+        assert.equal(registrations().length,0);
+        await readPhoto();
+        assert.match($('#result').innerHTML,/登録候補/);
+      }
+    """.replace("RECOVERED", json.dumps(recovered)), auth)
+
+
+@pytest.mark.parametrize("auth", ["child", "parent"])
+def test_config_failure_stays_blocked_until_retry(auth):
+    run_js(r"""
+      configStatus=500;
+      await start();
+      assert.equal(configReady,false);
+      assert.match($('#identity-note').textContent,/設定を読み込めません/);
+      await choose(); await $('#qadd').click(); await $('#qsame').click();
+      assert.equal(registrations().length,0);
+      assert.equal($('#file').disabled,true);
+      configStatus=200;
+      await $('#identity-retry').click();
+      assert.equal(configReady,true);
+      assert.equal($('#file').disabled,false);
+    """, auth)
+
+
+def test_pending_identity_blocks_operations_and_duplicate_retry():
+    run_js(r"""
+      await start();
+      let resolve;
+      routes.set('/api/auth/me',()=>new Promise(r=>resolve=r));
+      const pending=confirmIdentity(); await flush();
+      const count=calls.length;
+      await confirmIdentity();
+      assert.equal(calls.length,count);
+      assert.equal(audience,'pending');
+      await choose(); await $('#qadd').click(); await doRegister();
+      assert.equal(registrations().length,0);
+      assert.equal($('#file').disabled,true);
+      resolve(response({role:'child'})); await pending;
+      assert.equal($('#file').disabled,false);
+    """)
+
+
+@pytest.mark.parametrize("case", ["success", "empty", "same", "failure", "owner", "mixed", "partial", "uncertain", "parent"])
+def test_read_result_navigation_happens_once(case):
+    run_js(r"""
+      await start();
+      routes.set('/api/extract',()=>CASE==='failure' ? response({},500) : response({
+        items: ['empty','same'].includes(CASE) ? [] :
+          CASE==='owner' ? [item({child:''})] :
+          CASE==='mixed' ? [item(),item({child:''})] : [item()],
+        skipped: CASE==='same' ? 1 : 0
+      }));
+      routes.set('/api/register',opts=>{
+        if(CASE==='uncertain') throw new Error();
+        if(CASE==='partial') return response({results:[{status:'error',title:'未確認'}]});
+        return registerOK(opts);
+      });
+      await choose();
+      if(CASE==='parent') await readPhoto();
+      assert.equal(navigations.length,1);
+      const expected=['success','partial','uncertain'].includes(CASE) ? 'completion' : 'result';
+      assert.equal(navigations[0].id,expected);
+      assert.equal(document.activeElement,nodes.get(expected));
+      assert.deepEqual(navigations[0].options,{block:'start',behavior:'instant'});
+      if(CASE==='parent'){
+        await registerItems([item()],generation);
+        assert.equal(navigations.length,2);
+        assert.equal(navigations[1].id,'completion');
+      }
+    """.replace("CASE", json.dumps(case)), "parent" if case == "parent" else "child")
+
+
+def test_late_result_does_not_take_focus_from_another_control():
+    run_js(r"""
+      await start(); let resolve;
+      routes.set('/api/extract',()=>new Promise(r=>resolve=r));
+      const pending=choose(); await flush();
+      $('#qtitle').focus();
+      resolve(response({items:[]})); await pending;
+      assert.equal(navigations.length,0);
+      assert.equal(document.activeElement,$('#qtitle'));
+    """)
+
+
+def test_result_regions_and_manual_title_have_persistent_names():
+    tags = Elements().tags
+    by_id = {a["id"]: a for _, a in tags if "id" in a}
+    for id_ in ("result", "completion"):
+        assert by_id[id_]["tabindex"] == "-1"
+        assert by_id[id_]["aria-label"]
+    assert any(t == "label" and a.get("for") == "qtitle" for t, a in tags)
+    for id_ in ("file", "album", "go", "qadd", "qsame"):
+        assert "disabled" in by_id[id_]
+
+
+def test_parent_candidates_have_unique_labels_and_named_groups():
+    run_js(r"""
+      await start();
+      render({items:[item({title:'図工 <色紙>'}),item({id:'other',title:'音読'})]});
+      const html=$('#result').innerHTML;
+      const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);
+      assert.equal(ids.length,new Set(ids).size);
+      for(let i=0;i<2;i++){
+        for(const field of ['title','date','time_start','note']){
+          const id='candidate-'+i+'-'+field;
+          assert.ok(html.includes('<label for="'+id+'">'));
+          assert.ok(html.includes('<input id="'+id+'"'));
+        }
+      }
+      assert.equal((html.match(/<fieldset /g)||[]).length,2);
+      assert.equal((html.match(/<\/fieldset>/g)||[]).length,2);
+      assert.ok(html.includes('<legend>候補 1：図工 &lt;色紙&gt;</legend>'));
+      assert.ok(html.includes('aria-label="図工 &lt;色紙&gt;を登録する"'));
+      assert.ok(html.includes('aria-label="音読を登録する"'));
+    """, "parent")
+
+
+def test_retry_after_shared_selector_watch_expires_allows_explicit_child_selection():
+    run_js(r"""
+      await flush();
+      assert.equal(audience,'unknown');
+      const now=Date.now();
+      Date.now=()=>now+16000;
+      authValue='child';
+      await $('#identity-retry').click();
+      assert.equal($('#child').hidden,false);
+      assert.equal($('#file').disabled,true);
+      $('#child').value='下の子';
+      await $('#child').emit('change');
+      assert.equal($('#file').disabled,false);
+      assert.equal(audience,'kid');
+    """, 500)
