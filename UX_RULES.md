@@ -14,6 +14,7 @@
 ## 受け渡し
 
 1. ChatGPT の成果物は、人が `design/inbox/` に置く
+   - **UX レビューの担当（ChatGPT・Codex）は `tasks/current.md` を変更しない。書き込むのは `design/inbox/UX_REVIEW.md` だけ**（ほかのファイル・レビューの本文・目次・コードにも触らない）。進み具合は Claude Code が PR ごとにまとめる
 2. Claude Code が中身を確かめ、上の表の場所へ移してコミットする（`design/inbox/` には残さない）
 3. Claude Code は UX_SPEC.md に沿って実装し、スクリーンショットを撮って `design/screenshots/` に置く
    - **PC とスマホ、それぞれ1枚以上**
