@@ -349,19 +349,24 @@ def test_child_cannot_undo_what_the_parent_held_or_removed(held):
     assert row["status"] == held
 
 
-def test_child_redeem_uses_the_parents_price_not_the_requested_one(monkeypatch):
-    """子どもが送ったポイント数・金額ではなく、親が決めた交換リストの値で申し込む。"""
+def test_child_redeem_must_match_the_parents_list_exactly(monkeypatch):
+    """子どもの申し込みは、親の交換リストに名前・ポイント・金額がそろって一致するものだけ。"""
     from mimamori import points as points_mod
-    seen = {}
+    seen = []
 
     def fake_request(child, label, cost, yen=0):
-        seen.update(child=child, label=label, cost=cost, yen=yen)
+        seen.append((child, label, cost, yen))
         return {"id": "r1", "child": child}
 
     monkeypatch.setattr(main.redeem_mod, "request", fake_request)
-    reward = points_mod.get_rewards()[-1]
+    # 同じ名前で値段の違うものを2つ（Codex のレビューの再現）
+    points_mod.set_rewards([{"label": "図書カード", "points": 100, "yen": 500},
+                            {"label": "図書カード", "points": 200, "yen": 1000}])
     c = login(YOUNGER)
-    r = c.post("/api/redeem", json={"child": YOUNGER, "label": reward["label"], "cost": 1, "yen": 0})
-    assert r.status_code == 200
-    assert seen["cost"] == reward["points"] and seen["child"] == YOUNGER
-    assert c.post("/api/redeem", json={"child": YOUNGER, "label": "なんでも", "cost": 1}).status_code == 400
+    ok = c.post("/api/redeem", json={"child": YOUNGER, "label": "図書カード", "cost": 200, "yen": 1000})
+    assert ok.status_code == 200 and seen[-1] == (YOUNGER, "図書カード", 200, 1000)
+    for body in [{"label": "図書カード", "cost": 1, "yen": 1000},        # 値段を書き換え
+                 {"label": "図書カード", "cost": 200, "yen": 0},         # 金額を消して月の上限をすり抜け
+                 {"label": "なんでも", "cost": 1, "yen": 0}]:           # リストにないもの
+        assert c.post("/api/redeem", json=dict(body, child=YOUNGER)).status_code == 400, body
+    assert len(seen) == 1

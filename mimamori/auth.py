@@ -123,13 +123,12 @@ def set_passcode(user: str, passcode: str) -> None:
     if len(passcode) < MIN_LENGTH:
         raise ValueError(f"合言葉は {MIN_LENGTH} 文字以上にしてください。")
     salt = secrets.token_bytes(16)
-    recs = _records()
-    recs[user] = {
+    row = {
         "salt": base64.b64encode(salt).decode(),
         "hash": base64.b64encode(_hash(passcode, salt)).decode(),
         "set_at": int(_now()),
     }
-    ledger.set_setting(K_USERS, recs)
+    ledger.transact_setting(K_USERS, lambda recs: {**(recs or {}), user: row})
     _secret()                      # 署名の鍵も、ここで作っておく（起動した台数ぶん作られないように）
     _clear_fails(user)
 
@@ -210,8 +209,9 @@ def check(user: str, passcode: str) -> Tuple[str, int]:
 def _secret() -> bytes:
     s = ledger.get_setting(K_SECRET)
     if not s:
-        s = secrets.token_hex(32)
-        ledger.set_setting(K_SECRET, s)
+        # 2台が同時に作っても、先に入ったほうだけが残るようにする（片方の Cookie が無効にならないように）
+        fresh = secrets.token_hex(32)
+        s = ledger.transact_setting(K_SECRET, lambda cur: cur or fresh)
     return bytes.fromhex(s)
 
 
@@ -221,9 +221,7 @@ def epoch() -> int:
 
 def logout_all() -> int:
     """世代を1つ進める。これより前に出した Cookie は、どの端末のものも使えなくなる。"""
-    nxt = epoch() + 1
-    ledger.set_setting(K_EPOCH, nxt)
-    return nxt
+    return ledger.transact_setting(K_EPOCH, lambda cur: int(cur or 0) + 1)
 
 
 def _b64(b: bytes) -> str:

@@ -984,12 +984,13 @@ def api_redeem_request(req: RedeemRequest, request: Request):
     """子が申し込む。**ここでポイントを引く**（断られたら戻る）。"""
     req.child = _self(request, req.child)
     if not auth.is_parent(_user(request)):
-        # 子どもが送ってきたポイント数・金額は使わない。親が決めた交換リストから引く（#16）
-        reward = next((r for r in points_mod.get_rewards() if r.get("label") == req.label), None)
-        if not reward:
+        # 子どもの申し込みは、**親が決めた交換リストに、名前・ポイント・金額がそろって一致するもの**だけ（#16）。
+        # 値段を書き換えれば一致しないので断る。同じ名前で値段の違うものがあっても、選んだものの値段のまま。
+        def price(r):
+            return int(r.get("points") or r.get("cost") or 0), int(r.get("yen") or 0)
+        if not any(r.get("label") == req.label and price(r) == (int(req.cost), int(req.yen or 0))
+                   for r in points_mod.get_rewards()):
             raise HTTPException(400, "交換できるものの中から選んでください。")
-        req.cost = int(reward.get("points") or reward.get("cost") or 0)
-        req.yen = int(reward.get("yen") or 0)
     try:
         row = redeem_mod.request(req.child, req.label, req.cost, req.yen)
     except ValueError as e:
