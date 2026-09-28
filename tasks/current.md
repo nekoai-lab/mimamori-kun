@@ -37,6 +37,5 @@
 
 ## 次の1手
 
-- PR #34：`0d339ef` のA1追補をUX再確認し、解消・ux-passでよいと判定。`design/inbox/UX_REVIEW.md` の再確認節をPR別レビューへ移し、目次・最新判定を更新する。A2・A3とその他の前回判定は維持。
 - 塊 A（Claude Code）と D（Codex）→ F → C。それぞれ撮影 → ChatGPT の UX レビュー → `design/reviews/PR-<番号>.md` → ux-pass
 - ARCHITECTURE.md と CLAUDE.md のコマンドを埋める
