@@ -97,7 +97,7 @@ def event_meta(event_id: str) -> Optional[Dict[str, Any]]:
     """その予定がだれのもので、だれが・いつ入れたか（#16）。みまもりくんの予定でなければ None。
 
     子どもが id を指定して状態を変えたり取り消したりするときに、サーバー側の記録で確かめる。
-    created は UNIX 秒（カレンダーが付ける作成時刻。デモは足したとき）。
+    status は今の状態、created は UNIX 秒（カレンダーが付ける作成時刻。デモは足したとき）。
     """
     if not event_id:
         return None
@@ -107,7 +107,7 @@ def event_meta(event_id: str) -> Optional[Dict[str, Any]]:
         if not row:
             return None
         return {"child": row.get("child", ""), "source": row.get("source", "parent"),
-                "created": float(row.get("created") or 0)}
+                "status": row.get("status", "todo"), "created": float(row.get("created") or 0)}
     try:
         ev = _svc().events().get(calendarId=config.calendar_id, eventId=event_id).execute()
     except Exception:  # noqa: BLE001
@@ -119,7 +119,8 @@ def event_meta(event_id: str) -> Optional[Dict[str, Any]]:
         created = dt.datetime.fromisoformat((ev.get("created") or "").replace("Z", "+00:00")).timestamp()
     except ValueError:
         created = 0.0
-    return {"child": priv.get("child", ""), "source": priv.get("source", "parent"), "created": created}
+    return {"child": priv.get("child", ""), "source": priv.get("source", "parent"),
+            "status": priv.get("status", "todo"), "created": created}
 
 
 def event_owner(event_id: str) -> Optional[str]:

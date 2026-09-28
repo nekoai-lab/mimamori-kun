@@ -334,3 +334,34 @@ def test_another_persons_failures_do_not_clear_a_lock(monkeypatch):
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(lambda _: auth.check(OLDER, "0000"), range(8)))
     assert auth.locked_seconds(YOUNGER) > 0
+
+
+@pytest.mark.parametrize("held", ["pending", "rejected"])
+def test_child_cannot_undo_what_the_parent_held_or_removed(held):
+    """親が保留・取り消しにしたものを、子どもが戻したり済にしたり動かしたりできない。"""
+    parent, kid = login(auth.PARENT), login(YOUNGER)
+    mine = task_of(YOUNGER)
+    assert parent.post("/api/status", json={"event_id": mine, "status": held}).status_code == 200
+    for status in ["todo", "doing", "done"]:
+        assert kid.post("/api/status", json={"event_id": mine, "status": status}).status_code == 403
+    assert kid.post("/api/postpone", json={"event_id": mine}).status_code == 403
+    row = next(i for i in calendar_tools._demo_store if i["id"] == mine)
+    assert row["status"] == held
+
+
+def test_child_redeem_uses_the_parents_price_not_the_requested_one(monkeypatch):
+    """子どもが送ったポイント数・金額ではなく、親が決めた交換リストの値で申し込む。"""
+    from mimamori import points as points_mod
+    seen = {}
+
+    def fake_request(child, label, cost, yen=0):
+        seen.update(child=child, label=label, cost=cost, yen=yen)
+        return {"id": "r1", "child": child}
+
+    monkeypatch.setattr(main.redeem_mod, "request", fake_request)
+    reward = points_mod.get_rewards()[-1]
+    c = login(YOUNGER)
+    r = c.post("/api/redeem", json={"child": YOUNGER, "label": reward["label"], "cost": 1, "yen": 0})
+    assert r.status_code == 200
+    assert seen["cost"] == reward["points"] and seen["child"] == YOUNGER
+    assert c.post("/api/redeem", json={"child": YOUNGER, "label": "なんでも", "cost": 1}).status_code == 400

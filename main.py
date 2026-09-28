@@ -23,7 +23,6 @@ from mimamori.kid_agent import talk
 from mimamori.calendar_tools import (
     create_events,
     event_meta,
-    event_owner,
     list_events,
     list_raw,
     list_tasks,
@@ -106,12 +105,23 @@ def _self(request: Request, child: str = "") -> str:
     return user or ""
 
 
+CHILD_EDITABLE = ("todo", "doing", "done")
+
+
 def _own_event(request: Request, event_id: str) -> None:
+    """子どもが変えられるのは、自分のやることで、**今の状態が todo / doing / done のもの**だけ。
+
+    親が保留（pending）や取り消し（rejected）にしたものを、子どもが戻せないようにする（#16）。
+    持ち主も今の状態も、画面から来た値ではなく予定に残っている記録で確かめる。
+    """
     user = _user(request)
     if auth.is_parent(user):
         return
-    if event_owner(event_id) != user:
+    meta = event_meta(event_id)
+    if not meta or meta["child"] != user:
         raise HTTPException(403, "自分のやることだけ変えられます。")
+    if meta["status"] not in CHILD_EDITABLE:
+        raise HTTPException(403, "おうちの人が保留・取り消しにしたものは、変えられません。")
 
 
 UNDO_SECONDS = 10 * 60      # 子どもが自分で入れたものを取り消せるのは、入れてから10分（D-3）
@@ -427,7 +437,7 @@ def status(req: StatusRequest, request: Request):
     if req.status not in ("pending", "todo", "doing", "done", "rejected"):
         raise HTTPException(400, "status は pending / todo / doing / done / rejected のいずれかです。")
     if not auth.is_parent(_user(request)):
-        if req.status not in ("todo", "doing", "done"):
+        if req.status not in CHILD_EDITABLE:
             raise HTTPException(403, "保留・取り消しは、おうちの人だけができます。")
         _own_event(request, req.event_id)
     try:
@@ -973,6 +983,13 @@ class RedeemRequest(BaseModel):
 def api_redeem_request(req: RedeemRequest, request: Request):
     """子が申し込む。**ここでポイントを引く**（断られたら戻る）。"""
     req.child = _self(request, req.child)
+    if not auth.is_parent(_user(request)):
+        # 子どもが送ってきたポイント数・金額は使わない。親が決めた交換リストから引く（#16）
+        reward = next((r for r in points_mod.get_rewards() if r.get("label") == req.label), None)
+        if not reward:
+            raise HTTPException(400, "交換できるものの中から選んでください。")
+        req.cost = int(reward.get("points") or reward.get("cost") or 0)
+        req.yen = int(reward.get("yen") or 0)
     try:
         row = redeem_mod.request(req.child, req.label, req.cost, req.yen)
     except ValueError as e:
