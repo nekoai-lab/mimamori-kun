@@ -41,9 +41,8 @@ def _key(title: str) -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # リクエストを受ける前に本番の台帳接続を確かめる。
-    if "K_SERVICE" in os.environ:
-        ledger.store()
+    # 保存先の設定と、Firestore を選んだ場合の接続を起動時に確かめる。
+    ledger.store()
     yield
 
 

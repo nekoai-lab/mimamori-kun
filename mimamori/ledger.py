@@ -5,8 +5,9 @@
 
 保存先は環境によって差し替わる:
     - Cloud Run（K_SERVICE がある）では Firestore 必須。接続失敗は起動エラー
-    - ローカルでは GOOGLE_CLOUD_PROJECT があれば Firestore を試し、失敗時は JSON
-    - プロジェクト未指定のローカル開発では JSON ファイル
+    - ローカルは MIMAMORI_LEDGER=firestore を明示したときだけ Firestore。接続失敗は起動エラー
+    - MIMAMORI_LEDGER=json または未指定のローカル開発では JSON ファイル
+    - MIMAMORI_LEDGER の未知の値は、環境によらずエラー
 
 **呼ぶ側は保存先を知らない。** 先に台帳の形を決めておき、
 GCP が用意できた日に繋ぎ変えるだけで動くようにするための構造。
@@ -131,21 +132,21 @@ def store():
     global _store
     if _store is not None:
         return _store
-    project = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
+    backend = os.getenv("MIMAMORI_LEDGER", "json")
+    if backend not in {"json", "firestore"}:
+        raise RuntimeError("MIMAMORI_LEDGER は firestore または json を指定してください")
     on_cloud_run = "K_SERVICE" in os.environ
-    if on_cloud_run and not project:
-        raise RuntimeError("Cloud Run の台帳には GOOGLE_CLOUD_PROJECT が必要です")
-    if project:
+    if on_cloud_run or backend == "firestore":
+        project = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
+        if not project:
+            raise RuntimeError("Firestore の台帳には GOOGLE_CLOUD_PROJECT が必要です")
         try:
             candidate = _FirestoreStore(project)
-            if on_cloud_run:
-                candidate.check_connection()
+            candidate.check_connection()
             _store = candidate
             return _store
         except Exception as exc:  # noqa: BLE001
-            if on_cloud_run:
-                raise RuntimeError("Cloud Run の台帳: Firestore に接続できません") from exc
-            # ローカル開発だけは従来どおり JSON に切り替える。
+            raise RuntimeError("台帳: Firestore に接続できません") from exc
     _store = _LocalStore()
     return _store
 
