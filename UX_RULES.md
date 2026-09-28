@@ -7,7 +7,8 @@
 | ファイル | 誰が | いつ | 置き場所 |
 |---|---|---|---|
 | `UX_SPEC.md` | ChatGPT | 実装の前（最初） | `design/UX_SPEC.md` |
-| `UX_REVIEW.md` | ChatGPT | 実装のあと（最後） | `design/UX_REVIEW.md` |
+| UX レビュー | ChatGPT | 実装のあと（最後） | `design/reviews/PR-<番号>.md`（PR ごとに1つ） |
+| レビューの目次 | Claude Code | レビューを移したとき | `design/UX_REVIEW.md`（各レビューへのリンクと最新判定だけ） |
 | スクリーンショット | Claude Code | UX レビューの前 | `design/screenshots/` |
 
 ## 受け渡し
@@ -19,8 +20,15 @@
    - ファイル名：`<画面名>-pc.png`／`<画面名>-sp.png`
 4. 人が ChatGPT にスクリーンショットを渡し、UX_REVIEW.md をもらって `design/inbox/` に置く → 2 へ
 
-UX_REVIEW.md の指摘のうち、直すものは PR で直す。直さないものは理由を UX_REVIEW.md の末尾に書く。
-直す指摘がなくなったら、PR にラベル `ux-pass` を付ける（UI の変更がある full の PR はマージに必須。`~/Projects/ai-dev-harness/policies/git-flow.md`）。
+### UX レビューを移すとき（2 の続き）
+
+- inbox の UX_REVIEW.md は、その PR の `design/reviews/PR-<番号>.md` に移す。初めてなら新しく作る
+- 再確認で inbox に前回の本文の写しが入っているときは、写しが `design/reviews/PR-<番号>.md` と同じことを確かめ、**新しい再確認の節だけを末尾に足す**（二重にしない）。ファイルの冒頭には最新判定を1行置く
+- `design/UX_REVIEW.md`（目次）のその PR の行を、最新判定とリンクで更新する
+- レビューの本文は変えない。PR ごとに別のファイルなので、ほかの PR のレビューとはぶつからない
+
+UX レビューの指摘のうち、直すものは PR で直す。直さないものは理由を `design/reviews/PR-<番号>.md` の末尾に書く。
+最新判定が合格（直す指摘がない）になったら、PR にラベル `ux-pass` を付ける（UI の変更がある full の PR はマージに必須。`~/Projects/ai-dev-harness/policies/git-flow.md`）。
 
 ## UI の変更がある full の PR で確かめること
 
