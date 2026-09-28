@@ -1,0 +1,6 @@
+/* 学年に合わせたふりがな（塊 H・#26）。reading.js が組み立てた ruby に使う */
+ruby { ruby-position: over; ruby-align: center; }
+rt { font-size: .5em; line-height: 1; font-weight: 400; letter-spacing: 0; }
+/* ふりがなのある文は行間を広げる（文字200%でも、上の行とぶつからないように） */
+.reading-ruby { line-height: 2.1; }
+rp { display: none; }
