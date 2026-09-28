@@ -232,6 +232,15 @@ uvicorn main:app --reload --port 8080
 `http://localhost:8080` を開く。
 ローカルでは自分のユーザー資格情報で動くので、カレンダー共有の設定は不要。
 
+ポイント・知らせ・設定の台帳は、ローカルでは既定で `.data/ledger.json` に保存する。
+`GOOGLE_CLOUD_PROJECT` や ADC があっても、台帳の Firestore クライアントは作らない。
+保存先を選ぶ変数は `MIMAMORI_LEDGER`（未指定または `json` なら JSON、
+`firestore` を明示したときだけ Firestore）。Firestore には `GOOGLE_CLOUD_PROJECT` が必要で、
+起動時の初期化・接続確認に失敗すると起動を止める。JSON への自動切り替えはしない。
+Cloud Run（`K_SERVICE` がある環境）は `json` を指定しても Firestore を使う。
+`MIMAMORI_LEDGER` の空文字を含む未知の値は、どちらの環境でも起動エラーになる。
+`MIMAMORI_DEMO` はカレンダーの切り替えで、この台帳の保存先には影響しない。
+
 ### 3. Cloud Run へ
 
 ```bash
