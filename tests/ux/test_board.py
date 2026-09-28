@@ -18,14 +18,56 @@ HARNESS = r"""
 const vm=require('vm'), assert=require('assert/strict');
 const input=JSON.parse(require('fs').readFileSync(0,'utf8'));
 const elements=new Map(), calls=[], responses=new Map();
+// 必要な DOM だけを模す。削除・disabled でのフォーカス喪失も再現する。
+function node(tag='div',attrs={}) {
+  const e={tagName:tag.toUpperCase(),attrs,children:[],parentElement:null,value:'',textContent:'',
+    hidden:false,options:[],dataset:{},handlers:{},files:[],open:false,_html:'',_disabled:false,
+    get id(){return this.attrs.id||'';},
+    get isConnected(){return this===doc.body || !!this.parentElement?.isConnected;},
+    setAttribute(k,v){this.attrs[k]=v;if(k.startsWith('data-'))this.dataset[k.slice(5).replace(/-([a-z])/g,(_,c)=>c.toUpperCase())]=v;},
+    addEventListener(ev,fn){(this.handlers[ev]??=[]).push(fn);},
+    get disabled(){return this._disabled;},
+    set disabled(v){this._disabled=v;if(v&&doc.activeElement===this)doc.activeElement=doc.body;},
+    get innerHTML(){return this._html;},
+    set innerHTML(html){
+      if(this.children.some(c=>c.contains(doc.activeElement)))doc.activeElement=doc.body;
+      this.children.forEach(c=>c.parentElement=null);this.children=[];this._html=html;
+      const stack=[this];
+      for(const token of html.matchAll(/<\/?[\w-]+\b[^>]*>|[^<]+/g)){
+        const t=token[0];if(t.startsWith('</')){if(stack.length>1)stack.pop();continue;}
+        if(!t.startsWith('<')){stack[stack.length-1].textContent+=t;continue;}
+        const tag=t.match(/^<([\w-]+)/)[1], child=node(tag);
+        for(const m of t.slice(tag.length+1,-1).matchAll(/([\w-]+)(?:="([^"]*)")?/g))child.setAttribute(m[1],m[2]??'');
+        child._disabled='disabled' in child.attrs;
+        child.parentElement=stack[stack.length-1];child.parentElement.children.push(child);
+        if(!['input','br','img','hr'].includes(tag))stack.push(child);
+      }
+    },
+    contains(other){return this===other||this.children.some(c=>c.contains(other));},
+    matches(sel){
+      return sel.split(',').some(part=>{
+        let q=part.trim();if(q.includes(' ')) {const i=q.lastIndexOf(' ');return this.matches(q.slice(i+1))&&!!this.parentElement?.closest(q.slice(0,i));}
+        if(q.includes(':not(:disabled)')){if(this.disabled)return false;q=q.replace(':not(:disabled)','');}
+        if(q.startsWith('#'))return this.id===q.slice(1);
+        if(q.startsWith('.'))return (this.attrs.class||'').split(' ').includes(q.slice(1));
+        const m=q.match(/^([\w-]+)?(?:\[([\w-]+)(?:="([^"]*)")?\])?$/);
+        return !!m&&(!m[1]||this.tagName===m[1].toUpperCase())&&(!m[2]||(m[2] in this.attrs&&(m[3]===undefined||this.attrs[m[2]]===m[3])));
+      });
+    },
+    closest(sel){return this.matches(sel)?this:this.parentElement?.closest(sel)||null;},
+    querySelectorAll(sel){return this.children.flatMap(c=>[...(c.matches(sel)?[c]:[]),...c.querySelectorAll(sel)]);},
+    querySelector(sel){return this.querySelectorAll(sel)[0]||null;},
+    focus(){if(!this.disabled)doc.activeElement=this;},
+    async click(){if(this.disabled)return;for(let p=this;p;p=p.parentElement)for(const fn of p.handlers.click||[])await fn({target:this});},
+    getBoundingClientRect(){return {height:100};}
+  };
+  for(const [k,v] of Object.entries(attrs))e.setAttribute(k,v);
+  return e;
+}
 function el(key='') {
-  if(elements.has(key)) return elements.get(key);
-  const e={id:key.slice(1),value:'',textContent:'',innerHTML:'',hidden:false,disabled:false,
-    options:[],dataset:{},handlers:{},attrs:{},files:[],
-    addEventListener(ev,fn){this.handlers[ev]=fn;},setAttribute(k,v){this.attrs[k]=v;},
-    focus(){},click(){return this.handlers.click?.({target:this});},
-    closest(sel){return this.matches===sel?this:null;}};
-  elements.set(key,e);return e;
+  if(elements.has(key))return elements.get(key);
+  const e=node('div',key.startsWith('#')?{id:key.slice(1)}:{});
+  e.parentElement=doc.body;doc.body.children.push(e);elements.set(key,e);return e;
 }
 const task=(extra={})=>({id:'t',child:'子A',kind:'deadline',status:'todo',days_left:0,
   date:'2026-09-28',summary:'子A｜提出物',...extra});
@@ -40,7 +82,8 @@ function fetch(url,opts){
   if(queue?.length){const r=queue.shift();if(r instanceof Error)return Promise.reject(r);return Promise.resolve(r);}
   return Promise.resolve(reply(url==='/api/tasks'?defaultTasks:url.startsWith('/api/notices?')?defaultNotices:{}));
 }
-const doc={querySelector:el,querySelectorAll:()=>[],hidden:false,addEventListener(ev,fn){this[ev]=fn;}};
+const doc={querySelector:el,querySelectorAll:sel=>doc.body.querySelectorAll(sel),hidden:false,addEventListener(ev,fn){this[ev]=fn;},documentElement:{style:{setProperty(){}}}};
+doc.body=node('body');doc.activeElement=doc.body;
 const context=vm.createContext({document:doc,fetch,console,assert,el,calls,responses,reply,task,tasks,notice,
   confirm:()=>true,alert:()=>{},FormData:class{append(){}},
   // 共通ライブラリの固定境界だけを模す。A がなくても同じ処理が動く。
@@ -200,8 +243,7 @@ def test_actions_wait_for_server_failure_retry_and_separation(action):
     run_js(r"""
 setDefaults(tasks([task()]),{items:[notice()]});await load();calls.length=0;
 const action=ACTION;
-const btn=el('button');btn.dataset={id:'t',n:'n',title:'提出物',status:'done'};
-btn.matches=action==='seen'?'.seen':'.cancel-task';
+const btn=el(action==='done'?'#exceptions':'#notice').querySelector(action==='done'?'[data-status]':action==='seen'?'.seen':'.cancel-task');
 const invoke=()=>action==='done'?onStatus({currentTarget:btn}):onNotice({target:btn});
 const url=action==='seen'?'/api/notices/seen':'/api/status';
 let release;responses.set(url,[new Promise(r=>release=r)]);
@@ -210,7 +252,7 @@ assert.equal(calls.filter(c=>c.method==='POST').length,1);
 assert.match(el('#notice').innerHTML,/新しい予定/);
 assert.match(el('#exceptions').innerHTML,/提出物/);
 release(reply({},500));await request;
-assert.equal(btn.disabled,false);assert.match(el('#actionMsg').textContent,/確認できません/);
+assert.equal(btn.disabled,false);assert.match(el(action==='done'?'#exceptions':'#notice').innerHTML,/確認できません/);
 assert.equal(data.items[0].status,'todo');assert.equal(notices.length,1);
 responses.set(url,[reply(action==='seen'?{seen:1}:{status:action==='done'?'done':'rejected'})]);
 setDefaults(tasks(action==='seen'?[task()]:[]),{items:action==='seen'?[]:[notice()]});
@@ -227,7 +269,7 @@ else assert.equal(notices.length,1);
 def test_cancel_confirmation_and_application_failure():
     run_js(r"""
 setDefaults(tasks([task()]),{items:[notice()]});await load();calls.length=0;
-const btn=el('cancel');btn.matches='.cancel-task';btn.dataset={id:'t',title:'提出物'};
+const btn=el('#notice').querySelector('.cancel-task');
 let prompt;window.confirm=text=>{prompt=text;return false;};
 await onNotice({target:btn});assert.match(prompt,/提出物/);assert.equal(calls.length,0);
 window.confirm=()=>true;responses.set('/api/status',[reply({status:'error'})]);
@@ -242,9 +284,9 @@ calls.length=0;
 el('#schoolGrade').value='3';el('#kanjiScope').value='previous_grade';previewReading();
 assert.doesNotMatch(el('#readingPreview').innerHTML,/<ruby>/);
 el('#rubyMode').value='all';previewReading();assert.match(el('#readingPreview').innerHTML,/<ruby>/);
-el('#readingForm').handlers.change({target:{id:'readingChild'}});
+el('#readingForm').handlers.change[0]({target:{id:'readingChild'}});
 assert.equal(el('#schoolGrade').value,'0');assert.equal(el('#rubyMode').value,'auto');
-let prevented=false;el('#readingForm').handlers.submit({preventDefault(){prevented=true;}});
+let prevented=false;el('#readingForm').handlers.submit[0]({preventDefault(){prevented=true;}});
 assert.equal(prevented,true);assert.equal(calls.length,0);
 """)
 
@@ -253,7 +295,7 @@ def test_existing_manual_recurring_and_year_plan_requests():
     run_js(r"""
 el('#addtitle').value='音読';el('#addchild').value='子A';el('#addkind').value='homework';el('#adddate').value='2026-09-28';
 responses.set('/api/register',[reply({results:[{status:'ok'}]})]);
-await el('#add').handlers.submit({preventDefault(){}});
+await el('#add').handlers.submit[0]({preventDefault(){}});
 assert.deepEqual(JSON.parse(JSON.stringify(calls.find(c=>c.url==='/api/register').body.items)),[{kind:'homework',title:'子A｜音読',child:'子A',date:'2026-09-28'}]);
 responses.set('/api/recurring',[reply({templates:[{id:'r',title:'音読',child:'子A',days:'daily',enabled:true}]})]);await loadRec();
 responses.set('/api/recurring',[reply({today:{created:[]}})]);await el('#recsave').click();
@@ -276,3 +318,126 @@ assert.equal(el('#headline').textContent,'確認できていない情報があ�
 assert.match(el('#notice').innerHTML,/新しい予定/);
 assert.match(el('#freshness').textContent,/予定: 未取得/);
 """)
+
+
+@pytest.mark.parametrize('action', ['done', 'undo', 'seen', 'cancel'])
+@pytest.mark.parametrize('failure', ['reply({},500)', "new Error('offline')", 'reply({})'])
+def test_card_local_uncertain_result_and_recheck(action, failure):
+    run_js(r'''
+const action=ACTION;
+showDone=true;
+const ts=Array.from({length:7},(_,i)=>task({id:'t'+i,summary:'対象'+i,status:action==='undo'?'done':'todo'}));
+const ns=Array.from({length:7},(_,i)=>notice({id:'n'+i,title:'知らせ'+i,items:[{id:'t'+i,title:'対象'+i}]}));
+setDefaults(tasks(ts),{items:ns});await load();
+const root=el(action==='undo'?'#body':action==='done'?'#exceptions':'#notice');
+const card=()=>root.querySelectorAll('[data-card]').find(c=>c.dataset.card===(['done','undo'].includes(action)?'t6':'n6'));
+if(action==='cancel')card().querySelector('details').open=true;
+const button=card().querySelector(action==='seen'?'.seen':action==='cancel'?'.cancel-task':'[data-status]');
+button.focus();
+let release;const url=action==='seen'?'/api/notices/seen':'/api/status';
+responses.set(url,[new Promise(r=>release=r)]);
+const pending=action==='done'||action==='undo'?onStatus({currentTarget:button}):onNotice({target:button});
+await tick();
+assert.notEqual(document.activeElement,document.body);
+assert.equal(document.activeElement.closest('[data-card]'),card());
+assert.equal(document.activeElement.attrs.tabindex,'-1');assert.equal(button.disabled,true);
+release(FAILURE);await pending;
+assert.ok(card());assert.match(card().innerHTML||root.innerHTML,/確認できませんでした/);
+let retry=card().querySelector('[data-recheck]');assert.ok(retry);
+assert.equal(document.activeElement,retry);
+assert.match(retry.closest('[data-action]').querySelector('[role="status"]').textContent,action==='seen'?/知らせ6/:/対象6/);
+if(action==='cancel')assert.equal(card().querySelector('details').open,true);
+responses.set(action==='seen'?'/api/notices?unseen=true':'/api/tasks',[reply({},500)]);
+await retry.click();
+assert.ok(card());retry=card().querySelector('[data-recheck]');assert.ok(retry);
+assert.equal(document.activeElement,retry);
+assert.match(el('#headline').textContent,/確認でき/);
+// 同じ場所から再取得のみを行い、サーバーの現状へ戻す。
+const posts=calls.filter(c=>c.method==='POST').length;
+await retry.click();
+assert.equal(calls.filter(c=>c.method==='POST').length,posts);
+assert.equal(card().querySelector('[data-recheck]'),null);
+assert.notEqual(document.activeElement,document.body);
+assert.equal(document.activeElement.closest('[data-card]'),card());
+'''.replace('ACTION', json.dumps(action)).replace('FAILURE', failure))
+
+
+@pytest.mark.parametrize('action', ['done', 'undo', 'seen', 'cancel'])
+@pytest.mark.parametrize('outcome', ['remain', 'remove', 'last', 'moved', 'moved_failure'])
+def test_action_focus_handoff(action, outcome):
+    run_js(r'''
+const action=ACTION,outcome=OUTCOME;
+showDone=true;
+const old=task({id:'t0',status:action==='undo'?'done':'todo'}),other=task({id:'t1'});
+const n0=notice({id:'n0',items:[{id:'t0',title:'対象0'}]}),n1=notice({id:'n1'});
+setDefaults(tasks(outcome==='last'?[old]:[old,other]),{items:outcome==='last'?[n0]:[n0,n1]});await load();
+const root=el(action==='undo'?'#body':action==='done'?'#exceptions':'#notice');
+const getCard=id=>root.querySelectorAll('[data-card]').find(c=>c.dataset.card===id);
+const id=['done','undo'].includes(action)?'t0':'n0';
+let card=getCard(id);
+if(action==='cancel')card.querySelector('details').open=true;
+const btn=card.querySelector(action==='seen'?'.seen':action==='cancel'?'.cancel-task':'[data-status]');btn.focus();
+let release;responses.set(action==='seen'?'/api/notices/seen':'/api/status',[new Promise(r=>release=r)]);
+const pending=['done','undo'].includes(action)?onStatus({currentTarget:btn}):onNotice({target:btn});await tick();
+if(outcome.startsWith('moved'))el('#reload').focus();
+const remaining=outcome==='remain'||outcome.startsWith('moved');
+setDefaults(tasks(remaining?[{...old,status:action==='undo'?'todo':'done'},other]:outcome==='last'?[]:[other]),
+ {items:remaining?[{...n0,items:[]},n1]:outcome==='last'?[]:[n1]});
+release(outcome==='moved_failure'?reply({},500):reply(action==='seen'?{seen:1}:{status:action==='cancel'?'rejected':action==='undo'?'todo':'done'}));await pending;
+assert.notEqual(document.activeElement,document.body);
+if(outcome.startsWith('moved'))assert.equal(document.activeElement,el('#reload'));
+else if(outcome==='last')assert.equal(document.activeElement,el('#headline'));
+else {
+ // 対応済みは例外から消えるので、次の例外へ進む。
+ const expected=remaining&&action!=='done'?id:['done','undo'].includes(action)?'t1':'n1';
+ assert.equal(document.activeElement.closest('[data-card]').dataset.card,expected);
+ assert.ok(['BUTTON','SUMMARY','A'].includes(document.activeElement.tagName));
+}
+'''.replace('ACTION', json.dumps(action)).replace('OUTCOME', json.dumps(outcome)))
+
+
+def test_automatic_refresh_preserves_open_notice_and_current_control():
+    run_js(r'''
+setDefaults(tasks([task()]),{items:[notice()]});await load();
+const details=el('#notice').querySelector('details');details.open=true;
+details.querySelector('summary').focus();
+await document.visibilitychange();await tick();
+assert.equal(el('#notice').querySelector('details').open,true);
+assert.equal(document.activeElement,el('#notice').querySelector('summary'));
+assert.notEqual(document.activeElement,document.body);
+''')
+    assert 'scroll-margin-top:' in HTML
+    assert 'id="headline" tabindex="-1"' in HTML
+
+
+@pytest.mark.parametrize('failed_source', ['tasks', 'notices'])
+def test_cancel_recheck_retains_card_until_both_sources_confirm(failed_source):
+    run_js(r'''
+setDefaults(tasks([task()]),{items:[notice()]});await load();
+el('#notice').querySelector('details').open=true;
+let btn=el('#notice').querySelector('.cancel-task');btn.focus();
+responses.set('/api/status',[reply({})]);await onNotice({target:btn});
+setDefaults(tasks(),{items:[]});
+responses.set(SOURCE==='tasks'?'/api/tasks':'/api/notices?unseen=true',[reply({},500)]);
+await el('#notice').querySelector('[data-recheck]').click();
+assert.ok(el('#notice').querySelector('[data-card]'));
+assert.equal(el('#notice').querySelector('details').open,true);
+assert.equal(document.activeElement,el('#notice').querySelector('[data-recheck]'));
+await document.activeElement.click();
+assert.equal(el('#notice').querySelector('[data-card]'),null);
+assert.equal(document.activeElement,el('#headline'));
+'''.replace('SOURCE', json.dumps(failed_source)))
+
+
+def test_waiting_user_moves_to_another_card_and_refresh_keeps_that_action():
+    run_js(r'''
+setDefaults(tasks([task({id:'t0'}),task({id:'t1'})]),{items:[]});await load();
+let release;responses.set('/api/status',[new Promise(r=>release=r)]);
+const first=el('#exceptions').querySelector('[data-status]');first.focus();
+const pending=onStatus({currentTarget:first});await tick();
+el('#exceptions').querySelectorAll('[data-status]')[1].focus();
+setDefaults(tasks([task({id:'t1'})]),{items:[]});
+release(reply({status:'done'}));await pending;
+assert.equal(document.activeElement,el('#exceptions').querySelector('[data-status]'));
+assert.equal(document.activeElement.dataset.id,'t1');
+''')
