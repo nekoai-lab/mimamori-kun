@@ -77,7 +77,7 @@ def test_no_optimistic_points_or_settings_http_contract():
 HARNESS = r'''
 const assert = require('node:assert/strict');
 class Element {
-  constructor(tag='div') { this.tagName=tag; this.children=[]; this.dataset={}; this.attrs={}; this.listeners={}; this.style={}; this.value=''; this.hidden=false; this.disabled=false; this.open=false; this._text=''; this._html=''; this.className='';
+  constructor(tag='div') { this.tagName=tag; this.children=[]; this.dataset={}; this.attrs={}; this.listeners={}; this.style={setProperty(k,v){this[k]=v;}}; this.value=''; this.hidden=false; this.disabled=false; this.open=false; this._text=''; this._html=''; this.className='';
     this.classList={add:(...xs)=>{this.className=[...new Set(this.className.split(' ').concat(xs))].join(' ')},remove:(...xs)=>{this.className=this.className.split(' ').filter(x=>!xs.includes(x)).join(' ')},toggle:(x,on)=>{if(on??!this.className.split(' ').includes(x))this.classList.add(x);else this.classList.remove(x)},contains:x=>this.className.split(' ').includes(x)};
   }
   set textContent(x){this._text=String(x);this.children=[];}
@@ -91,6 +91,7 @@ class Element {
   setAttribute(k,v){this.attrs[k]=String(v);}
   addEventListener(k,fn){(this.listeners[k]??=[]).push(fn);}
   async fire(k){for(const fn of this.listeners[k]||[])await fn({preventDefault(){},target:this});}
+  getBoundingClientRect(){return this.rect||{top:0,height:0};}
   focus(){document.activeElement=this;}
   showModal(){this.open=true;}
   close(){this.open=false;this.fire('close');}
@@ -108,7 +109,8 @@ const document={documentElement:new Element('html'),body:new Element('body'),act
  createElement:tag=>new Element(tag)};
 const storage=new Map();
 const localStorage={getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)};
-const window={addEventListener(){}};
+const window={innerHeight:667,innerWidth:375,scrollY:0,addEventListener(){}};
+const requestAnimationFrame=()=>1;
 const navigator={onLine:true};
 const matchMedia=()=>({matches:false});
 const setInterval=()=>0, clearInterval=()=>{};
@@ -217,7 +219,7 @@ def test_retry_serialized_and_success_is_reversible_without_timeout():
       assert.equal($('#pt').textContent,'3 pt');
       assert.ok($('#today').textContent.includes('きょうのぶん おわったね'));
       assert.ok($('#records-list').textContent.includes('もどす'));
-      assert.equal($('#records').open,true);
+      assert.equal($('#records').open,false);
       assert.deepEqual(lsGet(OUT_KEY,[]),[]);
     ''')
 
@@ -400,31 +402,180 @@ def test_child_prefix_is_display_only_and_task_words_are_preserved(status, conta
     '''.replace('STATUS', json.dumps(status)).replace('CONTAINER', json.dumps(container)))
 
 
-def test_long_list_uses_page_scroll_with_space_for_fixed_conversation_controls():
+def test_layout_reserves_measured_space_and_preserves_wrapping():
     css = HTML.split('<style>')[1].split('</style>')[0]
-    def declarations(selector):
-        match = re.search(re.escape(selector) + r'\{([^}]+)\}', css)
-        assert match, selector
-        return dict(part.split(':', 1) for part in match[1].split(';') if part)
+    assert 'height:auto;max-height:none;overflow:visible' in css
+    assert 'overflow-wrap:anywhere' in css
+    assert 'body.docked #companion{position:fixed;bottom:calc(var(--nav-height, 90px) + 8px)' in css
+    assert 'body.docked #companion-slot{height:var(--companion-space)}' in css
+    assert 'var(--nav-height, 90px) + var(--companion-space) + 24px' in css
+    assert 'body.large-controls [data-family-nav]{position:static;' in css
+    assert 'todayItems.length>3' not in JS
+    assert 'new ResizeObserver(scheduleLayout)' in JS
+    assert 'document.fonts?.ready.then(scheduleLayout)' in JS
+    assert 'window.visualViewport?.addEventListener("resize",scheduleLayout)' in JS
 
-    today = declarations('#today')
-    assert today['height'] == 'auto'
-    assert today['max-height'] == 'none'
-    assert today['overflow'] == 'visible'
-    companion = declarations('body.many #companion')
-    assert companion['position'] == 'fixed'
-    assert companion['bottom'] == 'calc(80px + env(safe-area-inset-bottom))'
-    assert declarations('body.many .page-bottom')['padding-bottom'] == (
-        'calc(110px + 190px + env(safe-area-inset-bottom))')
-    # Short screens and large text must restore normal flow to avoid overlap.
-    assert '@media(max-width:340px),(max-height:500px){body.many #companion{position:static;' in css
-    assert declarations('body.large-controls #companion')['position'] == 'static'
+
+@pytest.mark.parametrize('width,height,top,control_height,docked,flow', [
+    (375, 667, 320, 240, False, False),  # short titles
+    (375, 667, 530, 240, True, False),   # three long titles
+    (390, 844, 420, 240, False, False),
+    (390, 844, 720, 240, True, False),
+    (375, 667, 1300, 240, True, False),  # five or more
+    (375, 667, 530, 350, True, False),   # enlarged text still fits
+    (375, 667, 900, 460, False, True),   # 200%/extreme growth
+    (320, 667, 900, 460, False, True),
+    (667, 375, 530, 240, False, True),
+])
+def test_layout_uses_actual_height(width, height, top, control_height, docked, flow):
+    # These are measured-geometry inputs, not a browser layout simulation.
+    run_js(f'''
+      window.innerWidth={width};window.innerHeight={height};
+      $('#companion-slot').rect={{top:{top},height:0}};
+      $('#companion').rect={{height:{control_height}}};
+      $('[data-family-nav]').rect={{height:65}};
+      layoutConversation();
+      assert.equal(document.body.classList.contains('docked'),{str(docked).lower()});
+      assert.equal(document.body.classList.contains('large-controls'),{str(flow).lower()});
+      assert.equal(document.documentElement.style['--nav-height'],'65px');
+      assert.equal(document.documentElement.style['--companion-space'],'{control_height + 24}px');
+      if({str(docked).lower()})assert.ok({height}-65-8-{control_height}>=160);
+      window.scrollY=200;$('#companion-slot').rect.top-=200;layoutConversation();
+      assert.equal(document.body.classList.contains('docked'),{str(docked).lower()});
+    ''')
+
+
+def test_privacy_notice_stays_with_entry_and_sticky_sheet_header():
+    companion = HTML.split('<section id="companion"')[1].split('</section>')[0]
+    sheet_head = HTML.split('<div class="sheet-head">')[1].split('<div class="thread"')[0]
+    for section in (companion, sheet_head):
+        assert 'やりとりは おうちの人も見られます' in section
+    assert 'id="close-chat"' in sheet_head
+    assert '.sheet-head{position:sticky;' in HTML
+
+
+def test_recent_undo_focus_and_recompletion_without_opening_records():
     run_js('''
-      setup();snapshot.items=Array.from({length:7},(_,i)=>task(String(i)));
-      renderCards();
-      assert.equal($('#today').children.length,7);
-      assert.equal(document.body.classList.contains('many'),true);
-      assert.equal($('#today').children[6].querySelector('.finish').textContent,'おわった');
-      snapshot.items=snapshot.items.slice(0,3);renderCards();
-      assert.equal(document.body.classList.contains('many'),false);
+      setup();renderCards();$('#today').querySelector('.finish').focus();
+      replies=[{status:'done'},taskReply([task('one','done')]),weekReply()];
+      finishCard(task());
+      assert.equal(document.activeElement,$('#today').querySelector('.undo'));
+      await new Promise(setImmediate);
+      assert.equal($('#records').open,false);
+      assert.equal(document.activeElement,$('#recent-undo'));
+      assert.ok($('#recent-result').textContent.includes('こくご ドリル：✓ おわった'));
+      const undo=$('#recent-undo');
+      for(const fn of [...timers.values()])fn(); // no expiration, even while focused
+      renderCards();assert.equal($('#recent').hidden,false);
+      assert.equal(document.activeElement,undo);
+      replies=[{status:'doing'},taskReply([task()],0),weekReply(0)];
+      await undo.fire('click');await new Promise(setImmediate);
+      assert.equal($('#recent').hidden,true);
+      assert.equal(document.activeElement,$('#today').querySelector('.finish'));
+      replies=[{status:'done'},taskReply([task('one','done')]),weekReply()];
+      finishCard(task());await new Promise(setImmediate);
+      assert.equal($('#pt').textContent,'3 pt');
+      assert.equal($('#recent-points').textContent,'+3 pt');
+      assert.deepEqual(calls.filter(x=>x.options?.method==='POST').map(x=>JSON.parse(x.options.body).status),['done','doing','done']);
+    ''')
+
+
+def test_recent_undo_failure_can_retry_in_place():
+    run_js('''
+      setup();replies=[{status:'done'},taskReply([task('one','done')]),weekReply()];
+      finishCard(task());await new Promise(setImmediate);
+      replies=[{ok:false}];await $('#recent-undo').fire('click');await new Promise(setImmediate);
+      assert.equal($('#recent').hidden,false);
+      assert.ok($('#recent-result').textContent.includes('まだ もどせていないよ'));
+      assert.equal($('#recent-undo').disabled,false);
+      assert.equal($('#today').querySelector('.finish'),null);
+      replies=[{status:'doing'},taskReply([task()],0),weekReply(0)];
+      await $('#recent-undo').fire('click');await new Promise(setImmediate);
+      assert.equal($('#recent').hidden,true);
+    ''')
+
+
+def test_task_specific_accessible_names_in_tasks_records_and_recent():
+    run_js('''
+      setup();snapshot.items=[task(),{...task('two','done'),summary:'さんすう プリント'}];renderCards();
+      assert.equal($('#today').querySelector('.finish').attrs['aria-label'],'こくご ドリルを、おわりにする');
+      assert.equal($('#records-list').querySelector('.undo').attrs['aria-label'],'さんすう プリントの完了をもどす');
+      replies=[{status:'done'},taskReply([task('one','done')]),weekReply()];
+      finishCard(task());await new Promise(setImmediate);
+      assert.equal($('#recent-undo').attrs['aria-label'],'こくご ドリルの完了をもどす');
+    ''')
+
+
+@pytest.mark.parametrize('points,task_response,expected', [
+    (3, "taskReply([task('one','done'),task('old','done')],13)", '+3 pt'),
+    (0, "taskReply([task('one','done'),task('old','done')],10)", ''),
+    (3, '{ok:false}', ''),
+    (3, "taskReply([task('one','done')],16)", ''),
+])
+def test_confirmed_feedback_tracks_id_points_and_week(points, task_response, expected):
+    run_js('''
+      setup();snapshot.points=10;snapshot.items=[task(),task('old','done')];
+      replies=[{status:'done'},RESPONSE,weekReply(2)];
+      finishCard({...task(),points:POINTS});await new Promise(setImmediate);
+      assert.equal($('#recent').dataset.itemId,'one');
+      assert.equal($('#recent-points').textContent,EXPECTED);
+      assert.equal($('#recent-week').textContent,'こんしゅうの だいし：2つ おわった');
+      assert.equal($('#recent-result').classList.contains('stamp'),true);
+      assert.ok($('#records-list').children.every(row=>!row.classList.contains('stamp')));
+      renderCards();assert.equal($('#recent').dataset.itemId,'one');
+      assert.equal($('#recent-points').textContent,EXPECTED);
+    '''.replace('RESPONSE', task_response).replace('POINTS', str(points)).replace('EXPECTED', json.dumps(expected)))
+
+
+def test_undo_while_completion_reads_pending_cannot_restore_success_feedback():
+    run_js('''
+      setup();const pending=deferred();
+      replies=[{status:'done'},()=>pending.promise,weekReply()];
+      finishCard(task());await new Promise(setImmediate);
+      replies=[{status:'doing'},taskReply([task()],0),weekReply(0)];
+      await $('#recent-undo').fire('click');await new Promise(setImmediate);
+      pending.resolve({ok:true,json:async()=>taskReply([task('one','done')],3)});
+      await new Promise(setImmediate);
+      assert.equal($('#recent').hidden,true);
+      assert.equal($('#pt').textContent,'0 pt');
+    ''')
+
+
+def test_sending_undo_keeps_focus_on_available_control():
+    run_js('''
+      setup();renderCards();$('#today').querySelector('.finish').focus();
+      const pending=deferred();replies=[()=>pending.promise];finishCard(task());
+      const undo=$('#today').querySelector('.undo');assert.equal(document.activeElement,undo);
+      await undo.fire('click');
+      assert.equal(document.activeElement,$('#talk'));
+      replies=[{status:'doing'},taskReply([task()],0),weekReply(0)];
+      pending.resolve({ok:true,json:async()=>({status:'done'})});await new Promise(setImmediate);
+      assert.equal($('#today').querySelector('.finish').disabled,false);
+    ''')
+
+
+def test_unconfirmed_baseline_and_failed_week_do_not_invent_gains():
+    run_js('''
+      setup();stale=true;
+      replies=[{status:'done'},taskReply([task('one','done')],3),{ok:false}];
+      finishCard(task());await new Promise(setImmediate);
+      assert.equal($('#recent-points').textContent,'');
+      assert.equal($('#recent-week').textContent,'');
+      assert.ok($('#recent-result').textContent.includes('✓ おわった'));
+      assert.ok($('#board').textContent.includes('よみこめなかったよ'));
+    ''')
+
+
+def test_overlapping_completions_do_not_attribute_combined_points_to_last_item():
+    run_js('''
+      setup();snapshot.items=[task(),task('two')];
+      const first=deferred(),second=deferred();replies=[()=>first.promise,()=>second.promise];
+      finishCard(task());finishCard(task('two'));
+      replies=[taskReply([task('one','done'),task('two','done')],6),weekReply(2)];
+      first.resolve({ok:true,json:async()=>({status:'done'})});await new Promise(setImmediate);
+      replies=[taskReply([task('one','done'),task('two','done')],6),weekReply(2)];
+      second.resolve({ok:true,json:async()=>({status:'done'})});await new Promise(setImmediate);
+      assert.equal($('#recent').dataset.itemId,'two');
+      assert.equal($('#recent-points').textContent,'');
+      assert.equal($('#pt').textContent,'6 pt');
     ''')
