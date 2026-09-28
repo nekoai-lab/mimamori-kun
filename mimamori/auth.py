@@ -33,6 +33,7 @@ PARENT = "parent"
 MIN_LENGTH = 4
 MAX_FAILS = 5                      # 続けて5回間違えたら
 LOCK_SECONDS = 15 * 60             # 15分ロック
+IDLE_SECONDS = 10 * 60             # 子どもの端末で親に切り替えたとき、操作がなければ10分で子どもに戻す
 
 K_USERS, K_SECRET, K_EPOCH, K_FAILS = "auth_users", "auth_secret", "auth_epoch", "auth_fails"
 _SCRYPT = {"n": 2 ** 14, "r": 8, "p": 1, "dklen": 32}
@@ -232,15 +233,27 @@ def _unb64(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
 
 
-def issue(user: str) -> str:
-    body = _b64(json.dumps({"u": user, "e": epoch(), "x": int(_now()) + MAX_AGE},
-                           ensure_ascii=False, separators=(",", ":")).encode())
+def issue(user: str, back_to: Optional[str] = None) -> str:
+    """Cookie の中身を作る。back_to を渡すと「子どもの端末で親に切り替えた」一時の状態になる。
+
+    一時の状態では、元の子（b）と、操作がないまま戻る時刻（i）も署名して入れる。
+    """
+    payload: Dict[str, Any] = {"u": user, "e": epoch(), "x": int(_now()) + MAX_AGE}
+    if back_to:
+        payload["b"] = back_to
+        payload["i"] = int(_now()) + IDLE_SECONDS
+    body = _b64(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode())
     sig = _b64(hmac.new(_secret(), body.encode(), hashlib.sha256).digest())
     return f"{body}.{sig}"
 
 
-def verify(token: Optional[str]) -> Optional[str]:
-    """正しい Cookie ならその人を返す。署名・期限・世代・人のどれかが合わなければ None。"""
+def read(token: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Cookie を読む。正しくなければ None。
+
+    返り: {"user", "back_to", "idle_until", "reverted"}
+      - 一時の親で、操作のないまま10分たっていたら、元の子として返す（reverted=True）。
+        呼ぶ側は Cookie をその子のものに書き換える
+    """
     if not token or "." not in token:
         return None
     body, sig = token.rsplit(".", 1)
@@ -255,5 +268,19 @@ def verify(token: Optional[str]) -> Optional[str]:
         return None
     if int(data.get("e", -1)) != epoch():
         return None
-    user = data.get("u")
-    return user if user in users() else None
+    user, back_to = data.get("u"), data.get("b")
+    if user not in users():
+        return None
+    if back_to:
+        if back_to not in children() or not is_parent(user):
+            return None
+        if int(data.get("i") or 0) <= _now():
+            return {"user": back_to, "back_to": None, "idle_until": 0, "reverted": True}
+        return {"user": user, "back_to": back_to, "idle_until": int(data["i"]), "reverted": False}
+    return {"user": user, "back_to": None, "idle_until": 0, "reverted": False}
+
+
+def verify(token: Optional[str]) -> Optional[str]:
+    """正しい Cookie ならその人を返す。署名・期限・世代・人のどれかが合わなければ None。"""
+    s = read(token)
+    return s["user"] if s else None

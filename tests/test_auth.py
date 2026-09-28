@@ -394,3 +394,85 @@ def test_schedule_page_escapes_the_kind():
     from pathlib import Path
     html = Path(main.__file__).with_name("static").joinpath("schedule.html").read_text(encoding="utf-8")
     assert '(KIND[it.kind]||it.kind||"")' not in html.replace('esc(KIND[it.kind]||it.kind||"")', "")
+
+
+# ---------------------------------------------------------------- 子どもの端末で親に切り替える（#16 ①）
+
+def switch_to_parent(c):
+    r = c.post("/api/auth/login", json={"who": "parent", "passcode": CODES[auth.PARENT]})
+    assert r.status_code == 200, r.text
+    return r
+
+
+def test_parent_login_on_a_child_device_is_a_temporary_switch():
+    c = login(YOUNGER)
+    assert switch_to_parent(c).json()["back_to"] == YOUNGER
+    me = c.get("/api/auth/me").json()
+    assert me["role"] == "parent" and me["switched"] and me["back_to"] == YOUNGER
+    assert 0 < me["idle_seconds"] <= auth.IDLE_SECONDS
+    assert c.get("/board", follow_redirects=False).status_code == 200
+
+
+def test_parent_on_their_own_device_is_not_temporary():
+    c = login(auth.PARENT)
+    me = c.get("/api/auth/me").json()
+    assert me["role"] == "parent" and not me["switched"]
+
+
+def test_switch_goes_back_to_the_child_after_10_idle_minutes(monkeypatch):
+    now = [2_000_000.0]
+    monkeypatch.setattr(auth, "_now", lambda: now[0])
+    c = login(YOUNGER)
+    switch_to_parent(c)
+    now[0] += auth.IDLE_SECONDS + 1
+    r = c.get("/board", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/kid"
+    me = c.get("/api/auth/me").json()                      # Cookie が子どもに書き換わっている
+    assert me["role"] == "child" and me["name"] == YOUNGER and not me["switched"]
+
+
+def test_activity_restarts_the_10_minutes_but_reads_do_not(monkeypatch):
+    now = [3_000_000.0]
+    monkeypatch.setattr(auth, "_now", lambda: now[0])
+    c = login(YOUNGER)
+    switch_to_parent(c)
+    now[0] += auth.IDLE_SECONDS - 60
+    assert c.post("/api/auth/touch").json()["switched"]      # 画面で操作があった
+    now[0] += auth.IDLE_SECONDS - 60
+    assert c.get("/api/auth/me").json()["role"] == "parent"  # 操作から10分たっていない
+    now[0] += 120                                            # 読み込みだけでは延びない
+    r = c.get("/api/tasks")                                  # 親のつもりの操作は子として実行しない
+    assert r.status_code == 401 and r.headers["x-mimamori-reverted"] == "1"
+    assert c.get("/api/auth/me").json()["role"] == "child"
+
+
+def test_back_to_child_button():
+    c = login(YOUNGER)
+    switch_to_parent(c)
+    assert c.post("/api/auth/back").json()["user"] == YOUNGER
+    me = c.get("/api/auth/me").json()
+    assert me["role"] == "child" and not me["switched"]
+    assert login(auth.PARENT).post("/api/auth/back").status_code == 400   # 切り替えていなければ使えない
+
+
+def test_logout_and_logout_all_are_not_undone_while_switched():
+    c = login(YOUNGER)
+    switch_to_parent(c)
+    assert c.post("/api/auth/logout").status_code == 200
+    assert c.get("/api/tasks").status_code == 401
+    c = login(YOUNGER)
+    switch_to_parent(c)
+    assert c.post("/api/auth/logout_all").status_code == 200
+    assert c.get("/api/tasks").status_code == 401
+
+
+def test_a_child_cannot_forge_a_switch():
+    """元の子（b）や期限（i）は署名の中。書き換えれば通らない。"""
+    c = login(YOUNGER)
+    token = c.cookies.get(auth.COOKIE)
+    body, sig = token.rsplit(".", 1)
+    data = json.loads(auth._unb64(body))
+    forged = auth._b64(json.dumps(dict(data, u=auth.PARENT, b=YOUNGER, i=9_999_999_999)).encode())
+    c.cookies.clear()
+    c.cookies.set(auth.COOKIE, f"{forged}.{sig}")
+    assert c.get("/api/tasks").status_code == 401

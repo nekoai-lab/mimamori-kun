@@ -19,7 +19,15 @@
   var root = document.documentElement;
   var style = document.createElement("style");
   style.textContent =
-    ':root[data-role="child"] .parent-only,:root[data-role="child"] a[href="/board"]{display:none!important}';
+    ':root[data-role="child"] .parent-only,:root[data-role="child"] a[href="/board"]{display:none!important}' +
+    // 子どもの端末で親に切り替えているときの帯（#16 ①）。どの画面でも上に出す
+    "#who-switched{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:10px;flex-wrap:wrap;" +
+    "padding:8px 16px;background:#1F2422;color:#fff;font-size:14px}" +
+    "#who-switched b{font-weight:700}#who-switched span{flex:1;min-width:12em}" +
+    "#who-switched button{font:inherit;font-weight:700;padding:8px 16px;min-height:44px;border-radius:999px;" +
+    "border:0;background:#fff;color:#1F2422;cursor:pointer}" +
+    "#who-parent{display:block;margin:28px auto 16px;text-align:center;font-size:13px}" +
+    "#who-parent a{color:inherit;opacity:.75}";
   document.head.appendChild(style);
 
   var rawFetch = window.fetch.bind(window);
@@ -28,11 +36,66 @@
     return rawFetch.apply(null, arguments).then(function (res) {
       if (res.status === 401 && !leaving && location.pathname !== "/login") {
         leaving = true;
-        location.href = "/login?next=" + encodeURIComponent(location.pathname);
+        if (res.headers.get("X-Mimamori-Reverted")) {
+          location.reload();         // 10分操作がなく子どもに戻った。いまの画面を子どもで開き直す
+        } else {
+          location.href = "/login?next=" + encodeURIComponent(location.pathname);
+        }
       }
       return res;
     });
   };
+
+  // ---------------------------------------------------------------- 親に切り替え中（#16 ①）
+  //
+  // 子どもの端末で親の合言葉を入れると、一時的に親になる。操作が10分なければ子どもに戻す。
+  //   - 戻す判断の正本はサーバー（Cookie の期限）。画面は、操作があれば1分おきに期限を延ばし、
+  //     操作がないまま10分たったら自分から戻す（画面を開いたまま置いていかれた場合）
+  //   - 「子どもに戻す」ボタンは、切り替え中ずっと出す
+  var IDLE_MS = 10 * 60 * 1000, TOUCH_MS = 60 * 1000;
+
+  function backToChild() {
+    if (leaving) return;
+    leaving = true;
+    rawFetch("/api/auth/back", { method: "POST" })
+      .catch(function () {})
+      .then(function () { location.href = "/kid"; });
+  }
+
+  function showSwitched(me) {
+    var bar = document.createElement("div");
+    bar.id = "who-switched";
+    bar.setAttribute("role", "region");
+    bar.setAttribute("aria-label", "おうちの人で使っています");
+    bar.innerHTML = '<span><b>おうちの人</b>で つかっています。さわらないと 10分で <b></b> の画面に もどります</span>' +
+      '<button type="button">子どもに戻す</button>';
+    bar.querySelectorAll("b")[1].textContent = me.back_to;     // 呼び名は文字として入れる
+    bar.querySelector("button").addEventListener("click", backToChild);
+    document.body.insertBefore(bar, document.body.firstChild);
+
+    var last = Date.now(), touched = Date.now();
+    function active() {
+      last = Date.now();
+      if (last - touched >= TOUCH_MS) {
+        touched = last;
+        rawFetch("/api/auth/touch", { method: "POST" }).catch(function () {});
+      }
+    }
+    ["pointerdown", "keydown", "scroll", "touchstart"].forEach(function (ev) {
+      window.addEventListener(ev, active, { passive: true, capture: true });
+    });
+    setInterval(function () {
+      if (Date.now() - last >= IDLE_MS) backToChild();
+    }, 15 * 1000);
+  }
+
+  function showParentEntry() {
+    // 子どもの画面から親に切り替える入口。見た目の置き場所は塊 A・B（プロフィールのメニュー）で決め直す
+    var p = document.createElement("p");
+    p.id = "who-parent";
+    p.innerHTML = '<a href="/login?switch=parent&next=%2Fboard">おうちの人に かわる</a>';
+    document.body.appendChild(p);
+  }
 
   rawFetch("/api/auth/me")
     .then(function (r) { return r.ok ? r.json() : null; })
@@ -40,6 +103,12 @@
       if (!me) return;
       root.dataset.role = me.role;
       window.mimamoriMe = me;
+      var ready = function () {
+        if (me.switched) showSwitched(me);
+        else if (me.role === "child" && me.auth) showParentEntry();
+      };
+      if (document.body) ready();
+      else document.addEventListener("DOMContentLoaded", ready);
       document.dispatchEvent(new CustomEvent("who:me", { detail: me }));
     })
     .catch(function () {});

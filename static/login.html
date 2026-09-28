@@ -87,13 +87,15 @@ input:focus{outline:2px solid var(--me);outline-offset:1px}
     </form>
   </section>
 
-  <p class="note">いちど はいると、この端末では 180日 そのまま つかえます。<br>あいことばは おうちの人が きめます。</p>
+  <p class="note" id="note">いちど はいると、この端末では 180日 そのまま つかえます。<br>あいことばは おうちの人が きめます。</p>
 </main>
 
 <script>
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 let chosen=null;
+// 子どもの端末から親に切り替える（#16 ①）。「おうちの人」を選んだ状態で始める
+const SWITCH=new URLSearchParams(location.search).get("switch")==="parent";
 
 // ログインのあとに戻る場所。**同じサイトの中だけ**（よそへ飛ばされないように）
 function nextPath(fallback){
@@ -110,16 +112,35 @@ async function loadChoices(){
     +'<span class="face" aria-hidden="true">'+esc(c.label.slice(0,1))+'</span>'
     +'<span>'+esc(c.label)+(c.ready?"":'<span class="sub">まだ あいことばが ありません</span>')+'</span></button>'
   ).join("");
-  $("#who").querySelectorAll("button:not(:disabled)").forEach(b=>b.addEventListener("click",()=>{
-    chosen={id:b.dataset.id,label:b.dataset.label};
-    $("#for").textContent=chosen.label+" の あいことば";
-    $("#step1").hidden=true; $("#step2").hidden=false;
-    $("#msg2").textContent=""; $("#msg2").classList.remove("wait");
-    $("#code").value=""; $("#code").focus();
-  }));
+  $("#who").querySelectorAll("button:not(:disabled)").forEach(b=>b.addEventListener("click",()=>pick(b)));
+  if(SWITCH){
+    const p=$("#who").querySelector('button[data-id="parent"]:not(:disabled)');
+    if(p){
+      pick(p);
+      $("#for").textContent="おうちの人に かわる";
+      $("#back").textContent="← やめる";
+      $("#note").textContent="さわらないと 10分で 子どもの画面に もどります。「子どもに戻す」で すぐ もどせます。";
+    }
+  }
 }
 
-$("#back").addEventListener("click",()=>{ chosen=null; $("#step2").hidden=true; $("#step1").hidden=false; });
+function pick(b){
+  chosen={id:b.dataset.id,label:b.dataset.label};
+  $("#for").textContent=chosen.label+" の あいことば";
+  $("#step1").hidden=true; $("#step2").hidden=false;
+  $("#msg2").textContent=""; $("#msg2").classList.remove("wait");
+  $("#code").value=""; $("#code").focus();
+}
+
+$("#back").addEventListener("click",()=>{
+  if(SWITCH){
+    // やめたら、切り替えようとした画面（同じサイトの中だけ）へ戻る
+    let back="/kid";
+    try{ const r=new URL(document.referrer); if(r.origin===location.origin&&r.pathname!=="/login") back=r.pathname+r.search; }catch(e){}
+    location.href=back; return;
+  }
+  chosen=null; $("#step2").hidden=true; $("#step1").hidden=false;
+});
 $("#kbd").addEventListener("click",()=>{
   const numeric=$("#code").inputMode==="numeric";
   $("#code").inputMode=numeric?"text":"numeric";

@@ -75,15 +75,49 @@ async def require_login(request: Request, call_next):
     if path in _OPEN or path.startswith("/static/"):
         request.state.user = None
         return await call_next(request)
-    user = auth.verify(request.cookies.get(auth.COOKIE))
-    if not user:
+    session = auth.read(request.cookies.get(auth.COOKIE))
+    if not session:
         if path.startswith("/api/"):
             return JSONResponse({"detail": "ログインしてください。"}, status_code=401)
         return RedirectResponse("/login?next=" + quote(path), status_code=303)
+    user = session["user"]
+    request.state.user = user
+    request.state.back_to = session["back_to"]
+    request.state.idle_until = session["idle_until"]
+    if session["reverted"]:
+        # 子どもの端末で親に切り替えたまま10分操作がなかった。元の子に戻す（#16 ①）
+        if path.startswith("/api/"):
+            # 親のつもりの操作を子として実行しない。401 と印を返し、画面は読み込み直す（who.js）
+            res = JSONResponse({"detail": "しばらく操作がなかったので、子どもの画面に戻しました。"},
+                               status_code=401, headers={"X-Mimamori-Reverted": "1"})
+        else:
+            res = RedirectResponse("/kid" if path in _PARENT_PAGES else path, status_code=303)
+        _set_session(res, user)
+        return res
     if path in _PARENT_PAGES and not auth.is_parent(user):
         return RedirectResponse("/kid", status_code=303)
-    request.state.user = user
-    return await call_next(request)
+    response = await call_next(request)
+    if session["back_to"] and _is_activity(request):
+        # 操作があったので、戻るまでの10分を数え直す（読み込みだけのアクセスでは延ばさない）
+        _set_session(response, user, back_to=session["back_to"])
+        request.state.idle_until = int(auth._now()) + auth.IDLE_SECONDS
+    return response
+
+
+def _is_activity(request: Request) -> bool:
+    """「操作」に数えるもの：ページを開く、書き込み、画面からの操作の知らせ（/api/auth/touch）。"""
+    path = request.url.path
+    if not path.startswith("/api/"):
+        return True
+    if path.startswith("/api/auth/"):
+        # ログアウト・全端末ログアウト・子どもに戻すは自分で Cookie を書く。上書きしない
+        return path == "/api/auth/touch"
+    return request.method != "GET"
+
+
+def _set_session(res, user: str, back_to: Optional[str] = None) -> None:
+    res.set_cookie(auth.COOKIE, auth.issue(user, back_to=back_to), max_age=auth.MAX_AGE,
+                   httponly=True, secure=True, samesite="lax", path="/")
 
 
 def _user(request: Request) -> Optional[str]:
@@ -178,7 +212,7 @@ class LoginRequest(BaseModel):
 
 
 @app.post("/api/auth/login")
-def api_auth_login(req: LoginRequest):
+def api_auth_login(req: LoginRequest, request: Request):
     user = auth.user_from_choice(req.who)
     if not user:
         raise HTTPException(400, "だれかを選んでください。")
@@ -189,18 +223,48 @@ def api_auth_login(req: LoginRequest):
         raise HTTPException(403, "まだ合言葉が決まっていません。おうちの人に聞いてください。")
     if result != "ok":
         raise HTTPException(401, f"合言葉がちがいます（あと{n}回まちがえると、しばらく入れません）。")
+    # 子どもでログインしている端末で親が入ったら、「親に切り替え」の一時の状態にする（#16 ①）。
+    # 操作がなければ10分で元の子に戻る。親の端末（子どもでログインしていない）なら今までどおり180日
+    current = auth.read(request.cookies.get(auth.COOKIE))
+    back_to = None
+    if auth.is_parent(user) and current:
+        if current["back_to"]:
+            back_to = current["back_to"]                    # 切り替え中にもう一度入った
+        elif not auth.is_parent(current["user"]):
+            back_to = current["user"]
     res = JSONResponse({"user": auth.display_name(user), "role": "parent" if auth.is_parent(user) else "child",
-                        "home": "/board" if auth.is_parent(user) else "/kid"})
-    res.set_cookie(auth.COOKIE, auth.issue(user), max_age=auth.MAX_AGE,
-                   httponly=True, secure=True, samesite="lax", path="/")
+                        "home": "/board" if auth.is_parent(user) else "/kid",
+                        "back_to": back_to})
+    _set_session(res, user, back_to=back_to)
     return res
 
 
 @app.get("/api/auth/me")
 def api_auth_me(request: Request):
     user = _user(request)
+    back_to = getattr(request.state, "back_to", None)
+    idle_until = getattr(request.state, "idle_until", 0)
     return {"user": auth.display_name(user) if user else "", "name": user or "",
-            "role": "parent" if auth.is_parent(user) else "child", "auth": auth.enabled()}
+            "role": "parent" if auth.is_parent(user) else "child", "auth": auth.enabled(),
+            "switched": bool(back_to), "back_to": back_to or "",
+            "idle_seconds": max(0, int(idle_until - auth._now())) if back_to else 0}
+
+
+@app.post("/api/auth/touch")
+def api_auth_touch(request: Request):
+    """画面で操作があったことの知らせ。親に切り替え中なら、戻るまでの10分を数え直す（middleware がやる）。"""
+    return {"ok": True, "switched": bool(getattr(request.state, "back_to", None))}
+
+
+@app.post("/api/auth/back")
+def api_auth_back(request: Request):
+    """「子どもに戻す」。子どもの端末で親に切り替えているときだけ使える。"""
+    back_to = getattr(request.state, "back_to", None)
+    if not back_to:
+        raise HTTPException(400, "子どもの端末で親に切り替えているときだけ使えます。")
+    res = JSONResponse({"user": back_to, "home": "/kid"})
+    _set_session(res, back_to)
+    return res
 
 
 @app.post("/api/auth/logout")
