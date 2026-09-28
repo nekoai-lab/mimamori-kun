@@ -59,13 +59,11 @@
 
   // 「子どもに戻す」。**戻せたのを確かめてから**子どもの画面へ（UX_REVIEW R1）。
   // 失敗したら親の帯を残し、やり直せるようにする。すでにサーバー側で戻っていたら（401）、今の状態を見て進む
-  var backing = false;
+  var backing = false, barBtn = null, barErr = null;
   function backToChild(auto) {
     if (backing || leaving) return;
     backing = true;
-    var bar = document.getElementById("who-switched");
-    var btn = bar && bar.querySelector("button");
-    var err = bar && bar.querySelector(".who-err");
+    var btn = barBtn, err = barErr;
     if (btn) { btn.disabled = true; btn.textContent = "子どもに戻しています…"; }
     if (err) err.textContent = "";
     function fail() {
@@ -94,10 +92,20 @@
     bar.id = "who-switched";
     bar.setAttribute("role", "region");
     bar.setAttribute("aria-label", "おうちの人で使っています");
-    bar.innerHTML = '<span><b>おうちの人</b>で つかっています。さわらないと 10分で <b></b> の画面に もどります</span>' +
-      '<button type="button">子どもに戻す</button><span class="who-err" role="alert"></span>';
-    bar.querySelectorAll("b")[1].textContent = me.back_to;     // 呼び名は文字として入れる
-    bar.querySelector("button").addEventListener("click", function () { backToChild(false); });
+    // HTML は使わずに組み立てる（呼び名は文字として入れる）
+    var text = document.createElement("span");
+    var who = document.createElement("b"); who.textContent = "おうちの人";
+    var kid = document.createElement("b"); kid.textContent = me.back_to;
+    text.appendChild(who);
+    text.appendChild(document.createTextNode("で つかっています。さわらないと 10分で "));
+    text.appendChild(kid);
+    text.appendChild(document.createTextNode(" の画面に もどります"));
+    barBtn = document.createElement("button");
+    barBtn.type = "button"; barBtn.textContent = "子どもに戻す";
+    barBtn.addEventListener("click", function () { backToChild(false); });
+    barErr = document.createElement("span");
+    barErr.className = "who-err"; barErr.setAttribute("role", "alert");
+    bar.appendChild(text); bar.appendChild(barBtn); bar.appendChild(barErr);
     document.body.insertBefore(bar, document.body.firstChild);
 
     var last = Date.now(), touched = Date.now();
