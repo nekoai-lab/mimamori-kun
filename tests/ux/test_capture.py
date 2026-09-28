@@ -46,6 +46,10 @@ def test_shared_contracts_and_accessible_fallback():
     assert 'max-width:100%' in HTML
 
 
+def test_normal_screen_has_no_english_tagline():
+    assert "SCHOOL NOTICE" not in HTML
+
+
 def test_login_and_who_are_the_only_identity_inputs():
     assert 'fetch("/api/auth/me")' in SCRIPT
     assert 'me.role === "child"' in SCRIPT
@@ -192,6 +196,30 @@ def test_child_auto_registration_keeps_branch_metadata_and_no_notification_claim
       await readPhoto();
       assert.equal(registrations().length,1);
     ''')
+
+
+@pytest.mark.parametrize("auth", ["child", "parent"])
+def test_completion_titles_strip_child_prefix_only_for_child_display(auth):
+    run_js(r'''
+      await start();
+      const titles = ['下の子｜図工 色紙', '音読', '下の子｜図工｜色紙',
+        '下の子｜<img src=x onerror=alert(1)>'];
+      const items = titles.map((title,n)=>item({id:'item'+n,title}));
+      const data = {results:titles.map((title,n)=>({status:'ok',id:'event'+n,title}))};
+      const original = JSON.stringify({items,data});
+      routes.set('/api/register',()=>response(data));
+      await registerItems(items,generation);
+      const html = $('#completion').innerHTML;
+      const prefix = AUTH === 'child' ? '' : '下の子｜';
+      assert.ok(html.includes('<li>'+prefix+'図工 色紙</li>'));
+      assert.ok(html.includes('<li>音読</li>'));
+      assert.ok(html.includes('<li>'+prefix+'図工｜色紙</li>'));
+      assert.ok(html.includes('<li>'+prefix+'&lt;img src=x onerror=alert(1)&gt;</li>'));
+      assert.doesNotMatch(html,/<img src=x/);
+      if(AUTH === 'child') assert.doesNotMatch(html,/下の子｜/);
+      assert.deepEqual(registrations()[0].items.map(i=>i.title),titles);
+      assert.equal(JSON.stringify({items,data}),original);
+    ''', auth)
 
 
 def test_only_ambiguous_ownership_requires_confirmation():

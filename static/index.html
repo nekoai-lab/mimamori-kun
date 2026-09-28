@@ -179,7 +179,6 @@ a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-of
 <body data-audience="parent">
 <header><div class="hdr">
   <h1>みまもりくん</h1>
-  <span class="tag">SCHOOL NOTICE → CALENDAR</span>
   <span id="audience">おうちの人</span>
   <span data-profile-menu></span><span data-appearance-picker></span>
   <select id="child" aria-label="だれのプリントか" hidden></select>
@@ -579,7 +578,7 @@ function showRegistered(data, expected){
   let h = '';
   if(ok.length){
     h += '<div class="ok">'+(isKid() ? 'やることに 入ったよ' : ok.length+' 件をカレンダーに登録しました。')
-      + '<ul>'+ok.map(r => '<li>'+esc(r.title)+'</li>').join('')+'</ul>';
+      + '<ul>'+ok.map(r => '<li>'+esc(isKid() ? (r.title || '').replace(/^[^｜]*｜/, '') : r.title)+'</li>').join('')+'</ul>';
     if(isKid() && data.notice && data.notice.id) h += '<p>おうちの人への知らせをアプリに残したよ</p>';
     h += '</div>';
   }
