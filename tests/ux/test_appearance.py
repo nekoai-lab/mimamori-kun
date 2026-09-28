@@ -125,7 +125,7 @@ function matches(e, sel){
   return true;
 }
 function el(tag){
-  const e = { tag, kids:[], attrs:{}, handlers:{}, style:{ props:{}, setProperty(k,v){ this.props[k]=v; } }, parent:null,
+  const e = { tag, kids:[], attrs:{}, handlers:{}, dataset:{}, style:{ props:{}, setProperty(k,v){ this.props[k]=v; } }, parent:null,
     textContent:'', hidden:false, type:'', isConnected:true,
     classList:{ set:new Set(), add(c){ this.set.add(c); }, contains(c){ return this.set.has(c); }, remove(c){ this.set.delete(c); } },
     get className(){ return [...this.classList.set].join(' '); }, set className(v){ this.classList.set = new Set(String(v).split(/\s+/).filter(Boolean)); },
@@ -334,3 +334,85 @@ def test_profile_menu_shows_own_name_and_parent_entry():
         """))
     assert out["summary"] == "下の子" and out["id"] == "child-name" and out["selects"] == 0
     assert out["links"] == [["おうちの人に かわる", "/login?switch=parent&next=%2Fboard"]]
+
+
+# ---------------------------------------------------------------- who.js（A が変えた本物のファイル）
+#
+# 以前直した穴を、本物の who.js で確かめ直す（kid.html・index.html のテストは who.js の代わりを使っている）
+#   - 子が決まる前に読み込みを始めない：select が埋まるまで who:ready を出さず、決まってから1回だけ出す
+#   - 通信に失敗しても親のままにしない：/api/auth/me が取れなければ親子（data-audience）を付けない
+
+WHO_RUN = DOM + r"""
+(async () => {
+  const src = require('fs').readFileSync(process.argv[1], 'utf8');
+  const c = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+  const env = makeEnv({ htmlAttrs: c.htmlAttrs || {}, slots: c.slots || [],
+    api: url => url === '/api/auth/me' ? c.me : ({status: 404, body: {}}) });
+  const head = el('head'); env.html.appendChild(head); env.doc.head = head;
+  const select = el('select'); select.id = 'child'; select.options = []; select.value = '';
+  const events = [];
+  select.dispatchEvent = e => { events.push([e.type, select.value]); (select.handlers[e.type] || []).forEach(f => f(e)); };
+  if (c.select) env.body.appendChild(select);
+  env.doc.getElementById = id => id === 'child' && c.select ? select : null;
+  env.doc.dispatchEvent = () => {};
+  let observer = null;
+  if (c.saved) env.store['mimamori-child'] = c.saved;
+  Object.assign(env.win, {
+    Event: function (t) { this.type = t; }, CustomEvent: function (t, o) { this.type = t; this.detail = o && o.detail; },
+    MutationObserver: function (cb) { observer = this; this.cb = cb; this.observe = () => {}; this.disconnect = () => { this.off = true; }; },
+    setTimeout, setInterval: () => 0, addEventListener() {}, matchMedia: () => ({ matches: false, addEventListener() {} }),
+  });
+  if (c.appearance) env.win.Appearance = {};
+  vm.runInNewContext(src, env.win);
+  await settle();
+  env.doc.h.DOMContentLoaded();                 // 画面の読み込みが終わった（select はまだ空）
+  await settle();
+  const before = events.slice();
+  for (const name of c.fill || []) { const o = el('option'); o.value = name; o.textContent = name; select.options.push(o); }
+  if (observer && !observer.off) observer.cb();  // 画面が /api/config のあとで select を埋めた
+  await settle();
+  console.log(JSON.stringify({ before, events, ready: select.dataset ? select.dataset.whoReady || null : null,
+    audience: env.html.getAttribute('data-audience'), role: env.html.dataset ? env.html.dataset.role || null : null,
+    parentEntry: !!env.body.kids.find(k => k.id === 'who-parent'), bar: !!env.body.kids.find(k => k.id === 'who-switched') }));
+})().catch(e => { console.error(e && e.stack || e); process.exit(1); });
+"""
+
+
+def run_who(case):
+    p = subprocess.run([node, "-e", WHO_RUN, str(STATIC / "who.js")], input=json.dumps(case, ensure_ascii=False),
+                       capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    return json.loads(p.stdout)
+
+
+CHILD_ME = {"status": 200, "body": {"role": "child", "name": "下の子", "auth": True, "switched": False}}
+
+
+@needs_node
+def test_who_waits_for_the_child_list_before_ready():
+    """子が決まる前に読み込みを始めない（#9 の穴）。覚えている子を入れてから who:ready を1回だけ出す。"""
+    out = run_who({"me": CHILD_ME, "select": True, "fill": ["上の子", "下の子"], "saved": "下の子"})
+    assert out["before"] == []
+    assert out["events"] == [["change", "下の子"], ["who:ready", "下の子"]]
+
+
+@needs_node
+@pytest.mark.parametrize("me", [{"status": 500, "body": {}}, "network", {"status": 401, "body": {}}])
+def test_who_does_not_decide_parent_when_me_fails(me):
+    """/api/auth/me が取れないときは、親子を付けない（親のまま使える状態にしない）。親への入口も帯も出さない。"""
+    out = run_who({"me": me})
+    assert out["audience"] is None and out["role"] is None and not out["parentEntry"] and not out["bar"]
+
+
+@needs_node
+@pytest.mark.parametrize("given,appearance,profile,entry", [
+    (None, False, False, True),       # A がない画面：下に「おうちの人に かわる」
+    (None, True, True, False),        # プロフィールのある画面：入口はプロフィールの中（appearance.js）
+    ("parent", False, False, True),   # 画面が決めた親子はそのまま
+])
+def test_who_sets_audience_from_login_and_places_parent_entry(given, appearance, profile, entry):
+    case = {"me": CHILD_ME, "appearance": appearance,
+            "htmlAttrs": {"data-audience": given} if given else {},
+            "slots": [{"attr": "data-profile-menu"}] if profile else []}
+    out = run_who(case)
+    assert out["audience"] == (given or "kid") and out["role"] == "child" and out["parentEntry"] is entry
