@@ -8,17 +8,21 @@ from contextlib import asynccontextmanager
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from urllib.parse import quote
+
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from mimamori.agent import read_otayori, read_year_plan
+from mimamori import auth
 from mimamori import images as images_mod
 from mimamori import ledger
 from mimamori.kid_agent import talk
 from mimamori.calendar_tools import (
     create_events,
+    event_meta,
     list_events,
     list_raw,
     list_tasks,
@@ -50,6 +54,261 @@ app = FastAPI(title="みまもりくん", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 MAX_BYTES = 12 * 1024 * 1024
+
+
+# ---------------------------------------------------------------- ログイン（#16）
+#
+# **入口で守る。** Cloud Run は --allow-unauthenticated のまま、ここで全部のページと /api/* を止める。
+# ログインなしで通すのは、ログインの画面と API・画面の部品（/static）・死活確認だけ。
+# 子どもは自分のぶんだけ。親だけの機能は 403。
+
+_OPEN = {"/login", "/api/auth/choices", "/api/auth/login", "/healthz"}
+_PARENT_PAGES = {"/board"}
+
+
+@app.middleware("http")
+async def require_login(request: Request, call_next):
+    path = request.url.path
+    if not auth.enabled():
+        request.state.user = auth.PARENT        # ローカルで外したときは、今までどおり全部使える
+        return await call_next(request)
+    if path in _OPEN or path.startswith("/static/"):
+        request.state.user = None
+        return await call_next(request)
+    session = auth.read(request.cookies.get(auth.COOKIE))
+    if not session:
+        if path.startswith("/api/"):
+            return JSONResponse({"detail": "ログインしてください。"}, status_code=401)
+        return RedirectResponse("/login?next=" + quote(path), status_code=303)
+    user = session["user"]
+    request.state.user = user
+    request.state.back_to = session["back_to"]
+    request.state.idle_until = session["idle_until"]
+    request.state.epoch = session["epoch"]
+    request.state.sid = session["sid"]
+    if session["reverted"]:
+        # 子どもの端末で親に切り替えたまま10分操作がなかった。元の子に戻す（#16 ①）
+        if path.startswith("/api/"):
+            # 親のつもりの操作を子として実行しない。401 と印を返し、画面は読み込み直す（who.js）
+            res = JSONResponse({"detail": "しばらく操作がなかったので、子どもの画面に戻しました。"},
+                               status_code=401, headers={"X-Mimamori-Reverted": "1"})
+        else:
+            res = RedirectResponse("/kid" if path in _PARENT_PAGES else path, status_code=303)
+        auth.end_switch(session["sid"], "back")       # 10分で戻った。遅れて届く親の Cookie も子どもとして扱う
+        _set_session(res, user, generation=session["epoch"])
+        return res
+    if path in _PARENT_PAGES and not auth.is_parent(user):
+        return RedirectResponse("/kid", status_code=303)
+    response = await call_next(request)
+    if session["back_to"] and _is_activity(request):
+        # 操作があったので、戻るまでの10分を数え直す（読み込みだけのアクセスでは延ばさない）
+        _set_session(response, user, back_to=session["back_to"], generation=session["epoch"], sid=session["sid"])
+        request.state.idle_until = int(auth._now()) + auth.IDLE_SECONDS
+    return response
+
+
+def _is_activity(request: Request) -> bool:
+    """「操作」に数えるもの：ページを開く、書き込み、画面からの操作の知らせ（/api/auth/touch）。"""
+    path = request.url.path
+    if not path.startswith("/api/"):
+        return True
+    if path.startswith("/api/auth/"):
+        # ログアウト・全端末ログアウト・子どもに戻すは自分で Cookie を書く。上書きしない
+        return path == "/api/auth/touch"
+    return request.method != "GET"
+
+
+def _set_session(res, user: str, back_to: Optional[str] = None, generation: Optional[int] = None,
+                 sid: Optional[str] = None) -> None:
+    res.set_cookie(auth.COOKIE, auth.issue(user, back_to=back_to, generation=generation, sid=sid),
+                   max_age=auth.MAX_AGE,
+                   httponly=True, secure=True, samesite="lax", path="/")
+
+
+def _user(request: Request) -> Optional[str]:
+    return getattr(request.state, "user", None)
+
+
+def parent_only(request: Request) -> None:
+    if not auth.is_parent(_user(request)):
+        raise HTTPException(403, "おうちの人だけが使えます。")
+
+
+def _self(request: Request, child: str = "") -> str:
+    """子どもなら自分の名前を返す（別の子を指定したら 403）。親は指定どおり。"""
+    user = _user(request)
+    if auth.is_parent(user):
+        return child
+    if child and child != user:
+        raise HTTPException(403, "自分のぶんだけ使えます。")
+    return user or ""
+
+
+CHILD_EDITABLE = ("todo", "doing", "done")
+
+
+def _own_event(request: Request, event_id: str) -> None:
+    """子どもが変えられるのは、自分のやることで、**今の状態が todo / doing / done のもの**だけ。
+
+    親が保留（pending）や取り消し（rejected）にしたものを、子どもが戻せないようにする（#16）。
+    持ち主も今の状態も、画面から来た値ではなく予定に残っている記録で確かめる。
+    """
+    user = _user(request)
+    if auth.is_parent(user):
+        return
+    meta = event_meta(event_id)
+    if not meta or meta["child"] != user:
+        raise HTTPException(403, "自分のやることだけ変えられます。")
+    if meta["status"] not in CHILD_EDITABLE:
+        raise HTTPException(403, "おうちの人が保留・取り消しにしたものは、変えられません。")
+
+
+UNDO_SECONDS = 10 * 60      # 子どもが自分で入れたものを取り消せるのは、入れてから10分（D-3）
+
+
+def _child_can_undo(request: Request, event_id: str) -> None:
+    """子どもが取り消せるのは、**自分が入れて、10分以内のもの**だけ（#16）。
+
+    それ以外（親が入れた自分の予定・古いもの）を消せると、/api/status の「取り消しは親だけ」の抜け道になる。
+    だれが・いつ入れたかは、画面から来た値ではなく予定に残っている記録で確かめる。
+    """
+    user = _user(request)
+    if auth.is_parent(user):
+        return
+    meta = event_meta(event_id)
+    fresh = bool(meta) and (dt.datetime.now(dt.timezone.utc).timestamp() - meta["created"]) <= UNDO_SECONDS
+    if not meta or meta["child"] != user or meta["source"] != "kid" or not fresh:
+        raise HTTPException(403, "取り消せるのは、自分で入れてから10分のあいだだけです。")
+
+
+def _own_assignment(request: Request, assignment_id: str) -> None:
+    user = _user(request)
+    if auth.is_parent(user):
+        return
+    row = next((a for a in study_mod.assignments(None, True) if a.get("id") == assignment_id), None)
+    if not row or row.get("child") != user:
+        raise HTTPException(403, "自分の課題だけ変えられます。")
+
+
+def _can_set_capacity(request: Request) -> None:
+    """学習の枠を変えられるのは、親と、計画を持つ上の子（中学生）だけ。"""
+    user = _user(request)
+    if auth.is_parent(user):
+        return
+    level = next((c.get("school_level") for c in config.children if c["name"] == user), "")
+    if level != "junior_high":
+        raise HTTPException(403, "おうちの人か、計画を立てる人だけが変えられます。")
+
+
+@app.get("/login")
+def login_page():
+    return FileResponse("static/login.html")
+
+
+@app.get("/api/auth/choices")
+def api_auth_choices():
+    """ログイン画面の選択肢。子どもの呼び名は出さない（学齢で見せる）。"""
+    return {"choices": auth.login_choices()}
+
+
+class LoginRequest(BaseModel):
+    who: str
+    passcode: str
+
+
+@app.post("/api/auth/login")
+def api_auth_login(req: LoginRequest, request: Request):
+    user = auth.user_from_choice(req.who)
+    if not user:
+        raise HTTPException(400, "だれかを選んでください。")
+    result, n = auth.check(user, req.passcode)
+    # 言葉の出し分け：小学生はひらがな中心、中学生と親は漢字（UX_REVIEW R6 の文言の表）
+    kid = not auth.is_parent(user) and next(
+        (c.get("school_level") for c in config.children if c["name"] == user), "") == "elementary"
+    teen = not auth.is_parent(user) and not kid
+    minutes = auth.LOCK_SECONDS // 60
+    if result == "locked":
+        # 待つ秒数は Retry-After で渡す（画面は日本語の文から数字を抜き出さない。UX_REVIEW R6）
+        return JSONResponse({
+            "detail": ("いまは はいれません。しばらく まってから「もういちど たしかめる」を おしてね。" if kid else
+                       "入力が続けて一致しなかったため、一時的にログインできません。時間をおいて「もう一度確認する」を押してください。"),
+            "note": (f"まちがいが つづくと、{minutes}分 おやすみに なります。" if kid else f"ロック時間は{minutes}分です。"),
+            "retry_after": n,
+        }, status_code=429, headers={"Retry-After": str(n)})
+    if result == "unset":
+        raise HTTPException(403, "まだ あいことばが きまっていません。おうちの人に きいてね。" if kid else
+                            "まだ合言葉が決まっていません。おうちの人に聞いてください。" if teen else
+                            "まだ合言葉が決まっていません。tools/set_passcode.py で決めてください。")
+    if result != "ok":
+        return JSONResponse({
+            "detail": ("あいことばが あわなかったよ。えらんだ人と、あいことばを たしかめてね。わからないときは、おうちの人に きいてね。"
+                       if kid else "合言葉が一致しませんでした。選んだ人と合言葉を確かめてください。"
+                       + ("わからないときは、おうちの人に聞いてください。" if teen else "")),
+            "note": (f"あと {n}回 まちがえると、しばらく はいれなく なるよ。" if kid else
+                     f"あと{n}回続けて一致しないと、{minutes}分ログインできなくなります。"),
+            "remaining": n,
+        }, status_code=401)
+    # 子どもでログインしている端末で親が入ったら、「親に切り替え」の一時の状態にする（#16 ①）。
+    # 操作がなければ10分で元の子に戻る。親の端末（子どもでログインしていない）なら今までどおり180日
+    current = auth.read(request.cookies.get(auth.COOKIE))
+    back_to, sid = None, None
+    if auth.is_parent(user) and current:
+        if current["back_to"]:
+            back_to, sid = current["back_to"], current["sid"]     # 切り替え中にもう一度入った
+        elif not auth.is_parent(current["user"]):
+            back_to, sid = current["user"], auth.start_switch()
+    elif current and current["back_to"]:
+        auth.end_switch(current["sid"], "back")          # 切り替え中の端末で子どもが入り直した
+    res = JSONResponse({"user": auth.display_name(user), "role": "parent" if auth.is_parent(user) else "child",
+                        "home": "/board" if auth.is_parent(user) else "/kid",
+                        "back_to": back_to})
+    _set_session(res, user, back_to=back_to, sid=sid)
+    return res
+
+
+@app.get("/api/auth/me")
+def api_auth_me(request: Request):
+    user = _user(request)
+    back_to = getattr(request.state, "back_to", None)
+    idle_until = getattr(request.state, "idle_until", 0)
+    return {"user": auth.display_name(user) if user else "", "name": user or "",
+            "role": "parent" if auth.is_parent(user) else "child", "auth": auth.enabled(),
+            "switched": bool(back_to), "back_to": back_to or "",
+            "idle_seconds": max(0, int(idle_until - auth._now())) if back_to else 0}
+
+
+@app.post("/api/auth/touch")
+def api_auth_touch(request: Request):
+    """画面で操作があったことの知らせ。親に切り替え中なら、戻るまでの10分を数え直す（middleware がやる）。"""
+    return {"ok": True, "switched": bool(getattr(request.state, "back_to", None))}
+
+
+@app.post("/api/auth/back")
+def api_auth_back(request: Request):
+    """「子どもに戻す」。子どもの端末で親に切り替えているときだけ使える。"""
+    back_to = getattr(request.state, "back_to", None)
+    if not back_to:
+        raise HTTPException(400, "子どもの端末で親に切り替えているときだけ使えます。")
+    auth.end_switch(getattr(request.state, "sid", None), "back")
+    res = JSONResponse({"user": back_to, "home": "/kid"})
+    _set_session(res, back_to, generation=getattr(request.state, "epoch", None))
+    return res
+
+
+@app.post("/api/auth/logout")
+def api_auth_logout(request: Request):
+    # 切り替え中なら、その切り替えを「ログアウトした」にする（遅れて届く親の Cookie を使えなくする）
+    auth.end_switch(getattr(request.state, "sid", None), "logout")
+    res = JSONResponse({"ok": True})
+    res.delete_cookie(auth.COOKIE, path="/", secure=True, httponly=True, samesite="lax")
+    return res
+
+
+@app.post("/api/auth/logout_all", dependencies=[Depends(parent_only)])
+def api_auth_logout_all(request: Request):
+    """すべての端末をログアウトさせる（この端末も含む）。"""
+    auth.logout_all()
+    return api_auth_logout(request)
 
 
 @app.get("/")
@@ -96,7 +355,11 @@ def board():
 
 
 @app.get("/api/config")
-def get_config():
+def get_config(request: Request):
+    user = _user(request)
+    if not auth.is_parent(user):
+        # 子どもには自分だけを見せる。兄弟に切り替えられないようにするのは、ここ（「だれ？」が1人になる）
+        return {"children": [c for c in config.children if c["name"] == user], "model": config.model}
     return {
         "children": config.children,
         "calendar_id": config.calendar_id,
@@ -106,7 +369,7 @@ def get_config():
 
 
 @app.post("/api/extract")
-async def extract(image: UploadFile = File(...), hint: str = Form("")):
+async def extract(request: Request, image: UploadFile = File(...), hint: str = Form("")):
     data = await image.read()
     if not data:
         raise HTTPException(400, "画像が空です。")
@@ -118,7 +381,9 @@ async def extract(image: UploadFile = File(...), hint: str = Form("")):
     except ValueError as e:
         raise HTTPException(415, str(e)) from e
     try:
-        result = await read_otayori(data, content_type, hint)
+        user = _user(request)
+        result = await read_otayori(data, content_type, hint,
+                                    child=None if auth.is_parent(user) else user)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"読み取りに失敗しました: {e}") from e
     return JSONResponse(result)
@@ -130,8 +395,34 @@ class RegisterRequest(BaseModel):
     source: str = "parent"         # "kid" なら、子が入れたものとして親に知らせる
 
 
+KINDS = ("event", "deadline", "homework", "bring")
+_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_TIME = re.compile(r"\d{2}:\d{2}")
+
+
+def _check_item(item: Dict[str, Any]) -> None:
+    """登録する1件の形を確かめる（#16）。**親から来たものも同じ**。
+
+    おたよりの読み取り結果は画像の中身に左右されるし、子どもも入れられる。
+    画面に出る値（種類・日付・時刻）に、決まった形以外のものを入れさせない。
+    """
+    if item.get("kind") not in KINDS:
+        raise HTTPException(400, "種類は event / deadline / homework / bring のどれかです。")
+    for key in ("date", "end_date"):
+        v = item.get(key)
+        if v is not None and not (isinstance(v, str) and _DATE.fullmatch(v)):
+            if key == "date" or v != "":
+                raise HTTPException(400, "日付は YYYY-MM-DD の形で入れてください。")
+    for key in ("time_start", "time_end"):
+        v = item.get(key)
+        if v not in (None, "") and not (isinstance(v, str) and _TIME.fullmatch(v)):
+            raise HTTPException(400, "時刻は HH:MM の形で入れてください。")
+    if not isinstance(item.get("title"), str) or not item["title"].strip():
+        raise HTTPException(400, "件名がありません。")
+
+
 @app.post("/api/register")
-def register(req: RegisterRequest):
+def register(req: RegisterRequest, request: Request):
     """カレンダーに入れる。
 
     **子が入れたものも、承認を待たずにそのまま入れる（D-62）。**
@@ -141,6 +432,16 @@ def register(req: RegisterRequest):
     """
     if not req.items:
         raise HTTPException(400, "登録するものがありません。")
+    for i in req.items:
+        _check_item(i)
+    user = _user(request)
+    if not auth.is_parent(user):
+        # 子どもは自分のぶんだけ入れられる。「子が入れた」として親に知らせる。保留にはできない
+        for i in req.items:
+            if i.get("child") not in (None, "", "不明", user):
+                raise HTTPException(403, "自分のぶんだけ入れられます。")
+        req.items = [dict(i, child=user) for i in req.items]
+        req.source, req.pending = "kid", False
     kid = req.source == "kid"
     items = [dict(i, source=("kid" if kid else "parent")) for i in req.items]
     try:
@@ -167,7 +468,7 @@ def register(req: RegisterRequest):
     return {"results": results, "notice": notice}
 
 
-@app.post("/api/notify/test")
+@app.post("/api/notify/test", dependencies=[Depends(parent_only)])
 def api_notify_test():
     """送り先が本当に届くかを、1本だけ投げて確かめる。"""
     cfg = notify_mod.configured()
@@ -178,12 +479,12 @@ def api_notify_test():
     return {"sent": True, "style": cfg["style"], "notice": row}
 
 
-@app.get("/api/notify/config")
+@app.get("/api/notify/config", dependencies=[Depends(parent_only)])
 def api_notify_config():
     return notify_mod.configured()
 
 
-@app.get("/api/notices")
+@app.get("/api/notices", dependencies=[Depends(parent_only)])
 def api_notices(unseen: bool = False):
     return {"items": notify_mod.notices(unseen_only=unseen)}
 
@@ -192,7 +493,7 @@ class NoticeSeen(BaseModel):
     id: str = ""
 
 
-@app.post("/api/notices/seen")
+@app.post("/api/notices/seen", dependencies=[Depends(parent_only)])
 def api_notices_seen(req: NoticeSeen):
     return {"seen": notify_mod.mark_seen(req.id)}
 
@@ -202,7 +503,7 @@ class UndoRequest(BaseModel):
 
 
 @app.post("/api/register/undo")
-def api_register_undo(req: UndoRequest):
+def api_register_undo(req: UndoRequest, request: Request):
     """まとめて入れたものを、まとめて取り消す（10分以内・D-3）。
 
     **消さずに隠す。** 予定は rejected にするだけなので、何を取り消したかは残る。
@@ -212,6 +513,8 @@ def api_register_undo(req: UndoRequest):
         raise HTTPException(400, "取り消すものがありません。")
     if len(req.ids) > 60:
         raise HTTPException(400, "一度に取り消せるのは60件までです。")
+    for eid in req.ids:
+        _child_can_undo(request, eid)
     done, failed = 0, []
     for eid in req.ids:
         try:
@@ -226,7 +529,7 @@ def api_register_undo(req: UndoRequest):
 
 
 @app.get("/api/tasks")
-def tasks(days: int = 14):
+def tasks(request: Request, days: int = 14):
     # 毎日きまっているもの（公文など）は、ここで足りない分だけ用意する。
     # 別のスケジューラを立てない。朝いちばんに誰かが開いた時点で並ぶ。
     try:
@@ -234,9 +537,16 @@ def tasks(days: int = 14):
     except Exception:  # noqa: BLE001
         pass            # 定期タスクが作れなくても、一覧は出す
     try:
-        return list_tasks(days)
+        data = list_tasks(days)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"タスクの取得に失敗しました: {e}") from e
+    user = _user(request)
+    if not auth.is_parent(user):
+        # 子どもには自分のぶんだけ（兄弟のやること・ポイントは見せない）
+        data["items"] = [i for i in data["items"] if i.get("child") == user]
+        data["children"] = [user]
+        data["points"] = {user: data["points"].get(user, 0)}
+    return data
 
 
 class StatusRequest(BaseModel):
@@ -245,9 +555,13 @@ class StatusRequest(BaseModel):
 
 
 @app.post("/api/status")
-def status(req: StatusRequest):
+def status(req: StatusRequest, request: Request):
     if req.status not in ("pending", "todo", "doing", "done", "rejected"):
         raise HTTPException(400, "status は pending / todo / doing / done / rejected のいずれかです。")
+    if not auth.is_parent(_user(request)):
+        if req.status not in CHILD_EDITABLE:
+            raise HTTPException(403, "保留・取り消しは、おうちの人だけができます。")
+        _own_event(request, req.event_id)
     try:
         return set_status(req.event_id, req.status)
     except Exception as e:  # noqa: BLE001
@@ -260,7 +574,8 @@ class KidChatRequest(BaseModel):
 
 
 @app.post("/api/kid/chat")
-async def kid_chat(req: KidChatRequest):
+async def kid_chat(req: KidChatRequest, request: Request):
+    req.child = _self(request, req.child)
     if not req.child:
         raise HTTPException(400, "誰の画面かが分かりません。")
     if len(req.history) > 40:
@@ -275,12 +590,13 @@ WEEK_GOAL = 5          # 週の台紙。★5つで1枚
 
 
 @app.get("/api/week")
-def api_week(child: str):
+def api_week(request: Request, child: str = ""):
     """今週の台紙。**日曜に戻る**（週は日曜はじまり）。
 
     `/api/tasks` は過去の「済」を落とす（やることの一覧なので、それでいい）。
     台紙は済んだ数を数えるものなので、カレンダーから直接読む。
     """
+    child = _self(request, child)
     if not child:
         raise HTTPException(400, "だれのぶんかが分かりません。")
     today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
@@ -321,7 +637,7 @@ class CapacityRequest(BaseModel):
     days: Optional[Dict[str, Any]] = None         # 日を指定して上書き
 
 
-@app.post("/api/capacity")
+@app.post("/api/capacity", dependencies=[Depends(_can_set_capacity)])
 def api_set_capacity(req: CapacityRequest):
     days = dict(req.days or {})
     if req.minutes is not None:
@@ -338,12 +654,13 @@ class PostponeRequest(BaseModel):
 
 
 @app.post("/api/postpone")
-def api_postpone(req: PostponeRequest):
+def api_postpone(req: PostponeRequest, request: Request):
     """「明日に送る」。**消さない。減らさない。日にちを1日ずらすだけ。**
 
     入らない日がある。詰め込ませるより、動かせるほうがいい。
     動かしたことは予定に残るので、親も見れば分かる。
     """
+    _own_event(request, req.event_id)
     today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
     try:
         rows = list_raw((today - dt.timedelta(days=14)).isoformat(),
@@ -362,8 +679,11 @@ def api_postpone(req: PostponeRequest):
 
 
 @app.get("/api/points")
-def api_points(child: str):
+def api_points(request: Request, child: str = ""):
     """残高と履歴。共同開発者の points.py を呼ぶだけ。"""
+    child = _self(request, child)
+    if not child:
+        raise HTTPException(400, "だれのぶんかが分かりません。")
     try:
         return {
             "child": child,
@@ -384,7 +704,7 @@ class RewardsRequest(BaseModel):
     rewards: List[Dict[str, Any]]
 
 
-@app.post("/api/rewards")
+@app.post("/api/rewards", dependencies=[Depends(parent_only)])
 def api_set_rewards(req: RewardsRequest):
     try:
         return points_mod.set_rewards(req.rewards)
@@ -394,7 +714,7 @@ def api_set_rewards(req: RewardsRequest):
         raise HTTPException(500, f"交換レートの保存に失敗しました: {e}") from e
 
 
-@app.get("/api/recurring")
+@app.get("/api/recurring", dependencies=[Depends(parent_only)])
 def api_recurring():
     """毎日きまっていること（テンプレート）を返す。"""
     return {"templates": recurring_mod.templates(), "today": recurring_mod.ensure()}
@@ -404,7 +724,7 @@ class RecurringRequest(BaseModel):
     templates: List[Dict[str, Any]]
 
 
-@app.post("/api/recurring")
+@app.post("/api/recurring", dependencies=[Depends(parent_only)])
 def api_set_recurring(req: RecurringRequest):
     try:
         saved = recurring_mod.set_templates(req.templates)
@@ -432,7 +752,7 @@ def _year_plan_rows(req: YearPlanRequest):
     return rows
 
 
-@app.post("/api/year_plan/extract")
+@app.post("/api/year_plan/extract", dependencies=[Depends(parent_only)])
 async def api_year_plan_extract(
     files: List[UploadFile] = File(...),
     fiscal_year: Optional[int] = Form(None),
@@ -480,7 +800,7 @@ async def api_year_plan_extract(
     }
 
 
-@app.post("/api/year_plan/check")
+@app.post("/api/year_plan/check", dependencies=[Depends(parent_only)])
 def api_year_plan_check(req: YearPlanRequest):
     """**入れる前に、資料そのものを確かめる。** ここで止めるのが仕事。"""
     rows = _year_plan_rows(req)
@@ -495,7 +815,7 @@ def api_year_plan_check(req: YearPlanRequest):
     }
 
 
-@app.post("/api/year_plan/register")
+@app.post("/api/year_plan/register", dependencies=[Depends(parent_only)])
 def api_year_plan_register(req: YearPlanRequest):
     """確かめたうえで入れる。すでにある予定は作らない。件名が同じで日付が違うものは作らず、報告する。"""
     rows = _year_plan_rows(req)
@@ -559,7 +879,7 @@ class MoveRequest(BaseModel):
     date: str
 
 
-@app.post("/api/year_plan/move")
+@app.post("/api/year_plan/move", dependencies=[Depends(parent_only)])
 def api_year_plan_move(req: MoveRequest):
     """改訂版で日にちが変わったものを、1件ずつ直す。
 
@@ -586,12 +906,13 @@ class RepeatRequest(BaseModel):
 
 
 @app.post("/api/quick/repeat")
-def api_quick_repeat(req: RepeatRequest):
+def api_quick_repeat(req: RepeatRequest, request: Request):
     """「昨日と同じ」。昨日その子に出ていた宿題・持ち物を、今日ぶんとして作る。
 
     公文のような定期ぶんは A-5 が並べる。こちらは**学校の宿題**用。
     毎日ほぼ同じ（音読・漢字ドリル・計算）なので、打ち直させない。
     """
+    req.child = _self(request, req.child)
     if not req.child:
         raise HTTPException(400, "だれのぶんかが分かりません。")
     today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
@@ -633,12 +954,13 @@ def api_quick_repeat(req: RepeatRequest):
 
 
 @app.get("/api/schedule")
-def api_schedule(ym: str = "", child: str = ""):
+def api_schedule(request: Request, ym: str = "", child: str = ""):
     """1か月ぶんの予定。**年間予定を入れたあと、それを見る場所がないと意味がない。**
 
     /api/tasks は「これからの14日」しか返さない（やることの一覧なので、それでいい）。
     予定表は過去も未来も、月の単位で見る。
     """
+    child = _self(request, child)
     today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
     try:
         y, m = (int(x) for x in (ym or today.strftime("%Y-%m")).split("-"))
@@ -663,13 +985,14 @@ def api_schedule(ym: str = "", child: str = ""):
         "first": first.isoformat(),
         "last": last.isoformat(),
         "today": today.isoformat(),
-        "children": [c["name"] for c in config.children],
+        "children": [c["name"] for c in config.children] if auth.is_parent(_user(request)) else [child],
         "items": sorted(items, key=lambda x: (x["date"], x.get("child", ""), x.get("summary", ""))),
     }
 
 
 @app.get("/api/assignments")
-def api_assignments(child: str = "", include_done: bool = False):
+def api_assignments(request: Request, child: str = "", include_done: bool = False):
+    child = _self(request, child)
     return {"items": study_mod.assignments(child or None, include_done)}
 
 
@@ -685,8 +1008,9 @@ class AssignmentRequest(BaseModel):
 
 
 @app.post("/api/assignments")
-def api_add_assignment(req: AssignmentRequest):
+def api_add_assignment(req: AssignmentRequest, request: Request):
     """課題を足す。範囲は**まず計算で**数に直す（モデルは呼ばない）。"""
+    req.child = _self(request, req.child)
     total, unit = req.total, req.unit
     parsed = study_mod.parse_range(req.range_text or req.title)
     if total is None:
@@ -711,7 +1035,8 @@ class AssignmentUpdate(BaseModel):
 
 
 @app.post("/api/assignments/update")
-def api_update_assignment(req: AssignmentUpdate):
+def api_update_assignment(req: AssignmentUpdate, request: Request):
+    _own_assignment(request, req.id)
     try:
         return {"assignment": study_mod.update_assignment(req.id, req.done, req.priority, req.due)}
     except ValueError as e:
@@ -723,22 +1048,25 @@ class AssignmentDelete(BaseModel):
 
 
 @app.post("/api/assignments/remove")
-def api_remove_assignment(req: AssignmentDelete):
+def api_remove_assignment(req: AssignmentDelete, request: Request):
+    _own_assignment(request, req.id)
     if not study_mod.remove_assignment(req.id):
         raise HTTPException(404, "その課題が見つかりませんでした。")
     return {"ok": True}
 
 
 @app.get("/api/plan")
-def api_plan(child: str):
+def api_plan(request: Request, child: str = ""):
     """配分の結果。**コードだけで出す**ので、押した瞬間に返る。"""
+    child = _self(request, child)
     if not child:
         raise HTTPException(400, "だれのぶんかが分かりません。")
     return study_mod.plan(child)
 
 
 @app.get("/api/plan/today")
-def api_plan_today(child: str):
+def api_plan_today(request: Request, child: str = ""):
+    child = _self(request, child)
     if not child:
         raise HTTPException(400, "だれのぶんかが分かりません。")
     return study_mod.today_plan(child)
@@ -757,7 +1085,8 @@ def api_study_range(req: RangeRequest):
 # ---------------------------------------------------------------- ごほうび（E系）
 
 @app.get("/api/redeem")
-def api_redeem_list(child: str = "", status: str = ""):
+def api_redeem_list(request: Request, child: str = "", status: str = ""):
+    child = _self(request, child)
     return {
         "items": redeem_mod.requests(child=child, status=status),
         "remaining": redeem_mod.remaining(child),
@@ -773,8 +1102,17 @@ class RedeemRequest(BaseModel):
 
 
 @app.post("/api/redeem")
-def api_redeem_request(req: RedeemRequest):
+def api_redeem_request(req: RedeemRequest, request: Request):
     """子が申し込む。**ここでポイントを引く**（断られたら戻る）。"""
+    req.child = _self(request, req.child)
+    if not auth.is_parent(_user(request)):
+        # 子どもの申し込みは、**親が決めた交換リストに、名前・ポイント・金額がそろって一致するもの**だけ（#16）。
+        # 値段を書き換えれば一致しないので断る。同じ名前で値段の違うものがあっても、選んだものの値段のまま。
+        def price(r):
+            return int(r.get("points") or r.get("cost") or 0), int(r.get("yen") or 0)
+        if not any(r.get("label") == req.label and price(r) == (int(req.cost), int(req.yen or 0))
+                   for r in points_mod.get_rewards()):
+            raise HTTPException(400, "交換できるものの中から選んでください。")
     try:
         row = redeem_mod.request(req.child, req.label, req.cost, req.yen)
     except ValueError as e:
@@ -792,7 +1130,7 @@ class RedeemDecision(BaseModel):
     note: str = ""
 
 
-@app.post("/api/redeem/approve")
+@app.post("/api/redeem/approve", dependencies=[Depends(parent_only)])
 def api_redeem_approve(req: RedeemDecision):
     try:
         return {"request": redeem_mod.approve(req.id, req.note)}
@@ -800,7 +1138,7 @@ def api_redeem_approve(req: RedeemDecision):
         raise HTTPException(400, str(e)) from e
 
 
-@app.post("/api/redeem/reject")
+@app.post("/api/redeem/reject", dependencies=[Depends(parent_only)])
 def api_redeem_reject(req: RedeemDecision):
     """断る。**理由が要る**（子どもに伝わる）。引いたポイントは戻す。"""
     try:
@@ -810,7 +1148,7 @@ def api_redeem_reject(req: RedeemDecision):
     return {"request": row, "balance": points_mod.balance(row["child"])}
 
 
-@app.post("/api/redeem/hand")
+@app.post("/api/redeem/hand", dependencies=[Depends(parent_only)])
 def api_redeem_hand(req: RedeemDecision):
     try:
         return {"request": redeem_mod.hand(req.id)}
@@ -823,14 +1161,15 @@ class CapRequest(BaseModel):
     count: Optional[int] = None
 
 
-@app.post("/api/redeem/cap")
+@app.post("/api/redeem/cap", dependencies=[Depends(parent_only)])
 def api_redeem_cap(req: CapRequest):
     return redeem_mod.set_cap(req.yen, req.count)
 
 
 @app.get("/api/redeem/pace")
-def api_redeem_pace(child: str, cost: int = 0):
+def api_redeem_pace(request: Request, child: str = "", cost: int = 0):
     """「今のペースだと約◯日」。分からないときは言わない。"""
+    child = _self(request, child)
     if not child:
         raise HTTPException(400, "だれのぶんかが分かりません。")
     return {

@@ -170,6 +170,11 @@ h2.wait{color:var(--accent)}
 .empty b{display:block;color:var(--accent);font-size:15px;margin-bottom:4px}
 .err{background:#F7E7DF;border:1px solid #B94F2B;color:#963C1E;border-radius:4px;padding:12px 14px;font-size:13.5px;margin-top:18px}
 :root[data-theme="dark"] .err{background:#33211A;color:#E8926B}
+footer .auth{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;width:100%}
+footer .auth button{font:inherit;font-size:14px;min-height:44px;padding:8px 16px;cursor:pointer;border-radius:999px;
+ border:1px solid var(--line-strong);background:transparent;color:var(--ink-2)}
+footer .auth button:disabled{opacity:.5;cursor:default}
+footer .auth-msg{width:100%;margin:8px 0 0;font-size:14px;color:var(--late-ink,#B42318)}
 footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
  font-size:12px;color:var(--ink-3);display:flex;gap:14px;flex-wrap:wrap}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -274,9 +279,34 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
   <footer>
     <a href="https://calendar.google.com/" target="_blank" rel="noopener">Google カレンダーで開く</a>
     <span id="meta"></span>
+    <span class="auth" id="auth">
+      <button type="button" id="logout">この端末をログアウト</button>
+      <button type="button" id="logoutAll">すべての端末をログアウト</button>
+      <span class="auth-msg" id="authMsg" role="alert"></span>
+    </span>
   </footer>
 </div>
 
+<script>
+/* ---- ログアウト（#16） ---- */
+// 成功を確かめてからログイン画面へ。失敗したら、この画面に残ってやり直せるようにする（UX_REVIEW R2）
+async function logoutTo(path, done, scope){
+  const btns=[document.getElementById("logout"),document.getElementById("logoutAll")];
+  const msg=document.getElementById("authMsg");
+  btns.forEach(b=>b.disabled=true); msg.textContent="";
+  let ok=false;
+  try{ ok=(await fetch(path,{method:"POST"})).ok; }catch(e){ ok=false; }
+  if(ok){ location.href="/login?done="+done; return; }
+  // 通信が切れた場合は、サーバーだけ済んでいることもある。「できなかった」と言い切らない
+  msg.textContent="ログアウトできたか確認できませんでした（"+scope+"）。通信を確かめて、もう一度お試しください。";
+  btns.forEach(b=>b.disabled=false);
+}
+document.getElementById("logout").addEventListener("click",()=>logoutTo("/api/auth/logout","logout","この端末"));
+document.getElementById("logoutAll").addEventListener("click",()=>{
+  if(!confirm("すべての端末（子どもの端末も）でログアウトします。もう一度、合言葉を入れてもらうことになります。よいですか？")) return;
+  logoutTo("/api/auth/logout_all","logout_all","すべての端末");
+});
+</script>
 <script>
 const $=s=>document.querySelector(s);
 const KIND={event:"行事",deadline:"提出",homework:"宿題",bring:"持ち物"};

@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>みまもりくん — はいる</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap">
+<script src="/static/theme.js"></script>
+<style>
+:root{
+  --paper:#FAF7F0;--surface:#fff;--ink:#1F2422;--ink-2:#5A625F;
+  --line:#E4E0D5;--line-strong:#CFC9B9;--me:#0F6B62;--me-ink:#fff;
+  --warm:#C8961E;--warm-soft:#FBF3DF;--error:#B42318;
+  --shadow:0 1px 2px rgba(31,36,34,.05),0 10px 26px -20px rgba(31,36,34,.45);
+}
+:root[data-theme="dark"]{
+  --paper:#14110C;--surface:#1E1B15;--ink:#F0ECE2;--ink-2:#B5AE9E;
+  --line:#312C22;--line-strong:#453E30;--me:#5FCFC0;--me-ink:#14110C;
+  --warm:#E0BB63;--warm-soft:#2C2413;--error:#FF9A91;
+  --shadow:0 1px 2px rgba(0,0,0,.5),0 10px 26px -20px rgba(0,0,0,1);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:"Noto Sans JP",system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;font-size:16px;line-height:1.75;-webkit-font-smoothing:antialiased}
+header{border-bottom:1px solid var(--line)}
+.hdr,main{max-width:440px;margin:0 auto;padding:16px}
+.hdr{display:flex;align-items:center;gap:10px}
+h1{font-family:"Zen Maru Gothic",sans-serif;font-size:19px;margin:0;letter-spacing:.04em}
+#theme{margin-left:auto;font:inherit;font-size:12.5px;padding:4px 12px;border-radius:999px;cursor:pointer;
+ border:1px solid var(--line-strong);background:transparent;color:var(--ink-2)}
+main{padding-top:28px}
+h2{font-family:"Zen Maru Gothic",sans-serif;font-size:22px;margin:0 0 18px;text-align:center}
+.who{display:grid;gap:12px;list-style:none;margin:0;padding:0}
+.who button{display:flex;align-items:center;gap:14px;width:100%;padding:16px 18px;cursor:pointer;text-align:left;
+ font:inherit;font-size:18px;font-weight:700;color:var(--ink);background:var(--surface);
+ border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow)}
+.who button:disabled{opacity:.55;cursor:default}
+.who .face{flex:none;display:grid;place-items:center;width:44px;height:44px;border-radius:50%;
+ background:var(--warm-soft);color:var(--warm);font-family:"Zen Maru Gothic",sans-serif;font-size:20px}
+.who .sub{display:block;font-size:12.5px;font-weight:400;color:var(--ink-2)}
+.card{padding:20px;border:1px solid var(--line);border-radius:18px;background:var(--surface);box-shadow:var(--shadow)}
+.card .for{margin:0 0 12px;font-weight:700}
+label{display:block;font-size:13px;color:var(--ink-2);margin-bottom:6px}
+input{width:100%;font:inherit;font-size:26px;letter-spacing:.3em;padding:10px 14px;text-align:center;
+ color:var(--ink);background:var(--paper);border:1px solid var(--line-strong);border-radius:12px}
+input:focus{outline:2px solid var(--me);outline-offset:1px}
+.go{width:100%;margin-top:14px;font:inherit;font-size:18px;font-weight:700;padding:12px;cursor:pointer;
+ background:var(--me);color:var(--me-ink);border:1px solid var(--me);border-radius:12px}
+.go:disabled{opacity:.45;cursor:default}
+.row{display:flex;justify-content:space-between;gap:10px;margin-top:12px}
+.link{font:inherit;font-size:14px;min-height:44px;min-width:44px;padding:10px 8px;cursor:pointer;background:none;border:0;
+ color:var(--ink-2);text-decoration:underline}
+.link:disabled{opacity:.5;cursor:default}
+.retry{font:inherit;font-size:16px;font-weight:700;min-height:44px;padding:10px 18px;margin-top:10px;cursor:pointer;
+ border-radius:12px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink)}
+.retry:disabled{opacity:.5;cursor:default}
+.sub2{margin:4px 0 0;font-size:13px;color:var(--ink-2)}
+.done{margin:0 0 18px;padding:12px 14px;border-radius:12px;background:var(--surface);border:1px solid var(--line);text-align:center}
+.msg{min-height:1.75em;margin:12px 0 0;font-size:14px;color:var(--error)}
+.msg.wait{color:var(--warm)}
+.note{margin:22px 0 0;font-size:12.5px;color:var(--ink-2);text-align:center}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<header>
+  <div class="hdr">
+    <h1>みまもりくん</h1>
+    <button type="button" id="theme">☾ 暗く</button>
+  </div>
+</header>
+
+<main>
+  <p class="done" id="done" role="status" hidden></p>
+  <section id="step1">
+    <h2>だれが つかう？</h2>
+    <ul class="who" id="who" aria-label="だれが つかう？"></ul>
+    <p class="msg" id="msg1" role="alert"></p>
+    <button type="button" class="retry" id="retry1" hidden>もういちど</button>
+  </section>
+
+  <section id="step2" hidden>
+    <form class="card" id="form" autocomplete="on">
+      <p class="for" id="for"></p>
+      <label for="code">あいことば</label>
+      <input id="code" name="passcode" type="password" inputmode="numeric" autocomplete="current-password"
+             enterkeyhint="go" required aria-describedby="for msg2 note2">
+      <p class="msg" id="msg2" role="alert" aria-live="assertive"></p>
+      <p class="sub2" id="note2"></p>
+      <p class="sub2" id="wait" hidden></p>
+      <button type="submit" class="go" id="go">はいる</button>
+      <button type="button" class="retry" id="recheck" hidden></button>
+      <div class="row">
+        <button type="button" class="link" id="back">← えらびなおす</button>
+        <button type="button" class="link" id="kbd">もじも つかう</button>
+      </div>
+    </form>
+  </section>
+
+  <p class="note" id="note">いちど はいると、この端末では 180日 そのまま つかえます。<br>あいことばは おうちの人が きめます。</p>
+</main>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let chosen=null;
+// 子どもの端末から親に切り替える（#16 ①）。「おうちの人」を選んだ状態で始める
+const SWITCH=new URLSearchParams(location.search).get("switch")==="parent";
+
+// ログインのあとに戻る場所。**同じサイトの中だけ**（よそへ飛ばされないように）
+function nextPath(fallback){
+  const n=new URLSearchParams(location.search).get("next")||"";
+  return n.startsWith("/")&&!n.startsWith("//")&&!n.startsWith("/login")?n:fallback;
+}
+
+let lastPick=null, unlockTimer=null;
+
+// ---------------------------------------------------------------- だれ？（UX_REVIEW R3・R4）
+
+async function loadChoices(){
+  $("#retry1").hidden=true; $("#retry1").disabled=true;
+  $("#msg1").textContent=""; $("#who").replaceChildren();
+  const loading=document.createElement("li"); loading.textContent="よみこみ中…"; loading.className="sub2";
+  $("#who").appendChild(loading);
+  let list=null;
+  try{
+    const res=await fetch("/api/auth/choices");
+    const j=res.ok?await res.json():null;
+    if(j&&Array.isArray(j.choices)&&j.choices.every(c=>c&&typeof c.id==="string"&&typeof c.label==="string")) list=j.choices;
+  }catch(e){}
+  $("#who").replaceChildren();
+  $("#retry1").disabled=false;
+  if(!list){
+    $("#msg1").textContent="つながらなかったよ。もういちど ためしてね。";
+    $("#retry1").hidden=false; return;
+  }
+  if(!list.length){
+    $("#msg1").textContent="えらべる人が いません。おうちの人に せっていを たしかめてもらってね。";
+    $("#retry1").hidden=false; return;
+  }
+  list.forEach(c=>{
+    const li=document.createElement("li");
+    const b=document.createElement("button");
+    b.type="button"; b.dataset.id=c.id; b.dataset.label=c.label; b.disabled=!c.ready;
+    b.innerHTML='<span class="face" aria-hidden="true">'+esc(c.label.slice(0,1))+'</span>'
+      +'<span>'+esc(c.label)+(c.ready?"":'<span class="sub">まだ あいことばが ありません</span>')+'</span>';
+    if(c.ready) b.addEventListener("click",()=>pick(b));
+    li.appendChild(b); $("#who").appendChild(li);
+  });
+  if(SWITCH){
+    const p=$("#who").querySelector('button[data-id="parent"]:not(:disabled)');
+    if(p){
+      pick(p);
+      $("#for").textContent="おうちの人に かわる";
+      $("#back").textContent="← やめる";
+      $("#note").textContent="さわらないと 10分で 子どもの画面に もどります。「子どもに戻す」で すぐ もどせます。";
+    }
+  }
+}
+$("#retry1").addEventListener("click",loadChoices);
+
+function pick(b){
+  lastPick=b;
+  chosen={id:b.dataset.id,label:b.dataset.label};
+  $("#for").textContent=chosen.label+" の あいことば";
+  $("#step1").hidden=true; $("#step2").hidden=false;
+  unlock(); clearMessages();
+  $("#code").value=""; $("#code").focus();
+}
+
+function clearMessages(){
+  $("#msg2").textContent=""; $("#msg2").classList.remove("wait"); $("#note2").textContent="";
+}
+
+$("#back").addEventListener("click",()=>{
+  if(SWITCH){
+    // やめたら、切り替えようとした画面（同じサイトの中だけ）へ戻る
+    let back="/kid";
+    try{ const r=new URL(document.referrer); if(r.origin===location.origin&&r.pathname!=="/login") back=r.pathname+r.search; }catch(e){}
+    location.href=back; return;
+  }
+  chosen=null; unlock(); $("#step2").hidden=true; $("#step1").hidden=false;
+  if(lastPick) lastPick.focus();                 // 選んだところへ戻す（R4）
+});
+$("#kbd").addEventListener("click",()=>{
+  const numeric=$("#code").inputMode==="numeric";
+  $("#code").inputMode=numeric?"text":"numeric";
+  $("#kbd").textContent=numeric?"すうじだけ にする":"もじも つかう";
+  $("#code").blur(); $("#code").focus();
+});
+
+// ---------------------------------------------------------------- ロック（UX_REVIEW R6）
+//
+// ロック中は入力をやめる。待つ秒数はサーバーの Retry-After（なければ時間は出さず、確かめるボタンだけ）。
+// 残りの時間は30秒おきに書き換える（毎秒は読み上げない）。
+
+function lock(seconds){
+  const kid=chosen&&chosen.id!=="parent";
+  $("#code").disabled=true; $("#go").hidden=true; $("#kbd").disabled=true;
+  $("#recheck").textContent=kid?"もういちど たしかめる":"もう一度確認する";
+  $("#recheck").hidden=false;
+  clearInterval(unlockTimer);
+  if(!(seconds>0)){ $("#recheck").disabled=false; $("#wait").hidden=true; return; }
+  const until=Date.now()+seconds*1000;
+  $("#recheck").disabled=true; $("#wait").hidden=false;
+  const tick=()=>{
+    const left=Math.ceil((until-Date.now())/60000);
+    if(left<=0){
+      clearInterval(unlockTimer);
+      $("#wait").textContent=kid?"もう いちど ためせるよ。":"もう一度試せます。";
+      $("#recheck").disabled=false; return;
+    }
+    $("#wait").textContent=kid?"あと "+left+"分くらい まってね。":"あと約"+left+"分でもう一度試せます。";
+  };
+  tick(); unlockTimer=setInterval(tick,30000);
+}
+
+function unlock(){
+  clearInterval(unlockTimer);
+  $("#code").disabled=false; $("#go").hidden=false; $("#go").disabled=false; $("#kbd").disabled=false;
+  $("#recheck").hidden=true; $("#wait").hidden=true;
+}
+$("#recheck").addEventListener("click",()=>{ unlock(); clearMessages(); $("#code").focus(); });
+
+$("#form").addEventListener("submit",async e=>{
+  e.preventDefault();
+  if(!chosen||$("#code").disabled) return;
+  const code=$("#code").value;
+  if(!code) return;
+  $("#go").disabled=true; clearMessages();
+  try{
+    const res=await fetch("/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({who:chosen.id,passcode:code})});
+    const j=await res.json().catch(()=>({}));
+    if(res.ok){ location.replace(nextPath(j.home||"/kid")); return; }
+    $("#msg2").textContent=(typeof j.detail==="string"&&j.detail)||"はいれませんでした。";
+    $("#note2").textContent=typeof j.note==="string"?j.note:"";
+    $("#code").value="";
+    if(res.status===429){
+      $("#msg2").classList.add("wait");
+      lock(Number(res.headers.get("Retry-After"))||0);
+      $("#recheck").focus();
+      return;
+    }
+    $("#code").focus();
+  }catch(err){
+    $("#msg2").textContent="つながらなかったよ。もういちど ためしてね。";
+  }
+  $("#go").disabled=false;
+});
+
+// ログアウトしたあと（/board から）。どちらをしたかを分けて伝える（UX_REVIEW R2）
+{
+  const done=new URLSearchParams(location.search).get("done");
+  const msg={logout:"この端末をログアウトしました。",logout_all:"すべての端末をログアウトしました。"}[done];
+  if(msg){ $("#done").textContent=msg; $("#done").hidden=false; }
+}
+
+loadChoices();
+</script>
+</body>
+</html>

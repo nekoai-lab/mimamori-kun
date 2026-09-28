@@ -1,0 +1,41 @@
+{
+ "version": 1,
+ "labels": {
+  "today": {
+   "kana": "きょう",
+   "text": "今日"
+  },
+  "shoot": {
+   "kana": "とる",
+   "text": "撮る"
+  },
+  "reward": {
+   "kana": "ごほうび",
+   "text": "ごほうび"
+  },
+  "done": {
+   "kana": "おわった",
+   "text": "終わった"
+  },
+  "talk": {
+   "kana": "はなす",
+   "text": "話す"
+  },
+  "voice": {
+   "kana": "こえで はなす",
+   "text": "声で 話す"
+  },
+  "appearance": {
+   "kana": "みため",
+   "text": "見た目"
+  },
+  "records": {
+   "kana": "きょうの きろく",
+   "text": "今日の 記録"
+  },
+  "readings": {
+   "kana": "よみかた",
+   "text": "読み方"
+  }
+ }
+}
