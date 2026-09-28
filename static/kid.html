@@ -478,12 +478,16 @@ function startRecognition(){
 $("#mic").addEventListener("click",startRecognition);
 // 取消は時間で消さない。記録は本人が開くまで折りたたんだまま。
 function renderRecent(){
-  const j=recentJob,box=$("#recent"),undo=$("#recent-undo");
+  const j=recentJob,box=$("#recent"),undo=$("#recent-undo"),result=$("#recent-result");
   const visible=j&&j.child===child&&j.state!=="restored";
   if(!visible){
     const hadFocus=document.activeElement===undo||document.activeElement===$("#recent-result");
     box.hidden=true;
-    if(hadFocus)($("#today").querySelector(".finish")||$("#talk")).focus();
+    if(hadFocus){
+      const available=[...$("#today").querySelectorAll(".finish")].filter(b=>!b.disabled);
+      const restored=available.find(b=>b.closest(".card")?.dataset.itemId===String(j?.item.id));
+      (restored||available[0]||$("#talk")).focus();
+    }
     return;
   }
   box.hidden=false;box.dataset.itemId=String(j.item.id);
@@ -491,9 +495,13 @@ function renderRecent(){
     (j.target==="done"?"✓ おわった":j.state==="error"?"まだ もどせていないよ":
       j.state==="waiting"?"もどせたか まだ たしかめられないよ":"もどしているよ");
   $("#recent-result").setAttribute("tabindex","-1");
-  undo.disabled=j.state==="sending"||!!j.undoRequested;
+  const pending=j.state==="sending"||!!j.undoRequested;
+  // 無効化するとフォーカスがbodyへ落ちるので、その前に結果欄へ引き継ぐ。
+  if(pending&&document.activeElement===undo)result.focus();
+  undo.disabled=pending;
   undo.textContent=j.target!=="done"&&j.state!=="sending"?"もういちど もどす":"もどす";
   undo.setAttribute("aria-label",displayTaskTitle(j.item)+"の完了をもどす");
+  if(!pending&&j.target!=="done"&&document.activeElement===result)undo.focus();
   $("#recent-points").textContent=j.target==="done"&&j.confirmedPoints?"+"+j.confirmedPoints+" pt":"";
   $("#recent-week").textContent=j.target==="done"&&j.confirmedWeek?"こんしゅうの だいし："+j.confirmedWeek.done+"つ おわった":"";
   scheduleLayout();

@@ -92,7 +92,9 @@ class Element {
   addEventListener(k,fn){(this.listeners[k]??=[]).push(fn);}
   async fire(k){for(const fn of this.listeners[k]||[])await fn({preventDefault(){},target:this});}
   getBoundingClientRect(){return this.rect||{top:0,height:0};}
-  focus(){document.activeElement=this;}
+  set disabled(value){this._disabled=!!value;if(value&&document.activeElement===this)document.activeElement=document.body;}
+  get disabled(){return this._disabled;}
+  focus(){if(!this.disabled)document.activeElement=this;}
   showModal(){this.open=true;}
   close(){this.open=false;this.fire('close');}
   get lastElementChild(){return this.children.at(-1);}
@@ -484,10 +486,13 @@ def test_recent_undo_failure_can_retry_in_place():
     run_js('''
       setup();replies=[{status:'done'},taskReply([task('one','done')]),weekReply()];
       finishCard(task());await new Promise(setImmediate);
+      $('#recent-undo').focus();
       replies=[{ok:false}];await $('#recent-undo').fire('click');await new Promise(setImmediate);
       assert.equal($('#recent').hidden,false);
       assert.ok($('#recent-result').textContent.includes('まだ もどせていないよ'));
       assert.equal($('#recent-undo').disabled,false);
+      assert.equal($('#recent-undo').textContent,'もういちど もどす');
+      assert.equal(document.activeElement,$('#recent-undo'));
       assert.equal($('#today').querySelector('.finish'),null);
       replies=[{status:'doing'},taskReply([task()],0),weekReply(0)];
       await $('#recent-undo').fire('click');await new Promise(setImmediate);
@@ -579,3 +584,39 @@ def test_overlapping_completions_do_not_attribute_combined_points_to_last_item()
       assert.equal($('#recent-points').textContent,'');
       assert.equal($('#pt').textContent,'6 pt');
     ''')
+
+
+def test_recent_undo_keeps_focus_during_send_and_returns_to_restored_task():
+    run_js('''
+      setup();snapshot.items=[task('first'),task()];renderCards();
+      replies=[{status:'done'},taskReply([task('first'),task('one','done')]),weekReply()];
+      finishCard(task());await new Promise(setImmediate);
+      $('#recent-undo').focus();
+      const pending=deferred();
+      replies=[()=>pending.promise,taskReply([task('first'),task()],0),weekReply(0)];
+      await $('#recent-undo').fire('click');
+      assert.equal($('#recent-undo').disabled,true);
+      assert.equal($('#recent').hidden,false);
+      assert.equal($('#recent-result').attrs.tabindex,'-1');
+      assert.equal(document.activeElement,$('#recent-result'));
+      renderCards();assert.equal(document.activeElement,$('#recent-result'));
+      pending.resolve({ok:true,json:async()=>({status:'doing'})});
+      await new Promise(setImmediate);
+      assert.equal($('#recent').hidden,true);
+      const restored=$('#today').children.find(row=>row.dataset.itemId==='one');
+      assert.equal(document.activeElement,restored.querySelector('.finish'));
+    ''')
+
+
+@pytest.mark.parametrize('available', ['other', 'none'])
+def test_recent_undo_focus_fallback_skips_disabled_tasks(available):
+    run_js('''
+      setup();snapshot.items=[task('first'),task('other'),task()];
+      recentJob={child,item:task(),previous:'doing',target:'doing',state:'restored'};
+      jobs.set(jobKey(child,'one'),recentJob);
+      moving.add(jobKey(child,'one'));moving.add(jobKey(child,'first'));
+      if(AVAILABLE==='none')moving.add(jobKey(child,'other'));
+      $('#recent-result').focus();renderCards();
+      const other=$('#today').children.find(row=>row.dataset.itemId==='other');
+      assert.equal(document.activeElement,AVAILABLE==='other'?other.querySelector('.finish'):$('#talk'));
+    '''.replace('AVAILABLE', json.dumps(available)))
