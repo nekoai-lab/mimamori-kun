@@ -10,6 +10,40 @@
 // 既存の <select id="child"> には触らない。値を入れて change を投げるだけなので、
 // 各画面の処理はそのまま動く。切り替えもその select でできる。
 (function () {
+  // ---------------------------------------------------------------- ログイン（#16）
+  //
+  // だれが使っているかはログインで決まる。子どものときは:
+  //   - 「だれ？」は自分だけ（/api/config が自分だけを返すので、切り替えは出ない）
+  //   - 「一覧」（親の画面）への導線と、親だけの操作（.parent-only）を隠す
+  // 途中でログインが切れたら（全端末ログアウトなど）、ログイン画面に戻す。
+  var root = document.documentElement;
+  var style = document.createElement("style");
+  style.textContent =
+    ':root[data-role="child"] .parent-only,:root[data-role="child"] a[href="/board"]{display:none!important}';
+  document.head.appendChild(style);
+
+  var rawFetch = window.fetch.bind(window);
+  var leaving = false;
+  window.fetch = function () {
+    return rawFetch.apply(null, arguments).then(function (res) {
+      if (res.status === 401 && !leaving && location.pathname !== "/login") {
+        leaving = true;
+        location.href = "/login?next=" + encodeURIComponent(location.pathname);
+      }
+      return res;
+    });
+  };
+
+  rawFetch("/api/auth/me")
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (me) {
+      if (!me) return;
+      root.dataset.role = me.role;
+      window.mimamoriMe = me;
+      document.dispatchEvent(new CustomEvent("who:me", { detail: me }));
+    })
+    .catch(function () {});
+
   var KEY = "mimamori-child";
   // 子どもごとの色。文字で読ませず、色で見分けられるようにする。
   var COLORS = ["#2F6FB5", "#C2614A", "#3F8A6E", "#8A5AA8"];

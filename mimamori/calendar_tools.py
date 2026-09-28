@@ -93,6 +93,25 @@ def list_raw(start_date: str, end_date: str) -> List[Dict[str, Any]]:
     return rows
 
 
+def event_owner(event_id: str) -> Optional[str]:
+    """その予定がだれのものか（#16）。みまもりくんの予定でなければ、見つからなければ None。
+
+    子どもが id を指定して状態を変えるときに、自分のものかを確かめるために使う。
+    """
+    if not event_id:
+        return None
+    if DEMO:
+        today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
+        row = next((e for e in _demo_state(today) if e["id"] == event_id), None)
+        return row["child"] if row else None
+    try:
+        ev = _svc().events().get(calendarId=config.calendar_id, eventId=event_id).execute()
+    except Exception:  # noqa: BLE001
+        return None
+    priv = (ev.get("extendedProperties") or {}).get("private") or {}
+    return priv.get("child") if priv.get("app") == MARK else None
+
+
 def _raw(start_date: str, end_date: str) -> List[Dict[str, Any]]:
     tmin = f"{start_date}T00:00:00+09:00"
     tmax = (dt.date.fromisoformat(end_date) + dt.timedelta(days=1)).isoformat() + "T00:00:00+09:00"
