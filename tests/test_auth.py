@@ -476,3 +476,18 @@ def test_a_child_cannot_forge_a_switch():
     c.cookies.clear()
     c.cookies.set(auth.COOKIE, f"{forged}.{sig}")
     assert c.get("/api/tasks").status_code == 401
+
+
+def test_logout_all_during_a_request_is_not_undone_by_the_refresh(monkeypatch):
+    """切り替え中の延長で、処理の途中の全端末ログアウトを取り消さない（Codex のレビュー #17）。"""
+    c = login(YOUNGER)
+    switch_to_parent(c)
+    real = main.study_mod.set_capacity
+
+    def logout_all_meanwhile(**kw):
+        auth.logout_all()                                   # 処理の途中で、別の端末から全端末ログアウト
+        return real(**kw)
+
+    monkeypatch.setattr(main.study_mod, "set_capacity", logout_all_meanwhile)
+    c.post("/api/capacity", json={"minutes": 60})          # 書き込み＝操作なので、応答で延長の Cookie が出る
+    assert c.get("/api/tasks").status_code == 401            # 延長された Cookie も無効のまま

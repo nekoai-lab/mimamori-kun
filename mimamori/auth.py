@@ -233,12 +233,15 @@ def _unb64(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
 
 
-def issue(user: str, back_to: Optional[str] = None) -> str:
+def issue(user: str, back_to: Optional[str] = None, generation: Optional[int] = None) -> str:
     """Cookie の中身を作る。back_to を渡すと「子どもの端末で親に切り替えた」一時の状態になる。
 
     一時の状態では、元の子（b）と、操作がないまま戻る時刻（i）も署名して入れる。
+    generation を渡すと、その世代で作る。**延長・戻すときは、確かめたときの世代を引き継ぐ**。
+    処理の途中で全端末ログアウトされたら、延長した Cookie も無効のままにするため（最新の世代にしない）。
     """
-    payload: Dict[str, Any] = {"u": user, "e": epoch(), "x": int(_now()) + MAX_AGE}
+    gen = epoch() if generation is None else int(generation)
+    payload: Dict[str, Any] = {"u": user, "e": gen, "x": int(_now()) + MAX_AGE}
     if back_to:
         payload["b"] = back_to
         payload["i"] = int(_now()) + IDLE_SECONDS
@@ -275,9 +278,10 @@ def read(token: Optional[str]) -> Optional[Dict[str, Any]]:
         if back_to not in children() or not is_parent(user):
             return None
         if int(data.get("i") or 0) <= _now():
-            return {"user": back_to, "back_to": None, "idle_until": 0, "reverted": True}
-        return {"user": user, "back_to": back_to, "idle_until": int(data["i"]), "reverted": False}
-    return {"user": user, "back_to": None, "idle_until": 0, "reverted": False}
+            return {"user": back_to, "back_to": None, "idle_until": 0, "reverted": True, "epoch": data["e"]}
+        return {"user": user, "back_to": back_to, "idle_until": int(data["i"]), "reverted": False,
+                "epoch": data["e"]}
+    return {"user": user, "back_to": None, "idle_until": 0, "reverted": False, "epoch": data["e"]}
 
 
 def verify(token: Optional[str]) -> Optional[str]:

@@ -84,6 +84,7 @@ async def require_login(request: Request, call_next):
     request.state.user = user
     request.state.back_to = session["back_to"]
     request.state.idle_until = session["idle_until"]
+    request.state.epoch = session["epoch"]
     if session["reverted"]:
         # 子どもの端末で親に切り替えたまま10分操作がなかった。元の子に戻す（#16 ①）
         if path.startswith("/api/"):
@@ -92,14 +93,14 @@ async def require_login(request: Request, call_next):
                                status_code=401, headers={"X-Mimamori-Reverted": "1"})
         else:
             res = RedirectResponse("/kid" if path in _PARENT_PAGES else path, status_code=303)
-        _set_session(res, user)
+        _set_session(res, user, generation=session["epoch"])
         return res
     if path in _PARENT_PAGES and not auth.is_parent(user):
         return RedirectResponse("/kid", status_code=303)
     response = await call_next(request)
     if session["back_to"] and _is_activity(request):
         # 操作があったので、戻るまでの10分を数え直す（読み込みだけのアクセスでは延ばさない）
-        _set_session(response, user, back_to=session["back_to"])
+        _set_session(response, user, back_to=session["back_to"], generation=session["epoch"])
         request.state.idle_until = int(auth._now()) + auth.IDLE_SECONDS
     return response
 
@@ -115,8 +116,8 @@ def _is_activity(request: Request) -> bool:
     return request.method != "GET"
 
 
-def _set_session(res, user: str, back_to: Optional[str] = None) -> None:
-    res.set_cookie(auth.COOKIE, auth.issue(user, back_to=back_to), max_age=auth.MAX_AGE,
+def _set_session(res, user: str, back_to: Optional[str] = None, generation: Optional[int] = None) -> None:
+    res.set_cookie(auth.COOKIE, auth.issue(user, back_to=back_to, generation=generation), max_age=auth.MAX_AGE,
                    httponly=True, secure=True, samesite="lax", path="/")
 
 
@@ -263,7 +264,7 @@ def api_auth_back(request: Request):
     if not back_to:
         raise HTTPException(400, "子どもの端末で親に切り替えているときだけ使えます。")
     res = JSONResponse({"user": back_to, "home": "/kid"})
-    _set_session(res, back_to)
+    _set_session(res, back_to, generation=getattr(request.state, "epoch", None))
     return res
 
 
