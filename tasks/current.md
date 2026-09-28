@@ -10,6 +10,8 @@
 
 ## 現状
 
+- PR #28 UXレビュー（2026-09-28）：`design/inbox/UX_REVIEW.md` を追加。高1件・中4件。次はB1〜B5の指摘対応と短画面・完了取消の再確認。見た目と設定／会話／読み補助の結合は担当塊へ持ち越し。今回アプリコードは変更していない。
+
 - #14：コメントなしのため Issue 本文の方針で実装。ローカルは `MIMAMORI_LEDGER` 未指定または `json` なら JSON（プロジェクト・ADC の有無によらず Firestore クライアントを作らない）。`firestore` 明示時と Cloud Run では Firestore 必須で、設定不足・初期化／接続失敗は起動エラー。Cloud Run は `json` より優先し、空文字を含む未知の値は両環境で拒否する。
 - #14 の検証：`.venv/bin/python -m pytest` は 56 件成功（既存の子どもスコープ 8 件＋台帳 48 件）。`git diff --check` 成功。専用 build・lint コマンドは未定義。依存ライブラリ由来の警告あり。Firestore はモックのみ、GCP 操作なし。独立 QA は未実施。
 - #14：README・`docs/セットアップ.md`・`.env.example`・台帳の説明を更新。作業ブランチは `fix/14-local-ledger-json`。preflight の fetch はネットワーク制限で失敗。ユーザー指定によりコミットまでで、push・PR は別担当。
