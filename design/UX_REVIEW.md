@@ -10,3 +10,4 @@ UX レビュー（ChatGPT）は PR ごとに `design/reviews/PR-<番号>.md` に
 | [#34](https://github.com/nekoai-lab/mimamori-kun/pull/34) | 見た目の共通基盤（塊 A） | ux-pass（A1〜A3・A1追補 解消）（2026-09-28、ChatGPT の再確認） | [PR-34.md](reviews/PR-34.md) |
 | [#35](https://github.com/nekoai-lab/mimamori-kun/pull/35) | 親の一覧（/board、塊 D） | ux-pass でよい。D1追補は解消、その他は前回の判定のまま（2026-09-28、ChatGPT の再確認） | [PR-35.md](reviews/PR-35.md) |
 | [#36](https://github.com/nekoai-lab/mimamori-kun/pull/36) | A の結合（見出しの書体・ログアウトの強弱・「暗く」の位置） | ux-pass でよい。指定の3点に直すものなし（対象外の結合作業は持ち越し）（2026-09-28、ChatGPT） | [PR-36.md](reviews/PR-36.md) |
+| [#38](https://github.com/nekoai-lab/mimamori-kun/pull/38) | A の結合（2）（相棒の着替え・子の / のナビ・「もう一度確かめる」の余白・/login の色） | ux-pass でよい。指定の①〜④に直すものなし（2026-09-28、ChatGPT／Codex） | [PR-38.md](reviews/PR-38.md) |
