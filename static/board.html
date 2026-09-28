@@ -143,7 +143,7 @@ h2.wait{color:var(--accent)}
 .row{background:var(--surface);border:1px solid var(--line);border-radius:4px;box-shadow:var(--shadow);
  padding:10px 13px;display:flex;gap:11px;align-items:flex-start}
 .row.is-late{background:var(--late);border-color:var(--late-line)}
-.row.is-done{opacity:.5}
+.row.is-done .row-content{opacity:.5}
 .chip{flex:none;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;margin-top:2px;white-space:nowrap}
 .k0{background:var(--kidA-soft);color:var(--kidA)}
 .k1{background:var(--kidB-soft);color:var(--kidB)}
@@ -211,7 +211,8 @@ button:focus-visible,a:focus-visible,summary:focus-visible,select:focus-visible,
 #readingForm select,#reload,.notice-card button{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line-strong);border-radius:6px;padding:8px}
 [data-family-nav]:not(:empty) + .fallback-links{display:none}
 #exceptions{margin-top:16px}
-.action-feedback{color:var(--late-ink)}
+.action-feedback{color:var(--ink)}
+.action-feedback.is-warning{color:var(--late-ink)}
 [data-action], [data-action] button, [data-action] [tabindex], [data-card] summary, [data-card] a, #headline{scroll-margin-top:calc(var(--board-header-height, 100px) + 16px)}
 .action-feedback:empty{display:none}
 </style>
@@ -594,7 +595,7 @@ function actionHtml(key,button){
   const state=actionStates.get(key);
   const controls=state && !state.resolved?"":state?.confirmed?'<span class="chip">'+(state.expected==="rejected"?"取り消し済み":key.startsWith("seen:")?"既読":state.expected==="todo"?"未対応":"対応済み")+'</span>':button;
   return '<div data-action="'+esc(key)+'">'+(state?.busy?button.replaceAll('<button ', '<button disabled '):controls)+
-    '<p class="action-feedback" role="status" tabindex="-1">'+esc(state?.message||"")+'</p>'+
+    '<p class="action-feedback'+(state && !state.busy && !state.confirmed?' is-warning':'')+'" role="status" tabindex="-1">'+esc(state?.message||"")+'</p>'+
     (state && !state.busy && !state.resolved?'<button type="button" data-recheck="'+esc(key)+'">状態を再確認する</button>':"")+(state && !state.resolved && key.startsWith('cancel:')?'<a href="https://calendar.google.com/" target="_blank" rel="noopener">Google カレンダーで確かめる</a>':'')+'</div>';
 }
 function beginAction(btn,key,title,needed){
@@ -607,6 +608,7 @@ function beginAction(btn,key,title,needed){
     root:btn.closest("[data-cards]")?.id};
   actionStates.set(key,state);
   const status=slot.querySelector('[role="status"]');
+  status.setAttribute("class","action-feedback");
   status.textContent=state.message;
   if(document.activeElement===btn) status.focus();
   btn.disabled=true;
@@ -666,6 +668,7 @@ function rowHtml(it,reason=""){
   const ki=data.children.indexOf(it.child);
   const late=exceptionReason(it).startsWith("⚠");
   return '<div class="row'+(late?" is-late":"")+(it.status==="done"?" is-done":"")+'" data-card="'+esc(it.id)+'" data-id="'+esc(it.id)+'">'
+    +'<div class="row-content">'
     +(reason?'<p class="reason">'+esc(reason)+'</p>':"")
     +'<span class="chip k'+(ki===0?0:1)+'">'+esc(it.child||"？")+"</span>"
     +'<div class="main">'
@@ -678,6 +681,7 @@ function rowHtml(it,reason=""){
         +(it.source==="kid"?'<span class="chip kid">子が入れた</span>':"")
       +"</div>"
       +(it.bring?'<div class="bring"><b>持ち物:</b> '+esc(it.bring)+"</div>":"")
+    +"</div>"
     +"</div>"
     // 「やってる」は子が /kid で言うこと。親は見るだけで、代わりに申告しない。
     +actionHtml("status:"+it.id,(it.status==="pending"?'<div class="acts">'

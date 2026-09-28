@@ -477,6 +477,18 @@ assert.ok(root.querySelector('[data-card]'));
 assert.notEqual(document.activeElement,document.body);
 if(moved)assert.equal(document.activeElement,el('#reload'));
 else assert.equal(document.activeElement.closest('[data-card]'),root.querySelector('[data-card]'));
+const feedback=root.querySelector('[data-action="'+(action==='done'?'status:t':action==='seen'?'seen:n':'cancel:t')+'"] .action-feedback');
+assert.ok(feedback);
+assert.equal(feedback.matches('.is-warning'),outcome!=='confirmed');
+if(action==='done'&&outcome==='confirmed'){
+ const card=feedback.closest('.row');
+ assert.ok(card.matches('.is-done'));
+ const content=card.querySelector('.row-content');
+ assert.ok(content);assert.ok(content.querySelector('.ttl'));
+ assert.equal(content.contains(feedback),false);
+ assert.equal(content.contains(feedback.closest('[data-action]')),false);
+ assert.equal(feedback.closest('[data-action]').parentElement,card);
+}
 const failed=['error','missing'].includes(outcome);
 if(failed){
  assert.match(root.innerHTML,/確認できませんでした/);
@@ -498,3 +510,41 @@ if(failed){
  }
 }
 '''.replace('ACTION', json.dumps(action)).replace('OUTCOME', json.dumps(outcome)).replace('MOVED', json.dumps(moved)))
+
+
+def test_feedback_colors_and_done_opacity_scope():
+    css = re.search(r"<style>([\s\S]*?)</style>", HTML)[1]
+    rules = dict(re.findall(r"([^{}]+)\{([^{}]*)\}", css))
+    rules = {selector.strip(): body for selector, body in rules.items()}
+    assert re.search(r"color:\s*var\(--ink\)", rules[".action-feedback"])
+    assert re.search(r"color:\s*var\(--late-ink\)", rules[".action-feedback.is-warning"])
+    # カード祖先への opacity 復活や、操作・結果文への追加を検出する。
+    dimmed = {selector for selector, body in rules.items()
+              if re.search(r"(?:^|;)\s*opacity:\s*(?:0?\.\d+|0)\s*(?:;|$)", body)}
+    assert ".row.is-done .row-content" in dimmed
+    assert dimmed <= {
+        ".row.is-done .row-content", ".ypfile button:disabled",
+        ".acts button:disabled", "footer .auth button:disabled",
+        ".add .prim:disabled", ".recfoot .prim:disabled", ".ypbar .prim:disabled",
+        ".ypout .mv:disabled", ".recrow.off .t,.recrow.off .who,.recrow.off .wd",
+    }
+    # 結果文が載る背景で、明暗どちらも通常文字のコントラストを保つ。
+    def rgb(value):
+        if len(value) == 4:
+            value = "#" + "".join(c * 2 for c in value[1:])
+        return [int(value[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+
+    def luminance(color):
+        return sum(w * (c / 12.92 if c <= .04045 else ((c + .055) / 1.055) ** 2.4)
+                   for w, c in zip((.2126, .7152, .0722), color))
+
+    for selector in (":root", ':root[data-theme="dark"]'):
+        palette = dict(re.findall(r"(--[\w-]+):\s*(#[0-9A-Fa-f]+)", rules[selector]))
+        paper = rgb(palette["--paper"])
+        late = palette["--late"]
+        alpha = int(late[7:9], 16) / 255
+        backgrounds = [rgb(palette[k]) for k in ("--surface", "--accent-soft", "--paper")]
+        backgrounds.append([a * alpha + b * (1 - alpha) for a, b in zip(rgb(late), paper)])
+        for background in backgrounds:
+            levels = sorted((luminance(rgb(palette["--ink"])), luminance(background)))
+            assert (levels[1] + .05) / (levels[0] + .05) >= 4.5
