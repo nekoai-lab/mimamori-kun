@@ -40,6 +40,19 @@ h1{font-family:inherit;font-size:21px;margin:0}
 .nav a{flex:none;font-size:12.5px;text-decoration:none;padding:4px 12px;white-space:nowrap;
   border:1px solid var(--line-strong);border-radius:999px;color:var(--ink-2)}
 .nav a.on{background:var(--accent);border-color:var(--accent);color:var(--paper);font-weight:700}
+/* 子のとき（A の結合（2）・PR-29 A2）：/kid と同じく、きょう・とる・ごほうび を画面の下に置く。
+   ナビの高さを測って本文の下に同じだけ余白を取り、ナビが本文や操作を隠さないようにする */
+body[data-audience="kid"] [data-family-nav]{position:fixed;left:0;right:0;bottom:0;z-index:10;flex-basis:auto;overflow:visible;
+  display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:0;padding:8px 12px calc(8px + env(safe-area-inset-bottom));
+  background:var(--kid-card,var(--surface));border-top:1px solid var(--line)}
+body[data-audience="kid"] [data-family-nav] a{flex:1 1 6em;max-width:200px;min-height:48px;font-size:16px;text-align:center;
+  display:inline-flex;align-items:center;justify-content:center;white-space:normal}
+body[data-audience="kid"]{padding-bottom:calc(var(--kid-nav-h, 72px) + 16px)}
+/* 文字拡大などでナビが画面の高さの3割を超えるときは、固定をやめてページの最後に置く（/kid と同じ考え方） */
+body[data-audience="kid"].nav-in-flow [data-family-nav]{position:static;border-top:1px solid var(--line);margin-top:24px}
+body[data-audience="kid"].nav-in-flow{padding-bottom:0}
+/* 「もう一度確かめる」と撮影パネルのあいだを空ける（PR-29 A1） */
+#identity-retry{margin:4px 0 20px}
 .theme{margin-left:auto;flex:none;font:inherit;font-size:12.5px;padding:4px 12px;white-space:nowrap;
   border:1px solid var(--line-strong);border-radius:999px;background:transparent;color:var(--ink-2);cursor:pointer}
 .lead{color:var(--ink-2);font-size:14px;margin:0 0 20px}
@@ -781,6 +794,34 @@ $("#qsame").addEventListener("click", async () => {
 controls();
 confirmIdentity();
 
+</script>
+<script>
+// 子のとき下に置くナビの高さを、本文の下の余白に使う（A の結合（2））
+(function(){
+  const nav=document.querySelector("[data-family-nav]");
+  if(!nav) return;
+  const measure=()=>{
+    document.body.classList.remove("nav-in-flow");
+    const h=nav.getBoundingClientRect().height, vh=(window.visualViewport&&window.visualViewport.height)||window.innerHeight;
+    document.body.style.setProperty("--kid-nav-h", h+"px");
+    document.body.classList.toggle("nav-in-flow", h>vh*0.3);
+  };
+  if(window.ResizeObserver) new ResizeObserver(measure).observe(nav);
+  window.addEventListener("resize", measure); measure();
+  // 「暗く」：親のときはリンクの行の右端（/plan・/schedule と同じ）。子のときはナビが下に行くので、見出しの行に残す（/kid と同じく上）
+  const theme=document.getElementById("theme"), hdr=document.querySelector(".hdr");
+  const home=nav.parentElement, next=nav.nextSibling;
+  const place=()=>{
+    const kid=document.body.dataset.audience==="kid";
+    // 子のとき：ナビは本文の後ろ（固定なら画面の下、固定をやめても最後）。親のとき：元の見出しの中
+    if(kid && nav.parentElement!==document.body){ document.body.appendChild(nav); measure(); }
+    if(!kid && nav.parentElement!==home){ home.insertBefore(nav, next); }
+    if(kid && theme.parentElement!==hdr) hdr.appendChild(theme);
+    if(!kid && theme.parentElement!==nav) nav.appendChild(theme);
+  };
+  new MutationObserver(place).observe(document.body,{attributes:true,attributeFilter:["data-audience"]});
+  place();
+})();
 </script>
 <script src="/static/appearance.js"></script>
 </body>

@@ -23,7 +23,14 @@ h1{font-size:28px;margin:0}h2{font-size:20px;margin:0}p{margin:8px 0} .heading{j
 #today{display:flex;flex-direction:column;gap:10px;margin:12px 0;height:auto;max-height:none;overflow:visible} .card{display:grid;grid-template-columns:1fr auto;gap:8px;padding:10px;border:1px solid var(--line);border-radius:16px;background:var(--kid-card,var(--surface));overflow-wrap:anywhere}
 .card:first-child{border-width:2px}.task-info{min-width:0}.task-info summary{list-style:none;display:flex;align-items:center;gap:10px;min-height:48px}.ic{font-size:28px}.tx{font-weight:700}.card p{font-size:14px}.card .finish{align-self:center;background:var(--kid-accent,var(--me));color:var(--kid-on-accent,var(--me-ink));font-weight:700}.card .status{grid-column:1/-1;margin:0}.card .later{grid-column:1/-1;justify-self:end}
 .card.done{border-color:var(--kid-done,var(--me))}.stamp{animation:stamp .25s ease-out}@keyframes stamp{from{transform:scale(1.08)}to{transform:scale(1)}}
-#companion{border:1px solid var(--line);border-radius:16px;padding:12px;background:var(--kid-card,var(--surface));margin:12px 0}.companion-top{display:flex;align-items:center;gap:12px}.companion-picture{width:76px;height:72px;flex:none}.resting .eyes{opacity:.4}.companion-top button{flex:1;text-align:left}.actions{display:flex;gap:8px;margin-top:8px}.actions button{flex:1;min-width:0}.companion-name{font-size:14px;display:block}
+#companion{border:1px solid var(--line);border-radius:16px;padding:12px;background:var(--kid-card,var(--surface));margin:12px 0}.companion-top{display:flex;align-items:center;gap:12px}.companion-picture{width:76px;height:72px;flex:none}.resting .eyes{opacity:.4}
+/* 相棒の着替え：テーマ（data-kid-theme）ごとに A の絵を出す。テーマがない（中立）ときは元の絵のまま。名前・会話・台紙は変えない */
+.companion-art{display:none;width:76px;height:72px;flex:none;background:center/contain no-repeat}
+:root[data-kid-theme="rocket-lab"] .companion-art[data-art="rocket-lab"]{display:block;background-image:url("/static/assets/appearance/rocket-lab.svg")}
+:root[data-kid-theme="monochrome"] .companion-art[data-art="monochrome"]{display:block;background-color:var(--kid-text)}
+:root[data-kid-theme="snow-bird"] .companion-art[data-art="snow-bird"]{display:block;background-image:url("/static/assets/appearance/snow-bird.svg")}
+:root[data-kid-theme] .companion-picture{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.resting .companion-art{opacity:.6}.companion-top button{flex:1;text-align:left}.actions{display:flex;gap:8px;margin-top:8px}.actions button{flex:1;min-width:0}.companion-name{font-size:14px;display:block}
 .page-bottom{padding-bottom:calc(var(--nav-height, 90px) + 24px)}.hint{text-align:center}
 /* A 未読込時にも移動できる静的リンク。ナビの生成・置換は A が所有する。 */
 [data-family-nav]{position:fixed;bottom:0;left:0;right:0;z-index:10;background:var(--kid-card,var(--surface));padding:8px 12px calc(8px + env(safe-area-inset-bottom));display:flex;gap:8px;justify-content:center}
@@ -87,6 +94,8 @@ body.large-controls .page-bottom{padding-bottom:24px}
   <p id="feedback" role="status" aria-live="polite"></p>
   <div id="companion-slot"><section id="companion" aria-label="相棒">
     <div class="companion-top">
+      <!-- テーマの着替え（A の結合（2））：テーマがあるときは A の絵を見せ、元の絵は読み上げ用に残す -->
+      <span class="companion-art" data-art="rocket-lab" aria-hidden="true"></span><span class="companion-art ap-art-mono" data-art="monochrome" aria-hidden="true" style="--ap-mask:url('/static/assets/appearance/monochrome.svg')"></span><span class="companion-art" data-art="snow-bird" aria-hidden="true"></span>
       <svg class="companion-picture" viewBox="0 0 100 90" role="img" aria-label="相棒のまる" id="companion-picture">
         <path d="M50 23V12m-5 0a5 5 0 1 0 10 0a5 5 0 1 0-10 0" fill="none" stroke="currentColor" stroke-width="3"/>
         <rect x="12" y="25" width="76" height="55" rx="25" fill="none" stroke="currentColor" stroke-width="3"/>
