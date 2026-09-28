@@ -66,6 +66,8 @@ const document={documentElement:new Element('html'),body:new Element('body'),act
   querySelectorAll:s=>s==='#rewards .card'?document.querySelector('#rewards').children:[],
   createElement:tag=>new Element(tag)};
 const window={innerHeight:667,addEventListener(){}};
+const store=new Map();
+const localStorage={getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,String(v))};
 let search='';
 const location={get search(){return search;}};
 let replies=[],calls=[];
@@ -278,9 +280,22 @@ await askFor(G);                      // 送り直させない
 assert.equal(posts().length,1);
 // もういちど たしかめる：申込がない → 送れていなかった
 replies.push({items:[]});
+await document.querySelector('#recheck').click();
+// 見つからなくても、まだ処理中かもしれない：送れていないとは決めない（コードレビュー #41）
+assert.equal(text('#send-note'),'まだ みつからないよ。すこし まってから「もういちど たしかめる」を おしてね。');
+assert.ok(uncertain);
+assert.equal(card(G.label).querySelector('[data-ask]').disabled,true);
+await askFor(G);
+assert.equal(posts().length,1);
+// 再読込しても（端末に覚えている）止まったまま
+assert.ok(JSON.parse(localStorage.getItem('mimamori-reward-pending'))['kid:下の子']);
+// サーバーの処理が終わるはずの時間をこえても見つからなければ、送れていない
+lastSent.at-=SETTLE_MS;
+replies.push({items:[]});
 reload({bal:34});
 await document.querySelector('#recheck').click();
 assert.match(text('#send-note'),/^おくれなかったよ/);
+assert.equal(JSON.parse(localStorage.getItem('mimamori-reward-pending'))['kid:下の子'],undefined);
 assert.equal(uncertain,null);
 assert.equal(document.querySelector('#recheck').hidden,true);
 assert.equal(card(G.label).querySelector('[data-ask]').disabled,false);
@@ -318,9 +333,14 @@ assert.equal(sending,false);
     ("parent", "", True),
     (None, "?view=parent", True),
     (None, "", False),
+    # 認証が無効な環境の実際の返事（role:"parent"・auth:false）
+    ("noauth", "?view=parent", True),
+    ("noauth", "", False),
 ])
 def test_parent_area_only_for_parent(role, view, parent):
-    me = "{ok:false,status:401}" if role is None else "{role:'%s',auth:true,name:'x'}" % role
+    me = ("{ok:false,status:401}" if role is None else
+          "{role:'parent',auth:false,name:'',user:''}" if role == "noauth" else
+          "{role:'%s',auth:true,name:'x'}" % role)
     run_js(r'''
 search=VIEW;
 replies.push({children:[{name:'下の子'}]});
@@ -379,4 +399,71 @@ assert.equal(matchSent(['a'],[{id:'a',label:G.label,cost:30,status:'requested'}]
 assert.equal(matchSent([],[{id:'b',label:W.label,cost:100,status:'requested'}],sent),0);
 assert.equal(matchSent([],[{id:'c',label:G.label,cost:20,status:'requested'}],sent),0);
 assert.equal(matchSent([],[{id:'d',label:G.label,cost:30,status:'approved'}],sent),1);
+''')
+
+
+def test_refund_is_not_claimed_from_an_earlier_rejection():
+    run_js(r'''
+const day='2026-09-29';
+const now={id:'n',label:G.label,cost:30,status:'rejected',note:'今週は なし',decided_at:day+'T10:00:00+09:00'};
+const old={id:'o',label:G.label,cost:30,status:'rejected',note:'先月は なし',decided_at:'2026-08-01T10:00:00+09:00'};
+const refund=(note,date)=>({kind:'adjust',points:30,title:'「'+G.label+'」の交換を取りやめ：'+note,date});
+// 前の見送りの記録だけ → 今回は言わない
+assert.equal(refunded(now,[refund('先月は なし','2026-08-01')],[now,old]),false);
+assert.equal(refunded(now,[refund('今週は なし',day)],[now,old]),true);
+// 見送りの日より前の記録は数えない
+assert.equal(refunded(now,[refund('今週は なし','2026-09-01')],[now]),false);
+// 同じ報酬・同じ理由の見送りが2件で、記録が1件 → 言わない
+const twin={...now,id:'t'};
+assert.equal(refunded(now,[refund('今週は なし',day)],[now,twin]),false);
+assert.equal(refunded(now,[refund('今週は なし',day),refund('今週は なし',day)],[now,twin]),true);
+''')
+
+
+def test_parent_decision_lock_holds_until_reload_and_unknown_blocks_that_request():
+    run_js(r'''
+setAudience(true);
+const item={id:'a',label:G.label,cost:30,status:'requested',at:new Date().toISOString()};
+const other={id:'b',label:W.label,cost:100,status:'requested',at:new Date().toISOString()};
+load({bal:4,items:[item,other]});
+const btn=(i,label)=>document.querySelector('#p-reqs').children[i].buttons.find(b=>b.textContent===label);
+replies.push(new Error('offline'));                  // OK の返事が消えた
+const slow=deferred();
+replies.push(()=>slow.promise);                      // 読み直しの points が遅い
+replies.push({items:[item,other],remaining:{cap:{yen:0,count:0},yen_left:null,count_left:null}});
+replies.push({days:null}); replies.push({days:null});   // loadPace
+const first=btn(0,'OK').click();
+await new Promise(r=>setImmediate(r));
+// 読み直しが終わるまで、どの申込のボタンも押せない・押しても送らない
+assert.equal(deciding,true);
+assert.equal(btn(1,'OK').disabled,true);
+await decide('approve','a');
+await decide('approve','b');
+assert.equal(posts().length,1);
+slow.resolve({ok:true,status:200,json:async()=>({child:'下の子',balance:4,history:[],rules:{}})});
+await first;
+for(let i=0;i<5;i++) await new Promise(r=>setImmediate(r));   // めやす（loadPace）の取得を終わらせる
+assert.equal(deciding,false);
+// 状態が変わっていない（requested のまま）ので、この申込は操作させない。ほかの申込は操作できる
+const row0=document.querySelector('#p-reqs').children[0];
+assert.equal(row0.buttons.map(b=>b.textContent).join(','),'読み直す');
+assert.match(row0.textContent,/送れたか確かめています/);
+assert.equal(btn(1,'OK').disabled,false);
+assert.match(text('#p-note'),/送れたか分かりません/);
+// 読み直して状態が変わっていたら、ロックを外す
+reload({bal:4,items:[{...item,status:'approved'},other]});
+replies.push({days:null}); replies.push({days:null});
+await row0.buttons[0].click();
+for(let i=0;i<5;i++) await new Promise(r=>setImmediate(r));
+assert.deepEqual(document.querySelector('#p-reqs').children[0].buttons.map(b=>b.textContent),['わたした','みおくる']);
+''')
+
+
+def test_over_cap_is_not_shown_as_negative():
+    run_js(r'''
+setAudience(true);
+load({bal:4,items:[],rem:{cap:{yen:1000,count:2},yen_left:-500,count_left:-1}});
+assert.equal(text('#left'),'今月の上限を 500円 こえています／今月の回数を 1回 こえています');
+load({bal:4,items:[],rem:{cap:{yen:1000,count:2},yen_left:300,count_left:1}});
+assert.equal(text('#left'),'今月あと 300円／あと 1回');
 ''')

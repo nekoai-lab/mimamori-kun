@@ -200,6 +200,9 @@ const PARENT_ST={requested:"もうしこみ",approved:"OK（手渡し待ち）",
 const SENDING="おくっているよ";
 const CHECKING="おくれたか たしかめているよ";
 const UNKNOWN="おくれたか まだ わからないよ。もういちど もうしこまずに、「もういちど たしかめる」を おしてね。";
+const NOT_FOUND_YET="まだ みつからないよ。すこし まってから「もういちど たしかめる」を おしてね。";
+const SETTLE_MS=6*60*1000;   // これより前に送ったものは、見つからなければ「送れていない」と言える（サーバーの timeout は 300秒）
+const PENDING_KEY="mimamori-reward-pending";
 const CAPPED="こんげつの もうしこみは おやすみ。おうちの人と はなしてね";
 // 親の画面か。子どもの端末で親に切り替えたときも親（#16 ①）。認証がない環境は ?view=parent に従う
 let parentView=false;
@@ -265,10 +268,16 @@ function cardState(reward,ctx){
   return {kind:"ready",can:!ctx.sending&&!ctx.uncertain,text:"もうしこめる"};
 }
 // みおくりで「ポイントは もどったよ」と言えるのは、戻した記録が見つかったときだけ（§2.4.2）
-function refunded(req,hist){
+// 台帳の記録は申込 ID を持たないので、名前・ポイント・理由・日付まで一致するものを数える。
+// 同じ報酬・同じ理由の見送りが複数あるときは、その数だけ戻した記録がなければ言わない（前の見送りの記録で言わない。コードレビュー #41）
+function refunded(req,hist,items){
   if(!Array.isArray(hist)) return false;
-  const head="「"+req.label+"」の交換を取りやめ";
-  return hist.some(e=>e.kind==="adjust"&&Number(e.points)===Number(req.cost)&&!e.revoked&&String(e.title||"").startsWith(head));
+  const title="「"+req.label+"」の交換を取りやめ："+String(req.note||"").trim();
+  const day=String(req.decided_at||"").slice(0,10);
+  const same=r=>r.status==="rejected"&&r.label===req.label&&Number(r.cost)===Number(req.cost)&&String(r.note||"").trim()===String(req.note||"").trim();
+  const peers=(items||[req]).filter(same).length||1;
+  const found=hist.filter(e=>e.kind==="adjust"&&!e.revoked&&Number(e.points)===Number(req.cost)&&String(e.title||"")===title&&(!day||String(e.date||"")>=day)).length;
+  return found>=peers;
 }
 // 残高の直下に出すもの：申込中・OK と、2週間以内の みおくり
 function activeReqs(items,now){
@@ -387,7 +396,7 @@ function paintReqs(){
     if(r.status==="approved") li.appendChild(element("p","てわたしを まっているよ","muted"));
     if(r.status==="rejected"){
       if(r.note) li.appendChild(element("p","おうちの人から："+r.note));
-      if(refunded(r,history)) li.appendChild(element("p","ポイントは もどったよ"));
+      if(refunded(r,history,reqs)) li.appendChild(element("p","ポイントは もどったよ"));
     }
     list.appendChild(li);
   }
@@ -440,13 +449,19 @@ function paintSendNote(text){
   $("#recheck").hidden=!uncertain;
 }
 
+// ---------------------------------------------------------------- 送れたか分からないもの（端末に覚える）
+function pendingAll(){ try{ return JSON.parse(localStorage.getItem(PENDING_KEY)||"{}")||{}; }catch(e){ return {}; } }
+function pendingSave(all){ try{ localStorage.setItem(PENDING_KEY,JSON.stringify(all)); }catch(e){} }
+function pendingGet(key){ return pendingAll()[key]||null; }
+function pendingSet(key,value){ const all=pendingAll(); if(value) all[key]=value; else delete all[key]; pendingSave(all); }
+
 // ---------------------------------------------------------------- もうしこむ（2タップ：入口 → 確定）
 async function askFor(reward){
   if(sending||uncertain||open!==reward.label) return;
   const me=child, id=epoch;
   const sent={label:reward.label,cost:costOf(reward),yen:yenOf(reward)};
   const before=(reqs||[]).map(r=>r.id);
-  sending=true; lastSent={sent,before};
+  sending=true; lastSent={sent,before,at:Date.now()};
   paintSendNote(SENDING); paintCards();
   try{
     await postJSON("/api/redeem",{child:me,label:sent.label,cost:sent.cost,yen:sent.yen});
@@ -458,7 +473,7 @@ async function askFor(reward){
   }catch(err){
     if(id!==epoch) return;
     sending=false;
-    if(err.unknown){ uncertain=sent; await recheck(); return; }
+    if(err.unknown){ uncertain=sent; open=""; pendingSet("kid:"+me,lastSent); await recheck(); return; }
     // 断られた（残高・上限など）。理由を出して、今の状態を取り直す
     open="";
     await loadChild(true);
@@ -476,7 +491,13 @@ async function recheck(){
   catch(e){ if(id===epoch) paintSendNote(UNKNOWN); return; }
   if(id!==epoch) return;
   const hits=matchSent(lastSent.before,after,lastSent.sent);
+  if(!hits&&Date.now()-lastSent.at<SETTLE_MS){
+    // 見つからなくても、まだ処理中かもしれない。送れていないとは決めず、申込を止めたまま
+    paintSendNote(NOT_FOUND_YET); paintCards();
+    return;
+  }
   uncertain=null; open=""; lastSent=null;
+  pendingSet("kid:"+child,null);
   await loadChild(true);
   if(id!==epoch) return;
   paintSendNote(hits?KID_ST.requested:"おくれなかったよ。もうしこむなら、もういちど えらんでね");
@@ -485,6 +506,8 @@ $("#recheck").addEventListener("click",recheck);
 
 // ---------------------------------------------------------------- 親の領域
 function paintParent(){
+  settleUnsure();
+  const unsure=unsureDecisions();
   const box=$("#p-reqs");
   box.replaceChildren();
   if(reqs==null){ box.appendChild(element("p","もうしこみを 読み込めませんでした","muted")); }
@@ -496,18 +519,22 @@ function paintParent(){
     head.appendChild(element("span",r.label+"（"+r.cost+"pt"+(r.yen?"・"+r.yen+"円":"")+"）"));
     row.appendChild(head);
     if(r.note) row.appendChild(element("p","理由・メモ："+r.note,"muted"));
-    if(r.status==="requested"||r.status==="approved"){
+    if(unsure[r.id]){
+      row.appendChild(element("p","送れたか確かめています。少し待って読み直してください","muted"));
+      row.appendChild(button("読み直す","",()=>loadChild(true)));
+    }else if(r.status==="requested"||r.status==="approved"){
       const acts=element("div",undefined,"row");
       if(r.status==="requested") acts.appendChild(button("OK","primary",()=>decide("approve",r.id)));
       acts.appendChild(button("わたした","",()=>decide("hand",r.id)));
       acts.appendChild(button("みおくる","",()=>showReject(row,r)));
+      for(const b of acts.children) b.disabled=deciding;
       row.appendChild(acts);
     }
     box.appendChild(row);
   }
   const rem=remaining||{}, bits=[];
-  if(rem.yen_left!=null) bits.push("今月あと "+rem.yen_left+"円");
-  if(rem.count_left!=null) bits.push("あと "+rem.count_left+"回");
+  if(rem.yen_left!=null) bits.push(rem.yen_left<0?"今月の上限を "+(-rem.yen_left)+"円 こえています":"今月あと "+rem.yen_left+"円");
+  if(rem.count_left!=null) bits.push(rem.count_left<0?"今月の回数を "+(-rem.count_left)+"回 こえています":"あと "+rem.count_left+"回");
   $("#left").textContent=bits.join("／");
   if(rem.cap){ $("#capyen").value=rem.cap.yen; $("#capcount").value=rem.cap.count; }
 }
@@ -529,22 +556,37 @@ function showReject(row,r){
   text.focus();
 }
 let deciding=false;
+// 送れたか分からない親の操作：申込 ID → 送ったときの状態。状態が変わったのを確かめるまで、その申込は操作させない
+function unsureDecisions(){ const all=pendingAll(); return all.parent||{}; }
+function setUnsure(id,value){ const all=pendingAll(); all.parent=all.parent||{}; if(value) all.parent[id]=value; else delete all.parent[id]; pendingSave(all); }
+function settleUnsure(){
+  const unsure=unsureDecisions();
+  for(const [id,u] of Object.entries(unsure)){
+    const r=(reqs||[]).find(x=>x.id===id);
+    if((r&&r.status!==u.status)||Date.now()-u.at>=SETTLE_MS) setUnsure(id,null);
+  }
+}
 async function decide(what,id,note){
   if(deciding) return;
+  const before=(reqs||[]).find(x=>x.id===id)?.status||"";
   deciding=true;
+  paintParent();   // 送っているあいだは どの申込のボタンも押せない
   const s=epoch;
   $("#p-note").textContent="送っています";
+  let done="";
   try{
     await postJSON("/api/redeem/"+what,{id,note:note||""});
-    if(s!==epoch) return;
-    $("#p-note").textContent={approve:"OK にしました",hand:"わたした にしました",reject:"みおくりにして、ポイントを戻しました"}[what];
+    done={approve:"OK にしました",hand:"わたした にしました",reject:"みおくりにして、ポイントを戻しました"}[what];
   }catch(err){
-    if(s!==epoch) return;
-    $("#p-note").textContent=err.unknown?"送れたか分かりません。一覧を読み直しました。状態を確かめてください":err.message;
-  }finally{
-    deciding=false;
-    if(s===epoch) await loadChild(true);
+    if(err.unknown) setUnsure(id,{status:before,at:Date.now()});
+    done=err.unknown?"送れたか分かりません。状態が変わったのを確かめるまで、この申込は操作できません。少し待って読み直してください":err.message;
   }
+  // 一覧を読み直して状態を確かめてから、ロックを外す
+  if(s===epoch) await loadChild(true);
+  deciding=false;
+  if(s!==epoch) return;
+  paintParent();
+  $("#p-note").textContent=done;
 }
 async function loadPace(){
   const list=$("#pace"), s=seq;
@@ -608,6 +650,10 @@ async function loadChild(keep){
   }
   paintAll();
   if(parentView) loadPace();
+  if(!keep&&!parentView&&!uncertain){
+    const saved=pendingGet("kid:"+me);
+    if(saved&&saved.sent&&Array.isArray(saved.before)){ uncertain=saved.sent; lastSent=saved; recheck(); }
+  }
 }
 $("#reload").addEventListener("click",()=>loadChild(false));
 // 文字を大きくしてナビが画面の3割をこえたら、下に固定しない（kid と同じ）
@@ -648,7 +694,8 @@ async function boot(){
   ]);
   const wantParent=new URLSearchParams(location.search).get("view")==="parent";
   // 親の領域は、親でログインしているときだけ。認証のない環境（401/404）は ?view=parent に従う
-  const parent=me?.role==="parent"?true:me?.role==="child"?false:wantParent;
+  // 認証が無効な環境では /api/auth/me が role:"parent"・auth:false を返す。そのときは ?view=parent に従う（コードレビュー #41）
+  const parent=me?.auth?me.role==="parent":wantParent;
   setAudience(parent);
   // 子どもの端末でログインしていないとき（認証なし）は、親への入口を ?view=parent にする
   if(!me?.auth) $("#to-parent").href="/reward?view=parent";
