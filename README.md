@@ -203,6 +203,8 @@ UI の変更がある PR は `ux-pass` も要る。ルールの正本は ai-dev-
 
 ## いちばん速い動かし方（会話画面だけ見たいとき）
 
+Vertex での手元の開発は `bash scripts/dev_server.sh`（課金先の一致を確認し、ローカル JSON 台帳・デモ登録・通知なしで起動）。
+
 GCPプロジェクトも課金も要りません。**AI Studio の APIキー1本**で動きます。
 必要なのは **Python 3.10 以上**（`python3 -V` で確認。macOS 同梱の 3.9 だと `pip install` が落ちる）。
 

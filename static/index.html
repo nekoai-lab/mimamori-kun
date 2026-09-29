@@ -28,6 +28,9 @@
   --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -16px rgba(0,0,0,.8);
 }
 *{box-sizing:border-box}
+#result{overflow-wrap:anywhere}
+#result legend{max-width:100%;white-space:normal}
+#shot{width:100%;padding:4px}
 #result li{overflow-wrap:anywhere}
 body{margin:0;background:var(--paper);color:var(--ink);
   font-family:"Noto Sans JP",system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;
@@ -90,7 +93,7 @@ h2{font-family:inherit;font-size:19px;margin:32px 0 6px}
   border-radius:0 4px 4px 0;box-shadow:var(--shadow);padding:14px}
 .item.dup{border-left-color:var(--line-strong);opacity:.72}
 .item.review{border-left-color:var(--warn)}
-.item-head{display:flex;gap:10px;align-items:flex-start}
+.item-head{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start}
 .item-head input[type=checkbox]{margin-top:6px;width:17px;height:17px;accent-color:var(--accent);flex:none}
 .item-title{flex:1;font-weight:700;font-size:15px;border:0;background:transparent;padding:2px 0;color:var(--ink)}
 .badges{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 0 27px}
@@ -107,7 +110,7 @@ h2{font-family:inherit;font-size:19px;margin:32px 0 6px}
 .changes b{font-weight:700}
 /* すでに入っているもの：数だけ伝える */
 .skipped{margin:8px 0 0;font-size:12.5px;color:var(--ink-3)}
-.skipped button{font:inherit;font-size:12px;margin-left:6px;padding:2px 8px;cursor:pointer;
+.skipped button{min-height:44px;font:inherit;font-size:12px;margin-left:6px;padding:2px 8px;cursor:pointer;
  border:1px solid var(--line);border-radius:7px;background:transparent;color:inherit}
 .skipped ul{margin:6px 0 0;padding-left:1.1em}
 /* 原本サムネイル：確かめているあいだ、ずっと横にある */
@@ -119,13 +122,13 @@ h2{font-family:inherit;font-size:19px;margin:32px 0 6px}
 @media (max-width:700px){
   .withshot{display:block}
   .withshot .shot{width:100%;position:static;margin:0 0 12px}
-  .withshot .shot img{max-height:200px;object-fit:cover;object-position:top}
+  .withshot .shot img{max-height:160px;object-fit:contain;object-position:top}
 }
-.item .who{font:inherit;font-size:11px;padding:2px 7px;border-radius:2px;border:1px solid var(--line-strong);
+.item .who{min-height:44px;max-width:100%;overflow-wrap:anywhere;font:inherit;font-size:11px;padding:2px 7px;border-radius:2px;border:1px solid var(--line-strong);
  background:var(--surface-2);color:var(--ink-2);cursor:pointer}
 .b-dim{background:var(--surface-2);color:var(--ink-3);border:1px solid var(--line)}
 .fields{display:grid;grid-template-columns:1fr;gap:10px;margin:12px 0 0 27px}
-@media(min-width:520px){.fields{grid-template-columns:150px 110px 1fr}}
+@media(min-width:520px){.fields{grid-template-columns:repeat(auto-fit,minmax(min(100%,8em),1fr))}}
 .fields label{font-size:11.5px;color:var(--ink-3);display:block;margin-bottom:3px}
 .src{margin:10px 0 0 27px;font-size:12.5px;color:var(--ink-3);border-left:2px solid var(--line);padding-left:10px}
 .err{background:var(--warn-soft);border:1px solid var(--warn);color:var(--warn);
@@ -153,18 +156,18 @@ footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);
 
 /* 手で入力する（目標：10タップ・20秒） */
 .quick{margin:16px 0 0}
-.qtoggle{font:inherit;font-size:13.5px;padding:7px 15px;cursor:pointer;background:var(--surface,#fff);
+.qtoggle{min-height:44px;max-width:100%;overflow-wrap:anywhere;font:inherit;font-size:13.5px;padding:7px 15px;cursor:pointer;background:var(--surface,#fff);
  color:inherit;border:1px solid var(--line-strong,#c3c8bf);border-radius:999px}
 .qbox{margin:10px 0 0;padding:14px;border:1px solid var(--line,#dcded6);border-radius:12px;background:var(--surface,#fff)}
 .qbox[hidden]{display:none}
 .qrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px}
 .qrow > .lab{font-size:12.5px;color:var(--ink-3,#7c8783);width:4.4em;flex:none;white-space:nowrap}
-.qrow button{font:inherit;font-size:14px;padding:9px 14px;cursor:pointer;background:var(--surface-2,#fbfbf7);
- color:inherit;border:1px solid var(--line-strong,#c3c8bf);border-radius:10px;min-height:42px}
+.qrow button{max-width:100%;overflow-wrap:anywhere;font:inherit;font-size:14px;padding:9px 14px;cursor:pointer;background:var(--surface-2,#fbfbf7);
+ color:inherit;border:1px solid var(--line-strong,#c3c8bf);border-radius:10px;min-height:44px}
 .qrow button[aria-pressed="true"]{background:var(--accent,#0f6b62);color:#fff;border-color:var(--accent,#0f6b62);font-weight:700}
 .qrow input[type=text]{flex:1;min-width:170px;font:inherit;font-size:15px;padding:10px 12px;
  color:inherit;background:var(--surface-2,#fbfbf7);border:1px solid var(--line-strong,#c3c8bf);border-radius:10px}
-.qrow input[type=date]{font:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--line-strong,#c3c8bf);
+.qrow input[type=date]{max-width:100%;min-width:0;font:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--line-strong,#c3c8bf);
  border-radius:10px;background:var(--surface-2,#fbfbf7);color:inherit}
 .qgo{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0 0}
 .qgo .add{font:inherit;font-size:15px;font-weight:700;padding:11px 22px;cursor:pointer;min-height:46px;
@@ -399,8 +402,9 @@ function revealResult(origin, selector){
   target.focus({preventScroll:true});
   target.scrollIntoView({block:"start", behavior:"instant"});
 }
-function readFailure(){
-  $("#result").innerHTML = '<div class="err">うまく読めなかったよ。文字がはっきり写っているか見てね。'
+function readFailure(temporary=false){
+  const message = temporary ? (isKid() ? "いまは よめないよ。すこし まってから もういちど ためしてね" : "いまは読み取りが混み合っています。少し待ってからもう一度お試しください") : "うまく読めなかったよ。文字がはっきり写っているか見てね。";
+  $("#result").innerHTML = '<div class="err">'+message
     + '<div class="row"><button class="btn ghost" id="retake">とりなおす</button>'
     + '<button class="btn ghost" id="qfall">手でいれる</button></div></div>';
   $("#retake").addEventListener("click", () => $("#file").click());
@@ -452,7 +456,8 @@ async function readEvents(res, onEvent){
   function line(text){
     if(!text.trim()) return;
     const event = JSON.parse(text);
-    if(done || event.type === "error") throw new Error();
+    if(event.type === "error") throw Object.assign(new Error(), {temporary:event.temporary === true});
+    if(done) throw new Error();
     onEvent(event);
     if(event.type === "done") done = event;
   }
@@ -519,7 +524,7 @@ async function readPhoto(){
     extraction = data;
     if(isKid()) await kidCandidates(data, token);
     else render(data);
-  }catch(err){ if(current(token)){ readFailure(); $("#note").textContent = ""; } }
+  }catch(err){ if(current(token)){ readFailure(err.temporary); $("#note").textContent = ""; } }
   finally { clearTimeout(timer); if(current(token)){ busy = false; controls(); revealResult(origin, $("#result").innerHTML ? "#result" : "#completion"); } }
 }
 
@@ -577,7 +582,7 @@ function render(d){
        + '<button type="button" id="showskip">見る</button>'
        + '<span id="skiplist"></span></p>';
   }
-  if(!d.items.length){ emptyResult(d); return; }
+  if(!d.items.length) h += '<p class="ok">登録候補はありません。足したいものがあれば入力できます。</p>';
 
   // 原本を横に置いたまま確かめる（画面設計 12-1）。撮り直さないと確かめられない、をなくす。
   h += '<div class="withshot"><div class="shot">'
@@ -617,9 +622,17 @@ function render(d){
   h += "</div>";
   h += '<div class="row"><button class="btn primary" id="reg">カレンダーに登録する</button>'
      + '<button class="btn ghost" id="all">全部チェック</button><span id="regnote" class="tag"></span></div>';
-  h += "</div></div>";
+  h += '</div></div><div class="row">ほかにも ある？<button type="button" class="btn ghost" id="add-candidate">＋ついか</button></div>';
   $("#result").innerHTML = h;
 
+  $("#add-candidate").addEventListener("click", () => {
+    if(busy || photoConsumed) return;
+    syncCandidates();
+    const names = [...new Set(d.items.map(it => it.child))].filter(name => window.CHILDREN.includes(name));
+    qChild = names.length === 1 ? names[0] : currentChild;
+    $("#qchild").textContent = "だれ：" + qChild;
+    qRenderSubjects(); manualLocked = false; controls(); openManual();
+  });
   if(d.skipped) bindSkip(d);
   if($("#shot")) $("#shot").addEventListener("click", () => {
     $("#photo-large").src = previewURL; $("#photo-dialog").showModal();
@@ -678,14 +691,20 @@ function armUndo(ids){
   });
 }
 
-function collect(){
+function syncCandidates(){
+  const rows = collect(true);
+  for(const row of rows) Object.assign(extraction.items.find(it => it.id === row.id), row);
+}
+function collect(includeUnchecked=false){
   const out = [];
   document.querySelectorAll(".item").forEach(el => {
     const src = extraction.items.find(x => x.id === el.dataset.id);
-    if(!el.querySelector('[data-f="selected"]').checked) return;
+    const selected = el.querySelector('[data-f="selected"]').checked;
+    if(!selected && !includeUnchecked) return;
     const note = el.querySelector('[data-f="note"]').value;
     const who = el.querySelector('[data-f="child"]');
     out.push(Object.assign({}, src, {
+      selected,
       child: who ? who.textContent.trim() : src.child,
       title: el.querySelector('[data-f="title"]').value,
       date: el.querySelector('[data-f="date"]').value,
@@ -817,8 +836,19 @@ $("#qadd").addEventListener("click", async () => {
   const token = generation;
   const extra = $("#qtitle").value.trim();
   const title = qChild + "｜" + qSubj + (extra ? " " + extra : "");
+  const candidate = {title, child:qChild, kind:qKind, date:qDateISO(), note:"手で入力"};
+  if(!isKid() && extraction && !photoConsumed){
+    // 既存候補の編集・チェックを保存してから描画し直す。
+    syncCandidates();
+    extraction.items.push({...candidate, id:crypto.randomUUID(), selected:true});
+    render(extraction);
+    $("#qtitle").value = ""; $("#qbox").hidden = true;
+    $("#qtoggle").setAttribute("aria-expanded", "false");
+    $("#result").focus();
+    return;
+  }
   busy = true; manualLocked = true; controls();
-  await registerItems([{title, child:qChild, kind:qKind, date:qDateISO(), note:"手で入力"}], token);
+  await registerItems([candidate], token);
   if(current(token)){ busy = false; controls(); manualNext(); }
 });
 function manualNext(){
@@ -864,7 +894,13 @@ $("#qsame").addEventListener("click", async () => {
   try{
     const items = await yesterdayItems(child);
     if(!current(token)) return;
-    if(items.length){ manualLocked = true; await registerItems(items, token); }
+    if(items.length){
+      if(!isKid() && extraction && !photoConsumed){
+        syncCandidates();
+        extraction.items.push(...items.map(it => ({...it,id:crypto.randomUUID(),selected:true})));
+        render(extraction);
+      }else{ manualLocked = true; await registerItems(items, token); }
+    }
     else $("#qnote").textContent = "新しく入れる昨日のぶんはありませんでした。";
   }catch(err){ if(current(token)) $("#qnote").textContent = "昨日のぶんを読み込めませんでした。手でいれることもできます。"; }
   finally { if(current(token)){ busy = false; controls(); if(manualLocked) manualNext(); } }

@@ -7,11 +7,12 @@ import unicodedata
 import uuid
 
 from . import ledger, notify
+from .config import config
 
 KEY = "date_questions"
 JST = dt.timezone(dt.timedelta(hours=9))
 ISSUES = ("relative", "no_month", "year_cross", "weekday_mismatch", "vague",
-          "undecided", "multiple", "recurring", "low_confidence")
+          "undecided", "multiple", "recurring", "low_confidence", "uncovered")
 
 
 def now():
@@ -83,7 +84,7 @@ def check(item, today=None, *, require_text=False):
                         issues.add("weekday_mismatch")
                 except ValueError:
                     issues.add("low_confidence")
-    elif text and not issues:
+    elif text and not (issues - {"uncovered"}):
         issues.add("no_month")
     item["date_text"] = item.get("date_text") or original
     item["date_issues"] = [i for i in ISSUES if i in issues]
@@ -107,7 +108,7 @@ def pending():
                   key=lambda r: r["created_at"])
 
 
-def change(id_, action, date=None, end_date=None):
+def change(id_, action, date=None, end_date=None, child=None):
     """トランザクション内では副作用を起こさず、登録の権利だけ確保する。"""
     def update(old):
         rows = old or []
@@ -123,6 +124,10 @@ def change(id_, action, date=None, end_date=None):
         elif action == "register":
             if row.get("date_is_range") and not end_date:
                 raise ValueError("いつまでの日付も選んでください。")
+            chosen_child = child if child is not None else row.get("child")
+            if chosen_child not in [c["name"] for c in config.children]:
+                raise ValueError("だれの予定か選んでください。")
+            row["child"] = chosen_child
             row.update(state="registering", chosen_date=date, chosen_end_date=end_date)
         return rows
     rows = ledger.transact_setting(KEY, update)
@@ -151,7 +156,9 @@ def remind():
     due = [r for r in rows if r.get("reminder_token") == token]
     if due:
         first = due[0]
+        # 保存・Calendar 用の件名はそのまま、表示時だけ子の接頭辞を外す。
+        title = first["title"].removeprefix(first["child"] + "｜")
         prefix = f"日付の確認待ちが{len(due)}件あります。" if len(due) > 1 else ""
         notify.add("date_question", "日付の確認が 3日 のこっています",
-                   prefix + f"『{first['title']}』（プリントの表記：『{first['date_text']}』）の日付が決まっていません。"
+                   prefix + f"『{title}』（{first['child']}、プリントの表記：『{first['date_text']}』）の日付が決まっていません。"
                    "みまもりくんの『確認すること』から日付を選んでください。")

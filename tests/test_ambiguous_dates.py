@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 import main
 from mimamori import agent, ambiguous_dates as dates, auth, calendar_tools, ledger, notify
+from test_extract_retry import fake_runner
 
 TODAY = dt.datetime(2026, 12, 1, 12, tzinfo=dates.JST)
 
@@ -202,3 +203,74 @@ def test_unknown_calendar_result_does_not_retry(monkeypatch):
     assert c.post(f"/api/date_questions/{id_}/register", json={"date": "2026-12-12"}).status_code == 502
     assert c.post(f"/api/date_questions/{id_}/register", json={"date": "2026-12-12"}).status_code == 409
     assert len(calls) == 1 and dates.pending()[0]["state"] == "registering"
+
+
+@pytest.mark.parametrize("title,display_title", [
+    ("下の子｜運動会", "運動会"), ("運動会", "運動会"), ("運動会｜集合", "運動会｜集合"),
+])
+def test_reminder_display_title_and_child_preserve_saved_calendar_title(title, display_title, monkeypatch):
+    c = client()
+    id_ = queued(c, monkeypatch, title=title, child="下の子")
+    monkeypatch.setattr(dates, "now", lambda: TODAY + dt.timedelta(days=3))
+    c.get("/api/notices")
+    assert notify.notices()[0]["body"] == (
+        f"『{display_title}』（下の子、プリントの表記：『再来週の土曜日』）の日付が決まっていません。"
+        "みまもりくんの『確認すること』から日付を選んでください。"
+    )
+    assert dates.pending()[0]["title"] == title
+    assert c.post(f"/api/date_questions/{id_}/register", json={"date": "2026-12-12"}).status_code == 200
+    assert any(r["summary"] == title for r in calendar_tools._demo_store)
+
+
+@pytest.mark.parametrize("patch,expected", [
+    ({"child": "elementary"}, "下の子"),
+    ({"child": "junior_high"}, "上の子"),
+    ({"child": "不明", "title": "下の子｜運動会"}, "下の子"),
+    ({"child": "elementary", "title": "上の子｜運動会"}, "上の子"),
+    ({"child": "判別不能", "school_level": "elementary"}, "下の子"),
+    ({"child": "判別不能"}, "不明"),
+    ({"child": "下の子", "title": "上の子｜運動会", "school_level": "junior_high"}, "下の子"),
+])
+@pytest.mark.parametrize("waiting", [False, True])
+def test_child_normalization_before_both_branches(monkeypatch, fake_runner, patch, expected, waiting):
+    payload = item(**patch, date_text="明後日" if waiting else "12月5日（土）")
+    fake_runner.replies = [json.dumps({"summary": "架空", "items": [payload]})] * 2
+    reviewed = []
+    def review(items, child):
+        reviewed.extend(deepcopy(items))
+        return dict(items=items, skipped=0, skipped_titles=[])
+    monkeypatch.setattr(agent, "_review", review)
+    result = asyncio.run(agent.read_otayori(b"dummy", "image/png"))
+    row = result["date_questions" if waiting else "items"][0]
+    assert row["child"] == expected
+    assert row["title"] == payload["title"]
+    if expected == "不明":
+        assert row["needs_review"] is True
+    if not waiting:
+        assert reviewed[0]["child"] == expected
+    # 子どもが撮った場合はモデルの名前・件名より撮った子を優先する。
+    scoped = asyncio.run(agent.read_otayori(b"dummy", "image/png", child="下の子"))
+    assert scoped["date_questions" if waiting else "items"][0]["child"] == "下の子"
+
+
+@pytest.mark.parametrize("waiting", [False, True])
+def test_same_school_level_does_not_choose_arbitrary_child(monkeypatch, fake_runner, waiting):
+    monkeypatch.setattr(agent.config, "children", [
+        {"name": "子A", "school_level": "elementary"},
+        {"name": "子B", "school_level": "elementary"},
+    ])
+    test_child_normalization_before_both_branches(monkeypatch, fake_runner, {"child": "elementary"}, "不明", waiting)
+
+
+@pytest.mark.parametrize("invalid_child", [None, "不明", "elementary", "設定外"])
+def test_unknown_child_requires_valid_selection_before_registration(monkeypatch, invalid_child):
+    c = client()
+    id_ = queued(c, monkeypatch, child="不明")
+    before = deepcopy(calendar_tools.list_tasks())
+    body = {"date": "2026-12-12", "child": invalid_child}
+    assert c.post(f"/api/date_questions/{id_}/register", json=body).status_code == 409
+    assert dates.pending()[0]["state"] == "waiting"
+    assert calendar_tools.list_tasks() == before
+    body["child"] = "下の子"
+    assert c.post(f"/api/date_questions/{id_}/register", json=body).status_code == 200
+    assert any(r["child"] == "下の子" and r["summary"] == "運動会" for r in calendar_tools._demo_store)

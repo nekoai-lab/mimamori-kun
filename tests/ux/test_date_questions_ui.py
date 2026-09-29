@@ -61,7 +61,7 @@ assert.match(area.innerHTML,/いつまで/);
 await month(10);await day(2);await press('ok');
 assert.match(area.innerHTML,/以降の日付/);assert.equal(calls.length,0);
 await month(10);await day(5);await press('ok');
-assert.match(area.innerHTML,/10月3日（土） 〜 2026年10月5日（月）/);
+assert.match(area.innerHTML,/10月3日（土） 〜 10月5日（月）/);
 responses.set('/api/date_questions/q/register',[reply({state:'registered'})]);
 await press('register');assert.equal(calls[0].body.end_date,'2026-10-05');
 ''')
@@ -113,4 +113,68 @@ assert.match(nodes.get('result').innerHTML,/日付は おうちの人に きい�
 routes.set('/api/extract',()=>response({items:[],date_questions_count:1}));
 await choose();await readPhoto();assert.equal(registrations().length,1);
 assert.match(nodes.get('result').innerHTML,/日付は おうちの人に きいてもらうね/);
+''')
+
+
+def test_display_title_keeps_saved_title_and_child_once():
+    board(SETUP + r'''
+q.title='上の子｜運動会';renderDateQuestions();
+assert.match(area.innerHTML,/<h3>運動会<\/h3>/);
+assert.ok(!area.innerHTML.includes('上の子｜'));
+await month(10);await day(17);await press('ok');
+assert.match(area.innerHTML,/<p>運動会 10月17日（土） 上の子　これで とうろくする？<\/p>/);
+assert.equal(q.title,'上の子｜運動会');
+q.title='運動会｜集合';renderDateQuestions();
+assert.match(area.innerHTML,/<h3>運動会｜集合<\/h3>/);
+''')
+
+
+def test_year_labels_follow_today_for_month_day_confirmation_and_summary():
+    board(SETUP + r'''
+const labels=()=>area.querySelectorAll('[data-date-action="month"]').map(b=>b.textContent);
+assert.ok(labels().includes('10月'));assert.ok(!labels().includes('2026年 10月'));
+assert.ok(labels().includes('2027年 1月'));
+await month(10);assert.match(area.innerHTML,/<p>10月<\/p>/);
+await day(17);assert.match(area.innerHTML,/<p>10月17日（土）で いい？<\/p>/);
+await press('reselect');await month(1);
+assert.match(area.innerHTML,/<p>2027年 1月<\/p>/);
+await day(3);assert.match(area.innerHTML,/<p>2027年1月3日（日）で いい？<\/p>/);
+await press('ok');assert.match(area.innerHTML,/<p>運動会 2027年1月3日（日） 上の子　これで とうろくする？<\/p>/);
+data.today='2027-01-01';await press('reset');
+assert.ok(labels().includes('1月'));assert.ok(!labels().includes('2027年 1月'));
+await month(1);await day(3);assert.match(area.innerHTML,/<p>1月3日（日）で いい？<\/p>/);
+''')
+
+
+def test_range_summary_across_years():
+    board(SETUP + r'''
+q.date_is_range=true;renderDateQuestions();
+await month(12);await day(30);await press('ok');
+await month(1);await day(3);await press('ok');
+assert.match(area.innerHTML,/<p>運動会 12月30日（水） 〜 2027年1月3日（日） 上の子　これで とうろくする？<\/p>/);
+''')
+
+
+def test_unknown_child_selected_before_summary_and_sent_to_server():
+    board(SETUP + r'''
+q.child='不明';data.children=['上の子','下の子'];renderDateQuestions();
+await month(10);await day(17);await press('ok');
+assert.match(area.innerHTML,/だれの予定？/);
+assert.ok(!area.innerHTML.includes('これで とうろくする？'));
+assert.equal(area.querySelector('[data-date-action="register"]'),null);
+const choices=area.querySelectorAll('[data-date-action="child"]');
+assert.equal(choices.map(b=>b.textContent).join(','),'上の子,下の子');
+assert.match(boardCSS,/\.date-question button\{[^}]*min-width:44px;min-height:44px/);
+assert.equal(calls.length,0);
+await choices[1].click();
+assert.match(area.innerHTML,/運動会 10月17日（土） 下の子　これで とうろくする？/);
+assert.equal(q.child,'不明');
+await press('reset');await month(10);await day(17);await press('ok');
+assert.match(area.innerHTML,/だれの予定？/);
+await area.querySelectorAll('[data-date-action="child"]').find(b=>b.dataset.child==='下の子').click();
+responses.set('/api/date_questions/q/register',[reply({state:'registered'})]);
+await press('register');
+assert.equal(calls.length,1);
+assert.equal(calls[0].body.child,'下の子');
+assert.equal(calls[0].body.date,'2026-10-17');
 ''')

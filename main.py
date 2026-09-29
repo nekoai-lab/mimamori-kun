@@ -398,6 +398,24 @@ async def _normalize_extract(data, content_type):
         )
 
 
+def _read_failure(exc, user):
+    from google.genai.errors import APIError
+    import httpx
+    import aiohttp
+
+    status = exc.code if isinstance(exc, APIError) and isinstance(exc.code, int) else None
+    temporary = status in (408, 429, 503, 504) or isinstance(
+        exc, (TimeoutError, httpx.TimeoutException, aiohttp.ServerTimeoutError))
+    # 本文・例外メッセージ・traceback を出さない。
+    logging.getLogger(__name__).warning("extract failure: type=%s status=%s", type(exc).__name__, status)
+    detail = "読み取りに失敗しました。もう一度試してください。"
+    if temporary:
+        detail = ("いまは読み取りが混み合っています。少し待ってからもう一度お試しください"
+                  if auth.is_parent(user) else
+                  "いまは よめないよ。すこし まってから もういちど ためしてね")
+    return dict(detail=detail, temporary=temporary)
+
+
 @app.post("/api/extract")
 async def extract(request: Request, image: UploadFile = File(...), hint: str = Form("")):
     data = await _extract_image(image)
@@ -407,7 +425,9 @@ async def extract(request: Request, image: UploadFile = File(...), hint: str = F
         result = await read_otayori(data, content_type, hint,
                                     child=None if auth.is_parent(user) else user)
     except Exception as e:
-        raise HTTPException(500, "読み取りに失敗しました。もう一度試してください。") from e
+        failure = _read_failure(e, user)
+        return JSONResponse(failure, status_code=503) if failure["temporary"] else JSONResponse(
+            {"detail": failure["detail"]}, status_code=500)
     return JSONResponse(_finish_extract(result, user))
 
 
@@ -428,9 +448,8 @@ async def extract_stream(request: Request, image: UploadFile = File(...), hint: 
                     yield {"type": "done", **_finish_extract(result, user)}
                 else:
                     yield event
-        except Exception:
-            # SDK の例外本文には入力・接続情報が含まれる可能性がある。
-            yield {"type": "error", "detail": "読み取りに失敗しました。もう一度試してください。"}
+        except Exception as exc:
+            yield {"type": "error", **_read_failure(exc, user)}
 
     async def lines():
         async for event in events():
@@ -549,6 +568,7 @@ def register(req: RegisterRequest, request: Request):
 class DateAnswer(BaseModel):
     date: dt.date
     end_date: Optional[dt.date] = None
+    child: Optional[str] = None
 
 
 @app.get("/api/date_questions", dependencies=[Depends(parent_only)])
@@ -557,9 +577,9 @@ def api_date_questions():
     return {"items": ambiguous_dates.pending()}
 
 
-def _date_action(id_, action, date=None, end_date=None):
+def _date_action(id_, action, date=None, end_date=None, child=None):
     try:
-        return ambiguous_dates.change(id_, action, date, end_date)
+        return ambiguous_dates.change(id_, action, date, end_date, child)
     except KeyError as exc:
         raise HTTPException(404, "日付の確認待ちが見つかりません。") from exc
     except ValueError as exc:
@@ -583,7 +603,7 @@ def api_date_register(id_: str, req: DateAnswer, request: Request):
     if req.end_date and req.end_date < req.date:
         raise HTTPException(400, "いつまでは、いつから以降の日付を選んでください。")
     row = _date_action(id_, "register", req.date.isoformat(),
-                       req.end_date.isoformat() if req.end_date else None)
+                       req.end_date.isoformat() if req.end_date else None, req.child)
     if row["state"] == "registered":
         return row["result"]
     # #52 の照合・更新情報は持ち越さない。親が決めた日付で新規登録する。

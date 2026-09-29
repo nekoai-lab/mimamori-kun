@@ -61,7 +61,9 @@ low_confidence: 手書き・かすれ・ぼけで日付を確信できない。
 1. 画像を丁寧に読む。日付、提出期限、持ち物、集合時刻、金額を落とさない。
 2. カレンダーに載せる価値のあるものだけを items にする。
    挨拶文、校長のコラム、一般的な注意書きは載せない。
-3. 最終出力は JSON のみ。既存予定との照合は後でシステムが行う。
+3. プリント中の日付の表現（相対・曜日だけ・月末などを含む）をすべて date_mentions に列挙する。
+   text に表現そのもの、context にその表現を含む原文の文を写す。items にあるものも列挙する。
+4. 最終出力は JSON のみ。既存予定との照合は後でシステムが行う。
 
 # 学校PCの「れんらくちょう」画面（毎日のもの）
 次の形をしていたら、1日ぶんの連絡です。実物で確かめた読み方に従うこと。
@@ -97,6 +99,7 @@ low_confidence: 手書き・かすれ・ぼけで日付を確信できない。
 # 出力する JSON の形
 {{
   "summary": "このおたよりが何だったか1〜2文",
+  "date_mentions": [{{"text": "明後日の学活", "context": "学級Tシャツの採寸を、明後日の学活で行います"}}],
   "items": [
     {{
       "kind": "event|deadline|homework|bring",
@@ -154,6 +157,7 @@ def _generation_config(child=None):
     return types.GenerateContentConfig(
         system_instruction=_instruction(child),
         response_mime_type="application/json", response_schema=Extraction,
+        http_options=types.HttpOptions(timeout=20000, retry_options=types.HttpRetryOptions(attempts=1)),
         thinking_config=types.ThinkingConfig(thinking_budget=config.thinking_budget),
     )
 
@@ -195,6 +199,26 @@ def _review(items: List[Dict[str, Any]], child: Optional[str] = None) -> Dict[st
 
 
 AMBIGUOUS_PROMPT = "日付の書き方があいまいなもの（明後日・今週・来週・今月末まで など）も、落とさず必ず items に1件ずつ入れ、date は null、date_text に原文、date_issues に理由を入れてください。持ち物や準備（体操服を持ってくる など）が書かれた予定も1件にします。"
+
+
+def _normalize_child(item: Dict[str, Any], child: Optional[str] = None) -> None:
+    """モデルの学校段階を子の名前として保存しない。日付の分岐より前に適用する。"""
+    names = {c["name"] for c in config.children}
+    resolved = child or (item["child"] if item["child"] in names else None)
+    if resolved is None:
+        resolved = next((c["name"] for c in config.children
+                         if item["title"].startswith(c["name"] + "｜")), None)
+    if resolved is None:
+        for level in (item["child"], item.get("school_level")):
+            if level not in ("elementary", "junior_high"):
+                continue
+            matches = [c["name"] for c in config.children if c.get("school_level") == level]
+            if len(matches) == 1:
+                resolved = matches[0]
+                break
+    item["child"] = resolved or "不明"
+    if resolved is None:
+        item["needs_review"] = True
 
 
 def closed_items(text: str) -> List[Dict[str, Any]]:
@@ -247,7 +271,55 @@ def closed_items(text: str) -> List[Dict[str, Any]]:
         return out
 
 
-async def stream_otayori(image_bytes: bytes, mime_type: str, hint: str = "",
+def _uncovered_dates(parsed: Extraction, child=None):
+    # 重複照合で除外された予定も含め、モデルが読んだ全項目と比べる。
+    fields = ("date_text", "source_text", "title", "note")
+    covered = [getattr(item, field) for item in parsed.items for field in fields]
+    seen = set()
+    normalized = [item.model_dump() for item in parsed.items]
+    for item in normalized:
+        _normalize_child(item, child)
+    names = {item["child"] for item in normalized}
+    inferred = next(iter(names)) if len(names) == 1 else "不明"
+    for mention in parsed.date_mentions:
+        text = mention.text.strip()
+        if not text or text in seen or any(text in value for value in covered):
+            continue
+        seen.add(text)
+        context = mention.context.strip() or text
+        item = Item(kind="event", title=context[:60], child=child or inferred,
+                    date_text=text, source_text=context,
+                    date_issues=["uncovered"], needs_review=True).model_dump()
+        _normalize_child(item, child)
+        yield ambiguous_dates.check(item, require_text=True)
+
+
+READ_TIMEOUT_SECONDS = 25.0
+
+
+async def stream_otayori(image_bytes: bytes, mime_type: str, hint: str = "", child=None):
+    """再試行・逐次照合を含む締切。yield 中に呼び出し元をキャンセルしない。"""
+    deadline = time.monotonic() + READ_TIMEOUT_SECONDS
+    stream = _stream_otayori(image_bytes, mime_type, hint, child)
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError()
+            try:
+                event = await asyncio.wait_for(anext(stream), timeout=remaining)
+            except StopAsyncIteration:
+                return
+            if time.monotonic() >= deadline:
+                raise TimeoutError()
+            yield event
+            if event["type"] == "done":
+                return
+    finally:
+        await stream.aclose()
+
+
+async def _stream_otayori(image_bytes: bytes, mime_type: str, hint: str = "",
                          child: Optional[str] = None):
     """1回の生成を逐次照合。空・不正な応答だけ同じ入力で1回再試行する。"""
     parts = [types.Part.from_bytes(data=image_bytes, mime_type=mime_type)]
@@ -289,8 +361,7 @@ async def stream_otayori(image_bytes: bytes, mime_type: str, hint: str = "",
                             if first_item is None:
                                 first_item = time.monotonic() - started
                             item = Item.model_validate(raw).model_dump()
-                            if child:
-                                item["child"] = child
+                            _normalize_child(item, child)
                             item = ambiguous_dates.check(item, require_text=True)
                             if item["date_issues"]:
                                 out["date_questions"].append(item)
@@ -320,6 +391,9 @@ async def stream_otayori(image_bytes: bytes, mime_type: str, hint: str = "",
                     )
                     yield {"type": "reset"}
                     continue
+                for item in _uncovered_dates(parsed, child):
+                    out["date_questions"].append(item)
+                    yield {"type": "question", "item": item}
                 out["summary"] = parsed.summary
                 retry_result = "success"
                 yield {"type": "done", **out}
@@ -346,6 +420,7 @@ async def read_otayori(image_bytes: bytes, mime_type: str, hint: str = "",
     async for event in stream_otayori(image_bytes, mime_type, hint, child):
         if event["type"] == "done":
             return {k: v for k, v in event.items() if k != "type"}
+
 
 
 # ---------------------------------------------------------------- 年間行事予定表
