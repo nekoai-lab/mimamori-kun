@@ -1,8 +1,11 @@
-.git/
-.gitignore
+/*
+!/Dockerfile
+!/requirements.txt
+!/main.py
+!/mimamori/
+!/static/
+
+# 許可したディレクトリ内のキャッシュ・OS メタデータも除外する
 __pycache__/
 *.pyc
-.venv/
-venv/
-.env
-samples/*.png
+.DS_Store
