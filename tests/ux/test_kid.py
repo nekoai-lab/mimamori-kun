@@ -65,7 +65,6 @@ def test_accessible_initial_actions_and_safe_fallback_navigation():
 
 def test_no_optimistic_points_or_settings_http_contract():
     assert 'queueDone' not in JS
-    assert 'points+" pt"' in JS
     assert 'companion_name:name' in JS
     assert '/api/appearance' not in JS and '/api/companion' not in JS
     assert 'JSON.stringify({child:s.child,history:requestHistory})' in JS
@@ -124,7 +123,7 @@ let replies=[],calls=[];
 async function fetch(url,options){calls.push({url,options});if(!replies.length)throw Error('unexpected fetch '+url);const reply=replies.shift();if(typeof reply==='function')return reply(url,options);if(reply instanceof Error)throw reply;return {ok:reply.ok??true,json:async()=>reply.body??reply};}
 function deferred(){let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};}
 function task(id='one',status='doing'){return {id,status,child:'下の子',summary:'こくご ドリル',date:'2026-09-28',days_left:0,kind:'homework',points:3,minutes:20};}
-function setup(){child='下の子';epoch=1;snapshot={items:[task()],points:0,today:'2026-09-28',at:1};stale=false;document.querySelector('#pt').textContent='0 pt';}
+function setup(){child='下の子';epoch=1;snapshot={items:[task()],points:0,today:'2026-09-28',at:1};stale=false;document.querySelector('#pt').textContent='きょう がんばった 0pt';}
 function taskReply(items=[],points=3){return {items,points:{'下の子':points},today:'2026-09-28'};}
 function weekReply(done=1,start='2026-09-27'){return {child:'下の子',start,done,goal:5};}
 '''
@@ -175,7 +174,7 @@ def test_failed_completion_never_claims_done_or_points(response, state):
     run_js('''
       setup();replies=[RESPONSE];finishCard(task());await new Promise(setImmediate);
       assert.equal(jobs.get(jobKey(child,'one')).state,STATE);
-      assert.equal($('#pt').textContent,'0 pt');
+      assert.equal($('#pt').textContent,'きょう がんばった 0pt');
       assert.equal($('#records-list').children.length,0);
       assert.ok($('#today').textContent.includes('もういちど'));
       assert.equal(calls.length,1);
@@ -197,7 +196,7 @@ def test_double_tap_and_undo_during_send_restore_doing_in_order():
       assert.equal(jobs.get(jobKey(child,'one')).state,'restored');
       assert.equal($('#records-list').children.length,0);
       assert.ok($('#today').querySelector('.finish'));
-      assert.equal($('#pt').textContent,'0 pt');
+      assert.equal($('#pt').textContent,'きょう がんばった 0pt');
     ''')
 
 
@@ -218,7 +217,7 @@ def test_retry_serialized_and_success_is_reversible_without_timeout():
       replies=[{status:'done'},taskReply([task('one','done')]),weekReply()];
       await Promise.all([flushOutbox(),flushOutbox()]);
       assert.equal(calls.filter(x=>x.options?.method==='POST').length,1);
-      assert.equal($('#pt').textContent,'3 pt');
+      assert.equal($('#pt').textContent,'きょう がんばった 3pt');
       assert.ok($('#today').textContent.includes('きょうのぶん おわったね'));
       assert.ok($('#records-list').textContent.includes('もどす'));
       assert.equal($('#records').open,false);
@@ -239,9 +238,9 @@ def test_child_switch_discards_late_reads_even_when_switching_back():
     run_js('''
       setup();const pending=deferred();replies=[()=>pending.promise];
       const load=loadCards();epoch+=2;
-      $('#pt').textContent='— pt';
+      $('#pt').textContent='きょう がんばった — pt';
       pending.resolve({ok:true,json:async()=>taskReply([task()],999)});await load;
-      assert.equal($('#pt').textContent,'— pt');
+      assert.equal($('#pt').textContent,'きょう がんばった — pt');
       assert.equal(storage.has(CACHE_KEY+':'+child),false);
     ''')
 
@@ -252,7 +251,7 @@ def test_empty_error_and_cache_are_distinct_and_child_scoped():
       assert.ok($('#today').textContent.includes('きょうは やることないよ'));
       replies=[{ok:false}];await loadCards();
       assert.ok($('#load-note').textContent.includes('前にひらいたとき'));
-      assert.equal($('#pt').textContent,'— pt');
+      assert.equal($('#pt').textContent,'きょう がんばった — pt');
       assert.ok(!$('#today').textContent.includes('おわったね'));
       child='上の子';epoch++;replies=[{ok:false}];await loadCards();
       assert.ok($('#load-note').textContent.includes('よみこめなかったよ'));
@@ -321,7 +320,7 @@ def test_appearance_stub_runs_once_after_child_ready_without_changing_chat():
       assert.equal(calls.filter(x=>x.url==='/api/tasks').length,1);
       assert.equal(calls.filter(x=>x.url==='/api/kid/chat').length,0);
       assert.equal($('#child-name').textContent,'下の子');
-      assert.equal($('#pt').textContent,'0 pt');
+      assert.equal($('#pt').textContent,'きょう がんばった 0pt');
     ''')
 
 
@@ -476,7 +475,7 @@ def test_recent_undo_focus_and_recompletion_without_opening_records():
       assert.equal(document.activeElement,$('#today').querySelector('.finish'));
       replies=[{status:'done'},taskReply([task('one','done')]),weekReply()];
       finishCard(task());await new Promise(setImmediate);
-      assert.equal($('#pt').textContent,'3 pt');
+      assert.equal($('#pt').textContent,'きょう がんばった 3pt');
       assert.equal($('#recent-points').textContent,'+3 pt');
       assert.deepEqual(calls.filter(x=>x.options?.method==='POST').map(x=>JSON.parse(x.options.body).status),['done','doing','done']);
     ''')
@@ -542,7 +541,7 @@ def test_undo_while_completion_reads_pending_cannot_restore_success_feedback():
       pending.resolve({ok:true,json:async()=>taskReply([task('one','done')],3)});
       await new Promise(setImmediate);
       assert.equal($('#recent').hidden,true);
-      assert.equal($('#pt').textContent,'0 pt');
+      assert.equal($('#pt').textContent,'きょう がんばった 0pt');
     ''')
 
 
@@ -582,7 +581,7 @@ def test_overlapping_completions_do_not_attribute_combined_points_to_last_item()
       second.resolve({ok:true,json:async()=>({status:'done'})});await new Promise(setImmediate);
       assert.equal($('#recent').dataset.itemId,'two');
       assert.equal($('#recent-points').textContent,'');
-      assert.equal($('#pt').textContent,'6 pt');
+      assert.equal($('#pt').textContent,'きょう がんばった 6pt');
     ''')
 
 
@@ -642,3 +641,46 @@ def test_name_success_is_not_shown_for_an_unsaved_name():
       assert.equal($('#name-status').textContent,'まだ おぼえていないよ。「このなまえにする」を おしてね。');
       assert.equal(savedName,'もも');
     ''')
+
+
+def test_points_label_initial():
+    attrs = next(attrs for _, attrs in DOC.tags if attrs.get('id') == 'pt')
+    assert attrs['href'] == '/reward'
+    assert attrs['aria-label'] == 'きょう がんばった —ポイント。ごほうびを みる'
+    assert re.search(r'id="pt"[^>]*>きょう がんばった — pt</a>', HTML)
+
+
+def test_points_label_loading_on_child_switch():
+    run_js('''
+      setup();replies=[taskReply([],12)];await loadCards();
+      const slow=deferred();
+      replies=[()=>slow.promise,()=>slow.promise,()=>slow.promise];
+      $('#child').value='上の子';showChild();
+      assert.equal($('#pt').textContent,'きょう がんばった — pt');
+      assert.equal($('#pt').attrs['aria-label'],'きょう がんばった —ポイント。ごほうびを みる');
+      slow.resolve({ok:false});await new Promise(setImmediate);
+    ''')
+
+
+@pytest.mark.parametrize('points', [0, 12, None])
+def test_points_label_loaded(points):
+    expected = '—' if points is None else str(points)
+    visible = expected + (' pt' if points is None else 'pt')
+    run_js('''
+      setup();replies=[taskReply([],POINTS)];await loadCards();
+      assert.equal($('#pt').textContent,VISIBLE);
+      assert.equal($('#pt').attrs['aria-label'],NAME);
+    '''.replace('POINTS', json.dumps(points))
+           .replace('VISIBLE', json.dumps('きょう がんばった ' + visible))
+           .replace('NAME', json.dumps('きょう がんばった ' + expected + 'ポイント。ごほうびを みる')))
+
+
+@pytest.mark.parametrize('cached', [False, True])
+def test_points_label_failed(cached):
+    run_js('''
+      setup();
+      if(CACHED){replies=[taskReply([],12)];await loadCards();}
+      replies=[{ok:false}];await loadCards();
+      assert.equal($('#pt').textContent,'きょう がんばった — pt');
+      assert.equal($('#pt').attrs['aria-label'],'きょう がんばった —ポイント。ごほうびを みる');
+    '''.replace('CACHED', json.dumps(cached)))
