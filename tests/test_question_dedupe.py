@@ -79,7 +79,7 @@ def test_different_date_text_keeps_question(capture, child, registered):
     if registered:
         assert client().post(f"/api/date_questions/{records()[0]['id']}/register",
                              json={"date": "2026-12-09"}).status_code == 200
-    result = capture(c, [question(date_text="来月の最終金曜日まで")])
+    result = capture(c, [question(date_text="再来週の水曜日まで")])
     assert result["date_questions_count"] == 1
     assert result["skipped"] == 0
     assert len(records()) == 2
@@ -128,7 +128,7 @@ def test_nfkc_date_text_and_calendar_failure(monkeypatch, state):
     assert len(records()) == 1
     assert result["count"] == int(state == "waiting")
     assert len(result["skipped_titles"]) == int(state == "registered")
-    assert dates.enqueue([question(date_text="１月下旬")])["count"] == 1
+    assert dates.enqueue([question(date_text="１月中旬")])["count"] == 1
 
 
 def test_dismissed_question_can_be_asked_again():
@@ -144,7 +144,7 @@ def test_confirmed_without_calendar_id_keeps_other_date_text():
     dates.change(row["id"], "register", "2026-12-09")
     calendar_tools.create_events([question(date="2026-12-09")])
     dates.change(row["id"], "confirmed")
-    dates.enqueue([question(date_text="来月の最終金曜日まで")])
+    dates.enqueue([question(date_text="再来週の水曜日まで")])
     assert len(records()) == 2 and len(events()) == 1
 
 
@@ -248,4 +248,50 @@ def test_fuzzy_normalizes_existing_title_and_date_supplements():
     dates.enqueue([question(title="はちまき【黒い布】準備", date_text="今週の金曜日まで（朝に提出）")])
     original = records()
     assert dates.enqueue([question(title="はちまき持参", date_text=" 今週の 金曜日までに ")])["count"] == 1
+    assert records() == original
+
+
+@pytest.mark.parametrize("state", ["waiting", "registering", "registered", "answered"])
+@pytest.mark.parametrize("old_date,new_date", [
+    ("来週の水曜日まで", "再来週の水曜日まで"),
+    ("12月中旬", "1月中旬"),
+    ("運動会の前週の水曜日まで", "運動会の翌週の水曜日まで"),
+    ("来週の水曜日まで", "来週の木曜日まで"),
+    ("来週の提出日(水)まで", "来週の提出日(木)まで"),
+    ("来週の提出日(水)まで", "来週の提出日まで"),
+    ("12月中旬までに提出", "12月下旬までに提出"),
+    ("12月末までに提出", "12月初までに提出"),
+    ("運動会の前日までに提出", "運動会の前々日までに提出"),
+    ("運動会の翌日までに提出", "運動会の翌々日までに提出"),
+    ("提出予定日(12月中旬)", "提出予定日(1月中旬)"),
+])
+def test_date_anchors_keep_separate_questions(state, old_date, new_date):
+    dates.enqueue([question(date_text=old_date)])
+    ledger.transact_setting(dates.KEY, lambda rows: [dict(r, state=state) for r in rows])
+    original = records()[0]
+    assert dates.enqueue([question(date_text=new_date)]) == {"count": 1, "skipped_titles": []}
+    assert len(records()) == 2 and records()[0] == original
+    assert records()[1]["date_text"] == new_date
+
+
+@pytest.mark.parametrize("old_date,new_date", [
+    ("来週の提出日(水)まで", "来週の提出日(木)まで"),
+    ("提出予定日(12月中旬)", "提出予定日(1月中旬)"),
+])
+def test_batch_keeps_different_date_anchors(old_date, new_date):
+    assert dates.enqueue([question(date_text=old_date), question(date_text=new_date)]) == {
+        "count": 2, "skipped_titles": []}
+    assert [r["date_text"] for r in records()] == [old_date, new_date]
+
+
+@pytest.mark.parametrize("old_date,new_date", [
+    ("来週の提出日（水）まで", "来週の提出日(水曜)までに"),
+    ("来週の水曜日まで", "来週の水曜までに"),
+    ("運動会の前週の木曜日 午前中", "運動会の前週の木曜日"),
+    ("１２月中旬ごろ", "12月中旬ごろまで"),
+])
+def test_date_anchor_spelling_variations(old_date, new_date):
+    dates.enqueue([question(date_text=old_date)])
+    original = records()
+    assert dates.enqueue([question(date_text=new_date)]) == {"count": 1, "skipped_titles": []}
     assert records() == original

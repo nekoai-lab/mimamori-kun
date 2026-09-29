@@ -37,18 +37,50 @@ def _question_norm(text):
     return dedupe.norm("".join(char for index, char in enumerate(text) if index not in removed))
 
 
+# 長い語を先に取り、再来週を来週、翌々日を翌日として扱わない。
+_DATE_WORDS = (
+    "今日", "本日", "明日", "明後日", "あさって", "昨日", "一昨日",
+    "今週", "来週", "再来週", "翌週", "前週", "先週",
+    "今月", "来月", "再来月", "翌月", "前月", "先月",
+    "今年", "来年", "再来年", "翌年", "前年", "昨年",
+    "前日", "翌日", "翌々日", "当日", "前々日",
+    "上旬", "中旬", "下旬", "初旬", "末", "月末", "月初",
+)
+_DATE_ANCHORS = re.compile(
+    r"(?P<number>[0-9]+)|(?P<word>"
+    + "|".join(sorted(_DATE_WORDS, key=len, reverse=True))
+    + r")|(?P<weekday>[月火水木金土日])曜日?|\(\s*(?P<paren>[月火水木金土日])(?:曜日?)?\s*\)"
+)
+
+
+def _date_anchors(text):
+    """補足を消す前の原文から日付の決め手を順に保持する。時刻の数字も含む。"""
+    text = unicodedata.normalize("NFKC", text or "")
+    anchors = []
+    for match in _DATE_ANCHORS.finditer(text):
+        number, word, weekday, paren = match.groups()
+        anchors.append(("number", number) if number is not None else
+                       ("word", word) if word is not None else
+                       ("weekday", weekday or paren))
+    return tuple(anchors)
+
+
 def _question_matches(candidates, rows):
     """読み取り開始時の記録だけに、件名完全一致→類似度順で1対1に割り当てる。"""
-    keys = [(_question_norm(r.get("title")), _question_norm(r.get("date_text")))
+    keys = [(_question_norm(r.get("title")), _question_norm(r.get("date_text")),
+             _date_anchors(r.get("date_text")))
             for r in rows]
     edges = []
     for i, item in enumerate(candidates):
         title, text = _question_norm(item.get("title")), _question_norm(item.get("date_text"))
+        anchors = _date_anchors(item.get("date_text"))
         for j, row in enumerate(rows):
             if (row.get("child") != item.get("child") or
                     row["state"] not in ("waiting", "registering", "answered", "registered")):
                 continue
-            old_title, old_text = keys[j]
+            old_title, old_text, old_anchors = keys[j]
+            if anchors != old_anchors:
+                continue
             title_score = dedupe.similarity(title, old_title)
             date_score = dedupe.similarity(text, old_text)
             if title_score >= QUESTION_TITLE_RATIO and date_score >= QUESTION_DATE_RATIO:
@@ -159,7 +191,7 @@ def enqueue(items):
     unique = {}
     for item in candidates:
         key = (item.get("child"), _question_norm(item.get("title")),
-               _question_norm(item.get("date_text")))
+               _question_norm(item.get("date_text")), _date_anchors(item.get("date_text")))
         unique.setdefault(key, item)
     candidates = list(unique.values())
     outcome = {}
