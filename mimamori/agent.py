@@ -61,9 +61,7 @@ low_confidence: 手書き・かすれ・ぼけで日付を確信できない。
 1. 画像を丁寧に読む。日付、提出期限、持ち物、集合時刻、金額を落とさない。
 2. カレンダーに載せる価値のあるものだけを items にする。
    挨拶文、校長のコラム、一般的な注意書きは載せない。
-3. プリント中の日付の表現（相対・曜日だけ・月末などを含む）をすべて date_mentions に列挙する。
-   text に表現そのもの、context にその表現を含む原文の文を写す。items にあるものも列挙する。
-4. 最終出力は JSON のみ。既存予定との照合は後でシステムが行う。
+3. 最終出力は JSON のみ。既存予定との照合は後でシステムが行う。
 
 # 学校PCの「れんらくちょう」画面（毎日のもの）
 次の形をしていたら、1日ぶんの連絡です。実物で確かめた読み方に従うこと。
@@ -99,7 +97,6 @@ low_confidence: 手書き・かすれ・ぼけで日付を確信できない。
 # 出力する JSON の形
 {{
   "summary": "このおたよりが何だったか1〜2文",
-  "date_mentions": [{{"text": "明後日の学活", "context": "学級Tシャツの採寸を、明後日の学活で行います"}}],
   "items": [
     {{
       "kind": "event|deadline|homework|bring",
@@ -271,29 +268,6 @@ def closed_items(text: str) -> List[Dict[str, Any]]:
         return out
 
 
-def _uncovered_dates(parsed: Extraction, child=None):
-    # 重複照合で除外された予定も含め、モデルが読んだ全項目と比べる。
-    fields = ("date_text", "source_text", "title", "note")
-    covered = [getattr(item, field) for item in parsed.items for field in fields]
-    seen = set()
-    normalized = [item.model_dump() for item in parsed.items]
-    for item in normalized:
-        _normalize_child(item, child)
-    names = {item["child"] for item in normalized}
-    inferred = next(iter(names)) if len(names) == 1 else "不明"
-    for mention in parsed.date_mentions:
-        text = mention.text.strip()
-        if not text or text in seen or any(text in value for value in covered):
-            continue
-        seen.add(text)
-        context = mention.context.strip() or text
-        item = Item(kind="event", title=context[:60], child=child or inferred,
-                    date_text=text, source_text=context,
-                    date_issues=["uncovered"], needs_review=True).model_dump()
-        _normalize_child(item, child)
-        yield ambiguous_dates.check(item, require_text=True)
-
-
 READ_TIMEOUT_SECONDS = 25.0
 
 
@@ -391,9 +365,6 @@ async def _stream_otayori(image_bytes: bytes, mime_type: str, hint: str = "",
                     )
                     yield {"type": "reset"}
                     continue
-                for item in _uncovered_dates(parsed, child):
-                    out["date_questions"].append(item)
-                    yield {"type": "question", "item": item}
                 out["summary"] = parsed.summary
                 retry_result = "success"
                 yield {"type": "done", **out}

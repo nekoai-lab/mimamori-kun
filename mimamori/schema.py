@@ -31,7 +31,7 @@ class Item(BaseModel):
     school_level: str = Field(default="unknown", description="elementary / junior_high / unknown")
     date: Optional[str] = Field(default=None, description="明確な場合だけ YYYY-MM-DD。あいまいなら null")
     date_text: str = Field(default="", description="原文の日付表現をそのまま。曜日・年・予備日も残す")
-    date_issues: List[Literal["relative", "no_month", "year_cross", "weekday_mismatch", "vague", "undecided", "multiple", "recurring", "low_confidence", "uncovered"]] = Field(default_factory=list)
+    date_issues: List[Literal["relative", "no_month", "year_cross", "weekday_mismatch", "vague", "undecided", "multiple", "recurring", "low_confidence"]] = Field(default_factory=list)
     date_is_range: bool = Field(default=False, description="期間なら true。日付を作らず期間であることだけ残す")
     end_date: Optional[str] = Field(default=None, description="複数日にまたがる場合の最終日 YYYY-MM-DD")
     time_start: Optional[str] = Field(default=None, description="HH:MM。終日なら null")
@@ -46,12 +46,6 @@ class Item(BaseModel):
     )
 
 
-class DateMention(BaseModel):
-    text: str = ""
-    context: str = ""
-
-
 class Extraction(BaseModel):
     summary: str = Field(description="このおたよりが何だったか、1〜2文")
     items: List[Item] = Field(default_factory=list)
-    date_mentions: List[DateMention] = Field(default_factory=list, description="プリント中の日付表現すべて。相対・曜日だけ・月末も含める")

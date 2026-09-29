@@ -8,52 +8,9 @@ import pytest
 from google.genai import errors
 
 import main
-from mimamori import agent, auth, ambiguous_dates
+from mimamori import agent, auth
 from test_extract_retry import fake_runner
 from test_extract_stream import api, post, item
-
-
-@pytest.mark.parametrize('child', [None, '下の子'])
-def test_missing_mentions_question_before_done_and_persisted(api, fake_runner, monkeypatch, child):
-    monkeypatch.setattr(main, '_user', lambda r: child or auth.PARENT)
-    fake_runner.replies = [json.dumps(dict(summary='', items=[], date_mentions=[
-        dict(text='明後日の学活', context='学級Tシャツの採寸を、明後日の学活で行います'),
-        dict(text='今週の金曜日まで', context='今週の金曜日までにはちまきを持参'),
-        dict(text='明後日の学活', context='同じ表現'),
-    ]))]
-    events = post(api)
-    assert [e['type'] for e in events] == ['received', 'reading', 'question', 'question', 'done']
-    rows = ambiguous_dates.pending()
-    assert len(rows) == events[-1]['date_questions_count'] == 2
-    assert rows[0]['date_text'] == '明後日の学活'
-    assert rows[0]['title'] == '学級Tシャツの採寸を、明後日の学活で行います'
-    for row, event in zip(rows, events[2:]):
-        assert set(row['date_issues']) >= {'uncovered', 'relative'}
-        assert row['date'] is None and row['needs_review']
-        assert row['child'] == (child or '不明') == event['item']['child']
-    monkeypatch.setattr(main, '_user', lambda r: auth.PARENT)
-    assert api.post('/api/date_questions/'+rows[0]['id']+'/dismiss').status_code == 200
-    assert len(ambiguous_dates.pending()) == 1
-
-
-@pytest.mark.parametrize('field', ['date_text', 'source_text', 'title', 'note'])
-def test_covered_mentions_even_if_deduped_not_added(fake_runner, monkeypatch, field):
-    monkeypatch.setattr(agent, '_review', lambda items, child: dict(items=[], skipped=1, skipped_titles=[]))
-    raw = {**item(), field:'明後日の学活'}
-    fake_runner.replies = [json.dumps(dict(summary='', items=[raw], date_mentions=[
-        dict(text='明後日の学活', context='採寸を行います'),
-        dict(text='来週の学活', context='配布します')]))]
-    out = asyncio.run(agent.read_otayori(b'fake', 'image/png'))
-    missing = [r for r in out['date_questions'] if 'uncovered' in r['date_issues']]
-    assert [r['date_text'] for r in missing] == ['来週の学活']
-
-
-@pytest.mark.parametrize('mentions', [[], [{'text':'','context':'何か'}], [{'text':'  ','context':''}]])
-def test_empty_mentions_noop(fake_runner, mentions):
-    fake_runner.replies = [json.dumps(dict(summary='', items=[], date_mentions=mentions))]
-    out = asyncio.run(agent.read_otayori(b'fake', 'image/png'))
-    assert out['items'] == out['date_questions'] == []
-    assert 'date_mentions' in fake_runner.calls[0]['config'].response_schema.model_fields
 
 
 @pytest.mark.parametrize('waiting', [False, True])
@@ -71,13 +28,24 @@ def test_normalized_stream_event_and_done(fake_runner, monkeypatch, waiting):
     assert events[-1]['date_questions' if waiting else 'items'] == [events[1]['item']]
 
 
-def test_sdk_limits_and_prompt(fake_runner):
+def test_sdk_limits(fake_runner):
     fake_runner.replies = [json.dumps(dict(summary='', items=[]))]
     asyncio.run(agent.read_otayori(b'fake', 'image/png'))
     cfg = fake_runner.calls[0]['config']
     assert cfg.http_options.timeout == 20000
     assert cfg.http_options.retry_options.attempts == 1
-    assert 'すべて date_mentions に列挙' in cfg.system_instruction
+
+
+def test_extraction_prompt_and_schema_without_date_enumeration(fake_runner):
+    fake_runner.replies = [json.dumps(dict(summary='', items=[]))]
+    asyncio.run(agent.read_otayori(b'fake', 'image/png'))
+    call = fake_runner.calls[0]
+    cfg = call['config']
+    prompt = cfg.system_instruction + call['contents'].parts[1].text
+    assert 'date_mentions' not in prompt
+    assert '列挙' not in prompt
+    assert 'date_mentions' not in cfg.response_schema.model_json_schema()['properties']
+    assert agent.AMBIGUOUS_PROMPT in prompt
 
 
 @pytest.mark.parametrize('kind', ['429', '503', 'timeout', 'httpx'])
@@ -160,15 +128,3 @@ def test_hanging_call_cancelled_with_fake_wait(monkeypatch):
     asyncio.run(consume())
     assert len(waits) == 2 and all(0 < n <= 25 for n in waits)
     assert closed == [True]
-
-
-@pytest.mark.parametrize('text,issue', [('金曜日', 'no_month'), ('月末まで', 'vague'), ('毎週金曜日', 'recurring')])
-def test_uncovered_adds_other_reasons_and_normalizes_owner(fake_runner, monkeypatch, text, issue):
-    monkeypatch.setattr(agent, '_review', lambda items, child: dict(items=items, skipped=0, skipped_titles=[]))
-    fake_runner.replies = [json.dumps(dict(summary='', items=[{**item(), 'child':'unknown', 'school_level':'elementary'}],
-        date_mentions=[dict(text=text, context='長い文'*30)]))]
-    result = asyncio.run(agent.read_otayori(b'fake', 'image/png'))
-    row = result['date_questions'][0]
-    assert set(row['date_issues']) >= {'uncovered', issue}
-    assert len(row['title']) == 60 and row['source_text'] == '長い文'*30
-    assert row['child'] == '下の子'

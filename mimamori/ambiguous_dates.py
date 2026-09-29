@@ -12,7 +12,7 @@ from .config import config
 KEY = "date_questions"
 JST = dt.timezone(dt.timedelta(hours=9))
 ISSUES = ("relative", "no_month", "year_cross", "weekday_mismatch", "vague",
-          "undecided", "multiple", "recurring", "low_confidence", "uncovered")
+          "undecided", "multiple", "recurring", "low_confidence")
 
 
 def now():
@@ -84,7 +84,7 @@ def check(item, today=None, *, require_text=False):
                         issues.add("weekday_mismatch")
                 except ValueError:
                     issues.add("low_confidence")
-    elif text and not (issues - {"uncovered"}):
+    elif text and not issues:
         issues.add("no_month")
     item["date_text"] = item.get("date_text") or original
     item["date_issues"] = [i for i in ISSUES if i in issues]
