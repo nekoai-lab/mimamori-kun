@@ -6,7 +6,7 @@ import re
 import unicodedata
 import uuid
 
-from . import ledger, notify
+from . import calendar_tools, dedupe, ledger, notify
 from .config import config
 
 KEY = "date_questions"
@@ -95,12 +95,62 @@ def check(item, today=None, *, require_text=False):
 
 
 def enqueue(items):
+    """同じ質問の照合と追加を同一トランザクションで行う。"""
+    if not items:
+        return {"count": 0, "skipped_titles": []}
+    today = now().date()
+    try:
+        # 日付を推測できないので、前後1年の既存予定を照合する。
+        existing = calendar_tools.list_raw(
+            (today - dt.timedelta(days=365)).isoformat(),
+            (today + dt.timedelta(days=365)).isoformat())
+    except Exception:  # 読めなければ質問を残す。台帳との照合は続ける。
+        existing = []
     stamp = now().isoformat()
-    rows = [dict(i, id=uuid.uuid4().hex, created_at=stamp, state="waiting", reminded_at=None)
-            for i in items]
-    if rows:
-        ledger.transact_setting(KEY, lambda old: (old or []) + rows)
-    return len(rows)
+    candidates = [dict(i, id=uuid.uuid4().hex, created_at=stamp, state="waiting", reminded_at=None)
+                  for i in items]
+    outcome = {}
+
+    def add(old):
+        rows = list(old or [])
+        count, skipped = 0, []
+        for item in candidates:
+            title = dedupe.norm(item.get("title", ""))
+            child = item.get("child")
+            text = unicodedata.normalize("NFKC", item.get("date_text") or "")
+            related = [r for r in rows if r.get("child") == child
+                       and dedupe.norm(r.get("title", "")) == title]
+            same = [r for r in related if
+                    unicodedata.normalize("NFKC", r.get("date_text") or "") == text]
+            if any(r["state"] in ("answered", "registered") for r in same):
+                skipped.append(item.get("title", ""))
+                continue
+            if any(r["state"] in ("waiting", "registering") for r in same):
+                continue
+            # 原文が違うと分かる登録済み予定を、件名だけの照合で拾い直さない。
+            other_rows = [r for r in related
+                          if r["state"] in ("answered", "registered", "registering")
+                          and unicodedata.normalize("NFKC", r.get("date_text") or "") != text]
+            other_ids = {result["id"] for r in other_rows
+                         for result in (r.get("result") or {}).get("results", [])
+                         if result.get("id")}
+            # 通信結果不明→親の確認済みでは Calendar id が残らない。
+            other_dates = {r["chosen_date"] for r in other_rows if r.get("chosen_date")
+                           and not any(v.get("id") for v in (r.get("result") or {}).get("results", []))}
+            if title and child in [c["name"] for c in config.children] and any(
+                    ev.get("child") == child and dedupe.norm(ev.get("summary", "")) == title
+                    and ev.get("id") not in other_ids and ev.get("date") not in other_dates
+                    for ev in existing):
+                skipped.append(item.get("title", ""))
+                continue
+            rows.append(item)
+            count += 1
+        # Firestore の再試行ごとに結果を置き換える（加算しない）。
+        outcome.update(count=count, skipped_titles=skipped)
+        return rows
+
+    ledger.transact_setting(KEY, add)
+    return outcome
 
 
 def pending():

@@ -498,9 +498,12 @@ def _finish_extract(result, user):
     if not auth.is_parent(user):
         waiting = [dict(i, child=user) for i in waiting]
     result["items"] = candidates
-    count = ambiguous_dates.enqueue(waiting)
-    if count:
-        result["date_questions_count"] = count
+    queued = ambiguous_dates.enqueue(waiting)
+    if queued["count"]:
+        result["date_questions_count"] = queued["count"]
+    if queued["skipped_titles"]:
+        result["skipped"] = result.get("skipped", 0) + len(queued["skipped_titles"])
+        result["skipped_titles"] = result.get("skipped_titles", []) + queued["skipped_titles"]
     return result
 
 
