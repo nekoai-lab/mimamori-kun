@@ -1035,9 +1035,17 @@ $("#notice").addEventListener("click",onNotice);
 $("#systemNotices").addEventListener("click",onNotice);
 // 日付を推測しない。選択はメモリ内だけで、最後の登録操作まで送信しない。
 const dateDrafts=new Map();
+function dateQuestionTitle(row){
+  const prefix=row.child+'｜';
+  return row.title.startsWith(prefix)?row.title.slice(prefix.length):row.title;
+}
+function dateYearLabel(year,separator=''){
+  return Number(year)===Number(data.today.slice(0,4))?'':year+'年'+separator;
+}
+function dateMonthLabel(year,month){return dateYearLabel(year,' ')+month+'月';}
 function dateLabel(value){
   const d=new Date(value+'T12:00:00+09:00');
-  return value.slice(0,4)+'年'+Number(value.slice(5,7))+'月'+Number(value.slice(8))+'日（'+
+  return dateYearLabel(value.slice(0,4))+Number(value.slice(5,7))+'月'+Number(value.slice(8))+'日（'+
     new Intl.DateTimeFormat('ja-JP',{weekday:'short',timeZone:'Asia/Tokyo'}).format(d)+'）';
 }
 function dateMonths(today){
@@ -1050,22 +1058,22 @@ function renderDateQuestions(){
   $('#dateQuestions').innerHTML=rows.map(row=>{
     const d=dateDrafts.get(row.id)||{step:'month',part:'start'};
     const button=(action,label,extra='')=>'<button type="button" data-date-action="'+action+'" '+extra+(d.busy?' disabled':'')+'>'+label+'</button>';
-    let h='<article class="date-question" data-date-id="'+esc(row.id)+'"><h3>'+esc(row.title)+'</h3><p>'+esc(row.child)+'</p>'+
+    let h='<article class="date-question" data-date-id="'+esc(row.id)+'"><h3>'+esc(dateQuestionTitle(row))+'</h3><p>'+esc(row.child)+'</p>'+
       '<p>プリントには「'+esc(row.date_text)+'」とあるよ。何月何日？</p>';
     if(row.state==='registering') return h+'<p role="status">登録結果を確認できません。カレンダーを確認してください。二重登録を避けるため再送を止めています。</p></article>';
     if(d.step==='summary'){
-      h+='<p>'+esc(row.title)+' '+dateLabel(d.start)+(d.end?' 〜 '+dateLabel(d.end):'')+' '+esc(row.child)+'　これで とうろくする？</p>'+
+      h+='<p>'+esc(dateQuestionTitle(row))+' '+dateLabel(d.start)+(d.end?' 〜 '+dateLabel(d.end):'')+' '+esc(row.child)+'　これで とうろくする？</p>'+
         button('register','とうろくする')+button('reset','なおす');
     }else if(d.step==='confirm'){
       h+='<p>'+dateLabel(d.choice)+'で いい？</p>'+button('ok','これでOK')+button('reselect','えらびなおす');
     }else{
       if(row.date_is_range) h+='<p>'+(d.part==='end'?'いつまで':'いつから')+'</p>';
       if(d.step==='day'){
-        h+='<p>'+d.year+'年'+d.month+'月</p><div class="date-days">';
+        h+='<p>'+dateMonthLabel(d.year,d.month)+'</p><div class="date-days">';
         for(let day=1;day<=31;day++) h+=button('day',day,'data-day="'+day+'" aria-label="'+day+'日"'+(day>dateDays(d.year,d.month)?' disabled':''));
         h+='</div>'+button('reselect','月をえらびなおす');
       }else{
-        h+='<div class="date-months">'+dateMonths(data.today).map(m=>button('month',m.year+'年 '+m.month+'月','data-year="'+m.year+'" data-month="'+m.month+'"')).join('')+'</div>';
+        h+='<div class="date-months">'+dateMonths(data.today).map(m=>button('month',dateMonthLabel(m.year,m.month),'data-year="'+m.year+'" data-month="'+m.month+'"')).join('')+'</div>';
       }
     }
     h+='<div class="date-actions">'+button('later','あとで確認する')+button('dismiss','とうろくしない')+'</div>';

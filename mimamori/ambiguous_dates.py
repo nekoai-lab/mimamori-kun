@@ -151,7 +151,9 @@ def remind():
     due = [r for r in rows if r.get("reminder_token") == token]
     if due:
         first = due[0]
+        # 保存・Calendar 用の件名はそのまま、表示時だけ子の接頭辞を外す。
+        title = first["title"].removeprefix(first["child"] + "｜")
         prefix = f"日付の確認待ちが{len(due)}件あります。" if len(due) > 1 else ""
         notify.add("date_question", "日付の確認が 3日 のこっています",
-                   prefix + f"『{first['title']}』（プリントの表記：『{first['date_text']}』）の日付が決まっていません。"
+                   prefix + f"『{title}』（{first['child']}、プリントの表記：『{first['date_text']}』）の日付が決まっていません。"
                    "みまもりくんの『確認すること』から日付を選んでください。")

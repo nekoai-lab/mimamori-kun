@@ -198,3 +198,20 @@ def test_unknown_calendar_result_does_not_retry(monkeypatch):
     assert c.post(f"/api/date_questions/{id_}/register", json={"date": "2026-12-12"}).status_code == 502
     assert c.post(f"/api/date_questions/{id_}/register", json={"date": "2026-12-12"}).status_code == 409
     assert len(calls) == 1 and dates.pending()[0]["state"] == "registering"
+
+
+@pytest.mark.parametrize("title,display_title", [
+    ("下の子｜運動会", "運動会"), ("運動会", "運動会"), ("運動会｜集合", "運動会｜集合"),
+])
+def test_reminder_display_title_and_child_preserve_saved_calendar_title(title, display_title, monkeypatch):
+    c = client()
+    id_ = queued(c, monkeypatch, title=title, child="下の子")
+    monkeypatch.setattr(dates, "now", lambda: TODAY + dt.timedelta(days=3))
+    c.get("/api/notices")
+    assert notify.notices()[0]["body"] == (
+        f"『{display_title}』（下の子、プリントの表記：『再来週の土曜日』）の日付が決まっていません。"
+        "みまもりくんの『確認すること』から日付を選んでください。"
+    )
+    assert dates.pending()[0]["title"] == title
+    assert c.post(f"/api/date_questions/{id_}/register", json={"date": "2026-12-12"}).status_code == 200
+    assert any(r["summary"] == title for r in calendar_tools._demo_store)
