@@ -23,6 +23,8 @@ from mimamori import ledger
 from mimamori.kid_agent import talk
 from mimamori.calendar_tools import (
     create_events,
+    validate_updates,
+    undo_update,
     event_meta,
     list_events,
     list_raw,
@@ -440,13 +442,17 @@ def register(req: RegisterRequest, request: Request):
         # 子どもは自分のぶんだけ入れられる。「子が入れた」として親に知らせる。保留にはできない
         for i in req.items:
             if i.get("child") not in (None, "", "不明", user):
-                raise HTTPException(403, "自分のぶんだけ入れられます。")
+                raise HTTPException(400 if i.get("branch") in ("moved", "diff") else 403,
+                                    "自分のぶんだけ入れられます。")
         req.items = [dict(i, child=user) for i in req.items]
         req.source, req.pending = "kid", False
     kid = req.source == "kid"
     items = [dict(i, source=("kid" if kid else "parent")) for i in req.items]
     try:
-        results = create_events(items, "pending" if req.pending else "todo")
+        validate_updates(items)
+        results = create_events(items, "pending" if req.pending else "todo", actor=user)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"カレンダー登録に失敗しました: {e}") from e
 
@@ -518,10 +524,15 @@ def api_register_undo(req: UndoRequest, request: Request):
     if len(req.ids) > 60:
         raise HTTPException(400, "一度に取り消せるのは60件までです。")
     for eid in req.ids:
-        _child_can_undo(request, eid)
+        if not eid.startswith("update:"):
+            _child_can_undo(request, eid)
     done, failed = 0, []
     for eid in req.ids:
         try:
+            if eid.startswith("update:"):
+                undo_update(eid, _user(request), auth.is_parent(_user(request)))
+                done += 1
+                continue
             r = set_status(eid, "rejected")
             if r.get("status") == "error":
                 failed.append(eid)
@@ -1153,6 +1164,7 @@ def api_redeem_list(request: Request, child: str = "", status: str = ""):
 
 
 class RedeemRequest(BaseModel):
+    request_key: Optional[str] = None
     child: str
     label: str
     cost: int
@@ -1163,16 +1175,10 @@ class RedeemRequest(BaseModel):
 def api_redeem_request(req: RedeemRequest, request: Request):
     """子が申し込む。**ここでポイントを引く**（断られたら戻る）。"""
     req.child = _self(request, req.child)
-    if not auth.is_parent(_user(request)):
-        # 子どもの申し込みは、**親が決めた交換リストに、名前・ポイント・金額がそろって一致するもの**だけ（#16）。
-        # 値段を書き換えれば一致しないので断る。同じ名前で値段の違うものがあっても、選んだものの値段のまま。
-        def price(r):
-            return int(r.get("points") or r.get("cost") or 0), int(r.get("yen") or 0)
-        if not any(r.get("label") == req.label and price(r) == (int(req.cost), int(req.yen or 0))
-                   for r in points_mod.get_rewards()):
-            raise HTTPException(400, "交換できるものの中から選んでください。")
     try:
-        row = redeem_mod.request(req.child, req.label, req.cost, req.yen)
+        row = redeem_mod.request(
+            req.child, req.label, req.cost, req.yen, request_key=req.request_key,
+            allowed_rewards=None if auth.is_parent(_user(request)) else points_mod.get_rewards())
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     try:

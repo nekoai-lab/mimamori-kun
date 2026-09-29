@@ -2,7 +2,7 @@
 
 新しいDBは作らない。予定の extendedProperties.private に
 「誰の・種別・状態・ポイント」を持たせ、ダッシュボードはそれを読むだけ。
-カレンダー側で人が手で直しても整合が壊れない。
+ポイントの加点・取消は set_status を通して行う。
 
 認証は Application Default Credentials。
 Cloud Run では実行サービスアカウントがそのまま使われるので鍵ファイルは不要。
@@ -11,10 +11,12 @@ Cloud Run では実行サービスアカウントがそのまま使われるの�
 """
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import os
 import uuid
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from .config import config
 
@@ -129,24 +131,24 @@ def event_owner(event_id: str) -> Optional[str]:
     return meta["child"] if meta else None
 
 
-def _raw(start_date: str, end_date: str) -> List[Dict[str, Any]]:
+def _raw(start_date: str, end_date: str, completed_on: str = "") -> List[Dict[str, Any]]:
     tmin = f"{start_date}T00:00:00+09:00"
     tmax = (dt.date.fromisoformat(end_date) + dt.timedelta(days=1)).isoformat() + "T00:00:00+09:00"
-    res = (
-        _svc()
-        .events()
-        .list(
-            calendarId=config.calendar_id,
-            timeMin=tmin,
-            timeMax=tmax,
-            singleEvents=True,
-            orderBy="startTime",
-            maxResults=250,
-        )
-        .execute()
-    )
+    params = dict(calendarId=config.calendar_id, singleEvents=True, maxResults=250)
+    if completed_on:
+        # 予定日とは独立に検索する。遠い過去・未来の完了も今日の実績に含む。
+        params["privateExtendedProperty"] = f"done_date={completed_on}"
+    else:
+        params.update(timeMin=tmin, timeMax=tmax, orderBy="startTime")
+    events = []
+    while True:
+        res = _svc().events().list(**params).execute()
+        events.extend(res.get("items", []))
+        if not res.get("nextPageToken"):
+            break
+        params["pageToken"] = res["nextPageToken"]
     out = []
-    for ev in res.get("items", []):
+    for ev in events:
         st = ev.get("start", {})
         priv = (ev.get("extendedProperties") or {}).get("private") or {}
         out.append(
@@ -161,6 +163,7 @@ def _raw(start_date: str, end_date: str) -> List[Dict[str, Any]]:
                 "child": priv.get("child", ""),
                 "kind": priv.get("kind", ""),
                 "status": priv.get("status", "todo"),
+                "done_at": priv.get("done_at") or "",
                 "batch": priv.get("batch", ""),
                 "source": priv.get("source", "parent"),
                 "minutes": int(priv.get("minutes") or 0) or _MINUTES.get(priv.get("kind", ""), 10),
@@ -181,6 +184,13 @@ OVERDUE_DAYS = 14
 _KIND_ORDER = {"deadline": 0, "bring": 1, "homework": 2, "event": 3}
 
 
+def _done_today(item: Dict[str, Any], today: dt.date) -> bool:
+    if item.get("status") != "done" or not item.get("done_at"):
+        return False
+    return dt.datetime.fromisoformat(item["done_at"]).astimezone(
+        dt.timezone(dt.timedelta(hours=9))).date() == today
+
+
 def list_tasks(days: int = 14) -> Dict[str, Any]:
     """ダッシュボード用。今日から days 日ぶんを、子ども別・状態別に整えて返す。"""
     today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
@@ -191,9 +201,11 @@ def list_tasks(days: int = 14) -> Dict[str, Any]:
         items = _demo_state(today)
     else:
         items = [e for e in _raw(start.isoformat(), end.isoformat()) if e["mine"]]
-        # 過去まで遡るのは、やり残しを見つけるため。済んだものまで持ってくると
-        # ポイント合計が膨らみ、「済」も伸びる。過去は未完了だけ拾う。
-        items = [e for e in items if e["date"] >= today.isoformat() or e["status"] != "done"]
+        completed = _raw(start.isoformat(), end.isoformat(), completed_on=today.isoformat())
+        items = list({e["id"]: e for e in items + completed if e["mine"]}.values())
+
+    items = [e for e in items if e["date"] >= today.isoformat()
+             or e["status"] != "done" or _done_today(e, today)]
 
     # 親が「けす」を押したものは、記録としてカレンダーには残すが画面には出さない。
     items = [e for e in items if e["status"] != "rejected"]
@@ -208,7 +220,7 @@ def list_tasks(days: int = 14) -> Dict[str, Any]:
     for c in config.children:
         points[c["name"]] = 0
     for e in items:
-        if e["status"] == "done":
+        if _done_today(e, today):
             points[e["child"]] = points.get(e["child"], 0) + e["points"]
 
     return {
@@ -223,9 +235,9 @@ def list_tasks(days: int = 14) -> Dict[str, Any]:
 
 
 def _demo_state(today: dt.date) -> List[Dict[str, Any]]:
-    """デモ用の台帳。日付が変わったときだけ作り直す。"""
+    """デモ用の台帳。日をまたいでも完了状態を保持する。"""
     global _demo_store, _demo_day
-    if _demo_day != today.isoformat() or not _demo_store:
+    if not _demo_day or not _demo_store:
         _demo_store = _demo_items(today)
         _demo_day = today.isoformat()
     return _demo_store
@@ -258,8 +270,8 @@ def _demo_items(today: dt.date) -> List[Dict[str, Any]]:
              child=younger, kind="homework", status="doing", points=3, bring=""),
         dict(base, id="d3", summary=f"{older}｜三者面談 希望調査票 提出", date=d(1),
              child=older, kind="deadline", status="todo", points=3, bring=""),
-        dict(base, id="d4", summary=f"✓ {older}｜塾 計算プリント", date=d(0),
-             child=older, kind="homework", status="done", points=3, bring=""),
+        dict(base, id="d4", summary=f"{older}｜塾 計算プリント", date=d(0),
+             child=older, kind="homework", status="todo", points=3, bring=""),
         dict(base, id="d5", summary=f"{younger}｜社会科見学（清掃工場）", date=d(6), time="08:15",
              child=younger, kind="event", status="todo", points=0, bring="お弁当、水筒、しおり"),
         dict(base, id="d6", summary=f"{older}｜体育祭 係希望票 提出", date=d(-1),
@@ -371,20 +383,157 @@ def _demo_add(item: Dict[str, Any], status: str = "todo") -> str:
             "link": "",
             "description": item.get("note", "") or "",
             "time": item.get("time_start"),
+            "time_end": item.get("time_end"),
+            "end_date": item.get("end_date") or item["date"],
         }
     )
     return new_id
 
 
-def create_events(items: List[Dict[str, Any]], status: str = "todo") -> List[Dict[str, str]]:
+def _update_target(item: Dict[str, Any]) -> Dict[str, Any]:
+    """画面の照合結果を信頼せず、更新直前の所有者と app マークを読む。"""
+    eid = item.get("matched_id")
+    if not isinstance(eid, str) or not eid:
+        raise ValueError("更新する予定の ID がありません。")
+    if DEMO:
+        today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
+        ev = next((e for e in _demo_state(today) if e["id"] == eid), None)
+        mine, child = (ev.get("mine"), ev.get("child")) if ev else (False, None)
+    else:
+        try:
+            ev = _svc().events().get(calendarId=config.calendar_id, eventId=eid).execute()
+        except Exception as exc:
+            raise ValueError("更新する予定を確認できません。") from exc
+        priv = (ev.get("extendedProperties") or {}).get("private") or {}
+        mine, child = priv.get("app") == MARK, priv.get("child")
+        if ev.get("status") == "cancelled":
+            ev = None
+    if not ev:
+        raise ValueError("更新する予定が見つかりません。")
+    if not mine:
+        raise ValueError("みまもりくんの予定ではありません。")
+    if not child or child != item.get("child"):
+        raise ValueError("同じ子どもの予定だけ更新できます。")
+    return ev
+
+
+def validate_updates(items: List[Dict[str, Any]]) -> None:
+    # 一括登録の途中で不正な照合先に気づいて新規だけ残すことを避ける。
+    for item in items:
+        branch = item.get("branch", "new")
+        if branch not in ("new", "moved", "diff"):
+            raise ValueError("登録の分岐が正しくありません。")
+        if branch != "new":
+            _update_target(item)
+
+
+def _patch_event(event_id: str, body: Dict[str, Any]) -> None:
+    if DEMO:
+        row = next(e for e in _demo_store if e["id"] == event_id)
+        row.update(copy.deepcopy(body))
+    else:
+        _svc().events().patch(calendarId=config.calendar_id, eventId=event_id,
+                              body=body).execute()
+
+
+def _update_event(item: Dict[str, Any], actor: str) -> Dict[str, str]:
+    from . import ledger
+    from .dedupe import _bring_set
+
+    ev = _update_target(item)
+    eid = item["matched_id"]
+    priv = ev if DEMO else ev["extendedProperties"]["private"]
+    old_bring = _bring_set(priv.get("bring"))
+    added = sorted(_bring_set(item.get("bring")) - old_bring)
+    description = ev.get("description") or ""
+    lines = description.splitlines()
+    if added:
+        lines.append("持ち物: " + "、".join(added))
+    for line in (item.get("note") or "").splitlines():
+        if line.strip() and line.strip() not in {s.strip() for s in lines}:
+            lines.append(line)
+    body = {"description": "\n".join(lines)}
+    bring = "、".join(sorted(old_bring | set(added)))
+    if DEMO:
+        body["bring"] = bring
+    else:
+        body["extendedProperties"] = {"private": {"bring": bring}}
+    if item["branch"] == "moved" or item.get("time_start"):
+        date = item["date"] if item["branch"] == "moved" else (
+            ev["date"] if DEMO else (ev["start"].get("date") or ev["start"]["dateTime"][:10]))
+        if DEMO:
+            body.update(date=date, time=item.get("time_start") or ev.get("time"))
+            delta = dt.date.fromisoformat(date) - dt.date.fromisoformat(ev["date"])
+            body["end_date"] = item.get("end_date") or (
+                dt.date.fromisoformat(ev.get("end_date") or ev["date"]) + delta).isoformat()
+            body["time_end"] = item.get("time_end") or ev.get("time_end")
+        else:
+            body.update(_move_body(ev, date, item))
+    before = {}
+    for key in body:
+        before[key] = copy.deepcopy(ev.get(key))
+    if not DEMO:
+        before["extendedProperties"] = {"private": {"bring": priv.get("bring")}}
+    token = "update:" + uuid.uuid4().hex
+    snapshot = {"id": eid, "child": item["child"], "actor": actor,
+                "created": dt.datetime.now(dt.timezone.utc).timestamp(),
+                "before": before, "after": body}
+    # 更新前に永続化する。Calendar の失敗時にも、予定や完了記録を消さない。
+    ledger.set_setting(token, snapshot)
+    if item["branch"] == "moved":
+        move_event(eid, item["date"], patch=body)
+    else:
+        _patch_event(eid, body)
+    return {"title": item["title"], "status": "ok", "id": eid,
+            "link": ev.get("htmlLink", ev.get("link", "")), "undo_id": token}
+
+
+def undo_update(token: str, actor: str, parent: bool) -> None:
+    from . import ledger
+
+    snap = ledger.get_setting(token)
+    if not snap or dt.datetime.now(dt.timezone.utc).timestamp() - snap["created"] > 600:
+        raise ValueError("更新の取り消し期限が過ぎています。")
+    if not parent and (snap["actor"] != actor or snap["child"] != actor):
+        raise ValueError("自分の更新だけ取り消せます。")
+    ev = _update_target({"matched_id": snap["id"], "child": snap["child"]})
+    current = {k: ev.get(k) for k in snap["after"]}
+    if not DEMO:
+        priv = ev["extendedProperties"]["private"]
+        current["extendedProperties"] = {"private": {"bring": priv.get("bring")}}
+    # Calendar は null による削除を、読み取り時にはキーの省略で返す。
+    def without_nulls(value):
+        if isinstance(value, dict):
+            return {k: without_nulls(v) for k, v in value.items() if v is not None}
+        return value
+
+    if without_nulls(current) == without_nulls(snap["before"]):
+        return  # 再送しても状態やポイントを変えない。
+    if without_nulls(current) != without_nulls(snap["after"]):
+        raise ValueError("その後の変更があるため、更新を取り消せません。")
+    body = copy.deepcopy(snap["before"])
+    if not DEMO:
+        for key in ("start", "end"):
+            if key in body:
+                field = "dateTime" if body[key].get("date") else "date"
+                body[key][field] = None
+                body[key].setdefault("timeZone", None)
+    _patch_event(snap["id"], body)
+
+
+def create_events(items: List[Dict[str, Any]], status: str = "todo", actor: str = "parent") -> List[Dict[str, str]]:
     """項目をカレンダーに登録する。
 
     status に "pending" を渡すと、親が承認するまで子のやることには出ない。
     子の画面から撮ったものは、外から来た画像を読ませた結果がそのまま
     書き込みになるので、必ず承認を挟む。
     """
+    validate_updates(items)
     results = []
     for item in items:
+        if item.get("branch", "new") != "new":
+            results.append(_update_event(item, actor))
+            continue
         if DEMO:
             try:
                 new_id = _demo_add(item, status)
@@ -407,35 +556,79 @@ def set_status(event_id: str, status: str) -> Dict[str, Any]:
     完了しても予定は消さない。件名に ✓ を付けて記録として残し、
     ダッシュボードの未完了リストからは外れる。
     """
+    from . import points
+
+    now = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).isoformat(timespec="seconds")
     if DEMO:
-        for it in _demo_store:
+        for it in _demo_state(dt.date.fromisoformat(now[:10])):
             if it["id"] == event_id:
+                done_at = points.record_status(it, status, now)
                 it["status"] = status
+                if done_at:
+                    it["done_at"] = done_at
+                else:
+                    it.pop("done_at", None)
                 title = it["summary"].lstrip("✓ ").strip()
                 it["summary"] = ("✓ " + title) if status == "done" else title
                 return {"id": event_id, "status": status, "summary": it["summary"]}
-        # 記録できていないのに done を返すと、子には「終わったね」と伝わり
-        # 親の一覧には残り続ける。できなかったことは、できなかったと返す。
         return {"id": event_id, "status": "error", "note": "その id のやることが見つかりませんでした"}
     ev = _svc().events().get(calendarId=config.calendar_id, eventId=event_id).execute()
     priv = (ev.get("extendedProperties") or {}).get("private") or {}
-    priv["status"] = status
-    summary = ev.get("summary", "")
-    summary = summary.lstrip("✓ ").strip()
+    if priv.get("app") != MARK:
+        raise ValueError("みまもりくんの予定ではありません")
+    done_at = (priv.get("done_at") or now) if status == "done" else ""
+    priv.update(status=status, done_at=done_at or None, done_date=done_at[:10] or None)
+    summary = ev.get("summary", "").lstrip("✓ ").strip()
     if status == "done":
         summary = "✓ " + summary
     body = {"summary": summary, "extendedProperties": {"private": priv}}
-    ev = _svc().events().patch(calendarId=config.calendar_id, eventId=event_id, body=body).execute()
-    return {"id": event_id, "status": status, "summary": ev.get("summary", "")}
+    # Calendar と台帳を跨ぐ原子的な保存はできない。Calendar 成功後に台帳へ記録し、
+    # 台帳側が失敗した場合はエラーを返す。同じ操作の再送で重複せず回復できる。
+    _svc().events().patch(calendarId=config.calendar_id, eventId=event_id, body=body).execute()
+    canonical = points.record_status({**priv, "id": event_id, "summary": summary}, status, done_at)
+    if canonical != done_at:
+        # 同時に完了した場合も最初のトランザクションの時刻に揃える。
+        _svc().events().patch(calendarId=config.calendar_id, eventId=event_id, body={
+            "extendedProperties": {"private": {"done_at": canonical or None,
+                                                 "done_date": canonical[:10] or None}}
+        }).execute()
+    return {"id": event_id, "status": status, "summary": summary}
 
 
-def move_event(event_id: str, new_date: str) -> Dict[str, Any]:
-    """予定の日にちを直す。**消して作り直さない。**
+def _move_body(ev: Dict[str, Any], new_date: str, item=None) -> Dict[str, Any]:
+    item = item or {}
+    st, end = ev.get("start", {}), ev.get("end", {})
+    if item.get("time_start"):
+        body = {k: v for k, v in _body(dict(item, date=new_date, title="")).items()
+                if k in ("start", "end")}
+        for key in ("start", "end"):
+            body[key]["date"] = None  # 終日から時刻つきへ切り替える。
+            body[key]["dateTime"] = dt.datetime.fromisoformat(body[key]["dateTime"]).replace(
+                tzinfo=ZoneInfo(config.timezone)).isoformat()
+        return body
+    old_date = st.get("date") or st.get("dateTime", "")[:10]
+    delta = dt.date.fromisoformat(new_date) - dt.date.fromisoformat(old_date)
+    result = {}
+    for key, value in (("start", st), ("end", end)):
+        field = "dateTime" if value.get("dateTime") else "date"
+        original = value[field]
+        shifted = (dt.date.fromisoformat(original[:10]) + delta).isoformat()
+        result[key] = {**value, field: shifted + original[10:]}
+    if item.get("end_date"):
+        field = "dateTime" if end.get("dateTime") else "date"
+        last = dt.date.fromisoformat(item["end_date"])
+        if field == "date":
+            last += dt.timedelta(days=1)
+        result["end"][field] = last.isoformat() + result["end"][field][10:]
+    return result
 
-    作り直すと id が変わり、ポイント台帳の ref_id が迷子になる。
-    改訂版の予定表で日程がずれたときは、この道を通る。
-    """
-    dt.date.fromisoformat(new_date)          # 形が違えばここで落とす
+
+def move_event(event_id: str, new_date: str, *, patch=None) -> Dict[str, Any]:
+    """ID・完了状態を保ったまま日程を変える。登録時は説明も一度に更新する。"""
+    dt.date.fromisoformat(new_date)
+    if patch is not None:
+        _patch_event(event_id, patch)
+        return {"id": event_id, "date": new_date}
     if DEMO:
         for it in _demo_store:
             if it["id"] == event_id:
@@ -443,16 +636,5 @@ def move_event(event_id: str, new_date: str) -> Dict[str, Any]:
                 return {"id": event_id, "date": new_date, "summary": it["summary"]}
         return {"id": event_id, "status": "error", "note": "その id の予定が見つかりませんでした"}
     ev = _svc().events().get(calendarId=config.calendar_id, eventId=event_id).execute()
-    st = ev.get("start", {})
-    if st.get("dateTime"):
-        t0 = st["dateTime"][11:]
-        t1 = (ev.get("end", {}).get("dateTime") or st["dateTime"])[11:]
-        body = {
-            "start": {"dateTime": f"{new_date}T{t0}", "timeZone": config.timezone},
-            "end": {"dateTime": f"{new_date}T{t1}", "timeZone": config.timezone},
-        }
-    else:
-        end = (dt.date.fromisoformat(new_date) + dt.timedelta(days=1)).isoformat()
-        body = {"start": {"date": new_date}, "end": {"date": end}}
-    ev = _svc().events().patch(calendarId=config.calendar_id, eventId=event_id, body=body).execute()
+    _patch_event(event_id, _move_body(ev, new_date))
     return {"id": event_id, "date": new_date, "summary": ev.get("summary", "")}

@@ -614,8 +614,10 @@ function collect(){
       title: el.querySelector('[data-f="title"]').value,
       date: el.querySelector('[data-f="date"]').value,
       time_start: el.querySelector('[data-f="time_start"]').value || null,
-      bring: [],
-      note: note
+      branch: src.branch || "new",
+      matched_id: src.matched_id || null,
+      bring: (src.bring || []).filter(x => note.split(" / ").includes(x)),
+      note: note.split(" / ").filter(x => !(src.bring || []).includes(x)).join(" / ")
     }));
   });
   return out;
@@ -662,7 +664,7 @@ function showRegistered(data, expected){
   if($("#undo")) $("#undo").remove();
   if($("#undonote")) $("#undonote").remove();
   clearInterval(undoTick);
-  const ids = ok.map(r => r.id).filter(Boolean);
+  const ids = ok.map(r => r.undo_id || r.id).filter(Boolean);
   if(ids.length) h += '<button class="btn ghost" id="undo">取り消す</button> <span id="undonote"></span>';
   $("#completion").insertAdjacentHTML("afterbegin", h);
   if(ids.length) armUndo(ids);

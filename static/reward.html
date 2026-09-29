@@ -137,8 +137,8 @@ body.nav-in-flow .page-bottom{display:none}
 </div></header>
 <main id="main">
   <h1 id="heading" class="sr-only">ごほうび</h1>
-  <p class="balance-label muted" id="balance-label">いまの ポイント</p>
-  <p class="balance" id="balance-line" role="group" aria-label="いまの ポイント"><b id="balance">—</b><span id="balance-unit" aria-hidden="true">pt</span></p>
+  <p class="balance-label muted" id="balance-label">いま つかえる ポイント</p>
+  <p class="balance" id="balance-line" role="group" aria-label="いま つかえる ポイントは まだ わからないよ"><b id="balance">—</b><span id="balance-unit" aria-hidden="true">pt</span></p>
   <p id="status" role="status">よみこんでいるよ</p>
   <p id="error" role="alert" hidden></p>
   <button id="auth-retry" type="button" hidden>もういちど たしかめる</button>
@@ -164,6 +164,7 @@ body.nav-in-flow .page-bottom{display:none}
     <details id="history-box"><summary>たまった記録</summary><div><ul id="history" class="history"></ul></div></details>
     <details id="handed-box" hidden><summary>うけとった ごほうび</summary><div><ul id="handed" class="history"></ul></div></details>
     <details id="rules-box"><summary>ポイントのきまり</summary><div>
+      <p>『きょう がんばった』は きょう おわらせた ぶん。『いま つかえる』は ごほうびに つかえる ぶんで、もうしこむと へるよ。</p>
       <table><tbody id="rules"></tbody></table>
       <p class="muted">テストは 点数ではなく、なおした もんだいの 数で つくよ。ごほうびは おうちの人と きめるよ。</p>
     </div></details>
@@ -272,15 +273,16 @@ function cardState(reward,ctx){
   return {kind:"ready",can:!ctx.sending&&!ctx.uncertain,text:"もうしこめる"};
 }
 // みおくりで「ポイントは もどったよ」と言えるのは、戻した記録が見つかったときだけ（§2.4.2）
-// 台帳の記録は申込 ID を持たないので、名前・ポイント・理由・日付まで一致するものを数える。
+// 新しい返金は申込 ID で照合。ID のない古い記録だけ、以前の数え方を使う。
 // 同じ報酬・同じ理由の見送りが複数あるときは、その数だけ戻した記録がなければ言わない（前の見送りの記録で言わない。コードレビュー #41）
 function refunded(req,hist,items){
   if(!Array.isArray(hist)) return false;
+  if(hist.some(e=>e.redeem_id===req.id&&e.kind==="adjust"&&!e.revoked&&Number(e.points)===Number(req.cost))) return true;
   const title="「"+req.label+"」の交換を取りやめ："+String(req.note||"").trim();
   const day=String(req.decided_at||"").slice(0,10);
   const same=r=>r.status==="rejected"&&r.label===req.label&&Number(r.cost)===Number(req.cost)&&String(r.note||"").trim()===String(req.note||"").trim();
   const peers=(items||[req]).filter(same).length||1;
-  const found=hist.filter(e=>e.kind==="adjust"&&!e.revoked&&Number(e.points)===Number(req.cost)&&String(e.title||"")===title&&(!day||String(e.date||"")>=day)).length;
+  const found=hist.filter(e=>!e.redeem_id&&e.kind==="adjust"&&!e.revoked&&Number(e.points)===Number(req.cost)&&String(e.title||"")===title&&(!day||String(e.date||"")>=day)).length;
   return found>=peers;
 }
 // 残高の直下に出すもの：申込中・OK と、2週間以内の みおくり
@@ -289,12 +291,17 @@ function activeReqs(items,now){
   return (items||[]).filter(r=>r.status==="requested"||r.status==="approved"||
     (r.status==="rejected"&&String(r.decided_at||r.at||"").slice(0,10)>=since));
 }
-// 送ったあと返事が分からないとき：送る前になかった申込で、同じものがあれば「送れた」。
+// 新しい申込はキーで照合。更新前に端末へ保存した不明情報だけ旧照合を続ける。
 // たしかめるまでに親が OK・手渡し・見送りにしていることがあるので、状態は問わない（QA #41）
+function matchesSent(before,r,sent){
+  if(sent.request_key) return r.request_key===sent.request_key;
+  return !before.includes(r.id)&&r.label===sent.label&&Number(r.cost)===Number(sent.cost);
+}
 function matchSent(before,after,sent){
-  const known=new Set(before);
-  const hits=(after||[]).filter(r=>!known.has(r.id)&&r.label===sent.label&&Number(r.cost)===Number(sent.cost));
-  return hits.length;
+  return (after||[]).filter(r=>matchesSent(before,r,sent)).length;
+}
+function newRequestKey(){
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,"0")).join("");
 }
 
 // ---------------------------------------------------------------- 絵（オリジナルの小さな絵。飾りなので読み上げない）
@@ -319,8 +326,8 @@ function icon(label){
 // ---------------------------------------------------------------- 子の画面を描く
 function paintBalance(){
   const b=$("#balance");
-  if(balance==null){ b.textContent="—"; $("#balance-line").setAttribute("aria-label","いまの ポイントは まだ わからないよ"); }
-  else{ b.textContent=String(balance); $("#balance-line").setAttribute("aria-label","いまの ポイント "+balance+"ポイント"); }
+  if(balance==null){ b.textContent="—"; $("#balance-line").setAttribute("aria-label","いま つかえる ポイントは まだ わからないよ"); }
+  else{ b.textContent=String(balance); $("#balance-line").setAttribute("aria-label","いま つかえる ポイント "+balance+"ポイント"); }
 }
 function paintCards(){
   const box=$("#rewards");
@@ -362,7 +369,7 @@ function paintCards(){
     if(st.kind==="ready"){
       if(open===reward.label){
         const ex=element("div",undefined,"explain");
-        ex.appendChild(element("p","もうしこむと、いまの ポイントから "+cost+"pt へるよ。おうちの人が みおくりに したら もどるよ。"));
+        ex.appendChild(element("p","もうしこむと、いま つかえる ポイントから "+cost+"pt へるよ。おうちの人が みおくりに したら もどるよ。"));
         const row=element("div",undefined,"actions");
         const go=button(cost+"ptを つかって もうしこむ","primary",()=>askFor(reward));
         go.disabled=!st.can;
@@ -422,7 +429,7 @@ function paintHistory(){
   list.replaceChildren();
   $("#start").hidden=true;
   if(history==null) return;
-  const rows=[...history].sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  const rows=history.filter(e=>!e.revoked).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
   for(const e of rows){
     const li=element("li");
     li.appendChild(element("span",shortDate(e.date),"date"));
@@ -474,14 +481,16 @@ function resultFocus(selector){
 async function askFor(reward){
   if(sending||uncertain||open!==reward.label) return;
   const me=child, id=epoch;
-  const sent={label:reward.label,cost:costOf(reward),yen:yenOf(reward)};
+  const sent={label:reward.label,cost:costOf(reward),yen:yenOf(reward),request_key:newRequestKey()};
   const before=(reqs||[]).map(r=>r.id);
   sending=true; lastSent={sent,before,at:Date.now()};
+  pendingSet("kid:"+me,lastSent);
   paintSendNote(SENDING);
   const finishFocus=resultFocus("#send-note");
   paintCards();
   try{
-    await postJSON("/api/redeem",{child:me,label:sent.label,cost:sent.cost,yen:sent.yen});
+    await postJSON("/api/redeem",{child:me,label:sent.label,cost:sent.cost,yen:sent.yen,request_key:sent.request_key});
+    pendingSet("kid:"+me,null);
     if(id!==epoch) return;
     sending=false; open=""; lastSent=null;
     await loadChild(true);
@@ -491,6 +500,7 @@ async function askFor(reward){
     if(id!==epoch) return;
     sending=false;
     if(err.unknown){ uncertain=sent; open=""; pendingSet("kid:"+me,lastSent); await recheck(false); return; }
+    pendingSet("kid:"+me,null);
     // 断られた（残高・上限など）。理由を出して、今の状態を取り直す
     open="";
     await loadChild(true);
@@ -515,7 +525,7 @@ async function recheck(focus=true){
     const after=reqs;
     const hits=matchSent(lastSent.before,after,lastSent.sent);
     if(hits>1){ paintSendNote(UNKNOWN); return; }
-    const matched=hits===1?after.find(r=>!lastSent.before.includes(r.id)&&r.label===lastSent.sent.label&&Number(r.cost)===Number(lastSent.sent.cost)):null;
+    const matched=hits===1?after.find(r=>matchesSent(lastSent.before,r,lastSent.sent)):null;
     if(matched&&!KID_ST[matched.status]){ paintSendNote(UNKNOWN); return; }
     if(!hits&&Date.now()-lastSent.at<SETTLE_MS){
       // 見つからなくても、まだ処理中かもしれない。送れていないとは決めず、申込を止めたまま
@@ -736,7 +746,7 @@ function setAudience(parent){
   $("#child").hidden=!parent;
   $("#heading").textContent=parent?"ごほうび（おうちの人）":"ごほうび";
   $("#heading").classList.toggle("sr-only",!parent);
-  $("#balance-label").textContent=parent?"選んでいる子の ポイント":"いまの ポイント";
+  $("#balance-label").textContent=parent?"選んでいる子の つかえるポイント":"いま つかえる ポイント";
   document.querySelector("[data-appearance-picker]").hidden=parent;
   document.querySelector("[data-profile-menu]").hidden=parent;
   if(!parent) $("#nav").innerHTML='<a href="/kid">きょう</a><a href="/?mode=kid">とる</a><a href="/reward" aria-current="page">ごほうび</a>';

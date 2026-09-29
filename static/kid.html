@@ -82,7 +82,7 @@ body.large-controls .page-bottom{padding-bottom:24px}
   <button id="tts" type="button" aria-pressed="true">読み上げ オン</button>
 </div></header>
 <main id="main">
-  <div class="heading"><h1>きょう</h1><a class="pt" id="pt" href="/reward" aria-label="ポイントとごほうび">— pt</a></div>
+  <div class="heading"><h1>きょう</h1><a class="pt" id="pt" href="/reward" aria-label="きょう がんばった —ポイント。ごほうびを みる">きょう がんばった — pt</a></div>
   <p id="load-note" role="status">よみこんでいるよ</p>
   <button id="reload" type="button" hidden>もういちど よみこむ</button>
   <section id="recent" aria-label="いまの完了" hidden>
@@ -228,7 +228,7 @@ function showChild(){
   child=next;recentJob=null;$("#recent").hidden=true;$("#records").open=false;epoch++;taskSeq++;weekSeq++;history=[];snapshot=null;stale=false;
   busy=false;chatStarted=false;lastChat=null;thread.replaceChildren();todayItems=[];renderFrame();
   $("#msg").value="";$("#retry-chat").hidden=true;$("#mic-status").textContent="";updateInput();
-  $("#child-name").textContent=child;$("#pt").textContent="— pt";
+  $("#child-name").textContent=child;paintPoints(null);
   $("#today").replaceChildren();$("#records-list").replaceChildren();feedback("");
   $("#board").textContent="だいしを よみこんでいるよ";$("#board").classList.remove("full");
   $("#greeting").textContent="きたね！";$("#companion").classList.remove("resting");
@@ -247,6 +247,11 @@ function persistJobs(){
     ...[...jobs.values()].filter(j=>["waiting","sending"].includes(j.state))];
   return lsSet(OUT_KEY,pending);
 }
+function paintPoints(points){
+  const known=Number.isFinite(points), value=known?String(points):"—";
+  $("#pt").textContent="きょう がんばった "+value+(known?"pt":" pt");
+  $("#pt").setAttribute("aria-label","きょう がんばった "+value+"ポイント。ごほうびを みる");
+}
 async function loadCards(){
   if(!child)return;
   const s=scope(),seq=++taskSeq;
@@ -259,11 +264,11 @@ async function loadCards(){
     // キャッシュにはこの子のデータだけを残す。
     snapshot={items:t.items.filter(x=>x.child===child),points:t.points[child],today:t.today,at:Date.now()};
     stale=false;lsSet(CACHE_KEY+":"+child,snapshot);
-    $("#pt").textContent=Number.isFinite(snapshot.points)?snapshot.points+" pt":"— pt";
+    paintPoints(snapshot.points);
     $("#load-note").textContent="";
   }catch(e){
     if(!current(s)||seq!==taskSeq)return;
-    snapshot=lsGet(CACHE_KEY+":"+child,null);stale=true;$("#pt").textContent="— pt";$("#reload").hidden=false;
+    snapshot=lsGet(CACHE_KEY+":"+child,null);stale=true;paintPoints(null);$("#reload").hidden=false;
     $("#load-note").textContent=snapshot?"前にひらいたときの内容だよ（"+new Date(snapshot.at).toLocaleString("ja-JP")+"）":"きょうのやることを よみこめなかったよ";
   }
   renderCards();
