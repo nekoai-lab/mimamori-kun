@@ -31,7 +31,8 @@ def test_progress_reset_and_registration_only_after_done(audience):
       assert.equal(($('#result').innerHTML.match(/<li>/g)||[]).length,2);
       await send({type:'question',item:item({title:'非表示の質問'})});
       assert.doesNotMatch($('#result').innerHTML,/非表示の質問/);
-      assert.match($('#result').innerHTML,/1件/);
+      assert.match($('#result').innerHTML,/日付を 確かめるものが あるよ（1件）/);
+      assert.doesNotMatch($('#result').innerHTML,/確認すること|聞きます|きいてもらうね/);
       assert.doesNotMatch($('#result').innerHTML,/<button/);
       await doRegister();
       assert.equal(registrations().length,0);
@@ -39,9 +40,14 @@ def test_progress_reset_and_registration_only_after_done(audience):
       assert.equal($('#result').innerHTML,'');
       assert.equal($('#note').textContent,AUTH==='child'?'よんでいるよ':'読んでいます');
       await send({type:'item',item:item({title:'やり直した候補'})});
-      await send({type:'done',items:[item({title:'やり直した候補'})]});
+      await send({type:'question',item:item({title:'最終の質問'})});
+      assert.doesNotMatch($('#result').innerHTML,/確認すること|聞きます|きいてもらうね/);
+      await send({type:'done',items:[item({title:'やり直した候補'})],date_questions_count:1});
       receive({done:true}); await pending;
       assert.equal(registrations().length,AUTH==='child'?1:0);
+      assert.match($('#result').innerHTML,AUTH==='child'
+        ? /おうちの人に きいてもらうね（1件）/
+        : /1件は「確認すること」で聞きます/);
       if(AUTH==='child') assert.match($('#completion').innerHTML,/やることに 入ったよ/);
       else assert.match($('#result').innerHTML,/登録候補/);
     """, audience)

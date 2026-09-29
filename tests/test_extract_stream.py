@@ -134,3 +134,75 @@ def test_item_is_delivered_before_model_finishes(fake_runner, monkeypatch):
 
     asyncio.run(consume())
     assert fake_runner.closed == 1
+
+
+@pytest.mark.parametrize("child", [None, "下の子"])
+@pytest.mark.parametrize("reset", [False, True])
+def test_disconnect_after_question_still_persists_final_once(api, fake_runner, monkeypatch, child, reset):
+    """Use ASGI http.disconnect while the real extractor is paused mid-stream."""
+    from io import BytesIO
+    from starlette.datastructures import UploadFile, Headers
+    from starlette.requests import Request
+
+    monkeypatch.setattr(main, "_user", lambda request: child or auth.PARENT)
+    monkeypatch.setattr(agent, "list_raw", lambda *args: [])
+    question = {**item(), "title": "最終の質問", "date": None, "date_text": "明後日"}
+    good = json.dumps({"summary": "", "items": [question]})
+    partial = '{"items":[' + json.dumps(dict(question, title="破棄する質問")) + '],'
+    fake_runner.replies = [partial, good] if reset else [good]
+    enqueue = main.ambiguous_dates.enqueue
+    saved = []
+
+    def save(items):
+        saved.append([dict(i) for i in items])
+        return enqueue(items)
+
+    monkeypatch.setattr(main.ambiguous_dates, "enqueue", save)
+
+    async def scenario():
+        disconnected = asyncio.Event()
+        resume = asyncio.Event()
+        finished = asyncio.Event()
+        seen = []
+        original = main.stream_otayori
+
+        async def paused(*args, **kwargs):
+            try:
+                async for event in original(*args, **kwargs):
+                    yield event
+                    if event["type"] == "question":
+                        await resume.wait()
+            finally:
+                finished.set()
+
+        monkeypatch.setattr(main, "stream_otayori", paused)
+        scope = {"type": "http", "asgi": {"spec_version": "2.0"}}
+        response = await main.extract_stream(
+            Request(scope), UploadFile(BytesIO(b"synthetic"),
+                                       headers=Headers({"content-type": "image/png"})), "")
+
+        async def send(message):
+            if message["type"] == "http.response.body" and message.get("body"):
+                event = json.loads(message["body"])
+                seen.append(event["type"])
+                if event["type"] == "question":
+                    disconnected.set()
+
+        async def receive():
+            await disconnected.wait()
+            return {"type": "http.disconnect"}
+
+        await asyncio.wait_for(response(scope, receive, send), 2)
+        assert seen[-1] == "question" and "done" not in seen
+        assert not saved and not main.ambiguous_dates.pending()
+        resume.set()
+        await asyncio.wait_for(finished.wait(), 2)
+        assert len(saved) == 1
+        assert [i["title"] for i in saved[0]] == ["最終の質問"]
+        pending = main.ambiguous_dates.pending()
+        assert len(pending) == 1
+        assert pending[0]["child"] == "下の子"
+        assert len(fake_runner.calls) == (2 if reset else 1)
+        assert seen[-1] == "question"  # No relay resumes after disconnect.
+
+    asyncio.run(scenario())

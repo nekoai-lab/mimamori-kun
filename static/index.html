@@ -523,7 +523,7 @@ async function readPhoto(){
         clearTimeout(timer); readingStage("soon");
         if(event.type === "item") partial.items.push(event.item);
         else partial.date_questions_count++;
-        $("#result").innerHTML = dateQuestionMessage(partial)
+        $("#result").innerHTML = dateQuestionMessage(partial, false)
           + '<ul>' + partial.items.map(it => '<li>'+esc(it.title)+'</li>').join("") + '</ul>';
       }
     });
@@ -569,8 +569,9 @@ async function kidCandidates(data, token){
   }
   $("#result").insertAdjacentHTML("afterbegin", skippedKidMessage(data) + dateQuestionMessage(data));
 }
-function dateQuestionMessage(data){
+function dateQuestionMessage(data, saved = true){
   if(!data.date_questions_count) return "";
+  if(!saved) return '<p class="skipped">日付を 確かめるものが あるよ（'+data.date_questions_count+'件）</p>';
   return '<p class="skipped">'+(isKid() ? '日付が わからないものは おうちの人に きいてもらうね（'+data.date_questions_count+'件）' :
     '日付が はっきりしないもの '+data.date_questions_count+'件は「確認すること」で聞きます')+'</p>';
 }

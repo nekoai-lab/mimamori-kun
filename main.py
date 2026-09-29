@@ -51,12 +51,18 @@ def _key(title: str) -> str:
     return re.sub(r"\s", "", (title or "").replace("✓", ""))
 
 
+# Keep extraction tasks alive after the response disconnects.
+_extract_tasks: set[asyncio.Task] = set()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_quota_project()
     # 保存先の設定と、Firestore を選んだ場合の接続を起動時に確かめる。
     ledger.store()
     yield
+    if _extract_tasks:
+        await asyncio.gather(*_extract_tasks)
 
 
 app = FastAPI(title="みまもりくん", lifespan=lifespan)
@@ -437,24 +443,46 @@ async def extract_stream(request: Request, image: UploadFile = File(...), hint: 
     data = await _extract_image(image)
     user = _user(request)
 
-    async def events():
-        yield {"type": "received"}
+    queue = asyncio.Queue()
+    connected = True
+    content_type = image.content_type
+
+    def publish(event):
+        if connected:
+            queue.put_nowait(event)
+
+    async def produce():
+        publish({"type": "received"})
         try:
-            normalized, mime = await _normalize_extract(data, image.content_type)
+            normalized, mime = await _normalize_extract(data, content_type)
             async for event in stream_otayori(
                 normalized, mime, hint, child=None if auth.is_parent(user) else user
             ):
                 if event["type"] == "done":
                     result = {k: v for k, v in event.items() if k != "type"}
-                    yield {"type": "done", **_finish_extract(result, user)}
+                    # Only the final attempt is persisted, before announcing done.
+                    publish({"type": "done", **_finish_extract(result, user)})
                 else:
-                    yield event
+                    publish(event)
         except Exception as exc:
-            yield {"type": "error", **_read_failure(exc, user)}
+            publish({"type": "error", **_read_failure(exc, user)})
+        finally:
+            publish(None)
+
+    task = asyncio.create_task(produce())
+    _extract_tasks.add(task)
+    task.add_done_callback(_extract_tasks.discard)
 
     async def lines():
-        async for event in events():
-            yield json.dumps(event, ensure_ascii=False) + "\n"
+        nonlocal connected
+        try:
+            while (event := await queue.get()) is not None:
+                yield json.dumps(event, ensure_ascii=False) + "\n"
+        finally:
+            # Disconnect cancels only this relay, never extraction/persistence.
+            connected = False
+            while not queue.empty():
+                queue.get_nowait()
 
     return StreamingResponse(lines(), media_type="application/x-ndjson",
                              headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
