@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 import re
 import uuid
 from typing import Any, Dict, List, Optional
@@ -28,6 +29,7 @@ from .config import config
 from .schema import Extraction
 
 APP_NAME = "mimamorikun"
+logger = logging.getLogger(__name__)
 
 
 def _instruction(child: Optional[str] = None) -> str:
@@ -192,32 +194,71 @@ async def read_otayori(image_bytes: bytes, mime_type: str, hint: str = "",
     """
     runner = InMemoryRunner(agent=build_agent(child), app_name=APP_NAME)
     user_id = "parent"
-    session = await runner.session_service.create_session(app_name=APP_NAME, user_id=user_id)
-
     parts = [types.Part.from_bytes(data=image_bytes, mime_type=mime_type)]
     prompt = "このおたよりを読んで、カレンダー登録候補を JSON で返してください。"
     if hint.strip():
         prompt += f"\n補足（保護者からのメモ）: {hint.strip()}"
     parts.append(types.Part.from_text(text=prompt))
 
-    final = ""
-    trace: List[str] = []
-    async for event in runner.run_async(
-        user_id=user_id,
-        session_id=session.id,
-        new_message=types.Content(role="user", parts=parts),
-    ):
-        if event.content and event.content.parts:
-            for p in event.content.parts:
-                if getattr(p, "function_call", None):
-                    trace.append(f"ツール呼び出し: {p.function_call.name}")
-                if getattr(p, "function_response", None):
-                    trace.append(f"ツール応答: {p.function_response.name}")
-        if event.is_final_response() and event.content and event.content.parts:
-            final = "".join(p.text or "" for p in event.content.parts)
-
-    data = _parse_json(final)
-    parsed = Extraction.model_validate(data)
+    first_failure = None
+    retry_result = "failure"
+    try:
+        for attempt in range(2):
+            # 失敗した応答やツール履歴を持ち越さず、同じ画像・補足で読み直す。
+            session = await runner.session_service.create_session(
+                app_name=APP_NAME, user_id=user_id
+            )
+            final = ""
+            trace: List[str] = []
+            finish_reason = None
+            usage = None
+            async for event in runner.run_async(
+                user_id=user_id,
+                session_id=session.id,
+                new_message=types.Content(role="user", parts=parts).model_copy(deep=True),
+            ):
+                if event.content and event.content.parts:
+                    for p in event.content.parts:
+                        if getattr(p, "function_call", None):
+                            trace.append(f"ツール呼び出し: {p.function_call.name}")
+                        if getattr(p, "function_response", None):
+                            trace.append(f"ツール応答: {p.function_response.name}")
+                if event.is_final_response():
+                    final = "".join(
+                        p.text or "" for p in (event.content.parts or [])
+                    ) if event.content else ""
+                    # ADK 1.3 は空の candidate の finish_reason を error_code に保存する。
+                    # 文字がある応答では保持されないため、取得できなければ unknown。
+                    reason = getattr(event, "finish_reason", None) or getattr(event, "error_code", None)
+                    finish_reason = reason if reason in {r.value for r in types.FinishReason} else None
+                    usage = getattr(event, "usage_metadata", None)
+            try:
+                data = _parse_json(final)
+            except ValueError as exc:
+                if attempt:
+                    raise
+                failure = ("empty_response" if not final.strip() else
+                           "invalid_json" if isinstance(exc, json.JSONDecodeError) else
+                           "missing_json")
+                first_failure = (
+                    failure, getattr(finish_reason, "value", finish_reason) or "unknown",
+                    getattr(usage, "prompt_token_count", None),
+                    getattr(usage, "thoughts_token_count", None),
+                    getattr(usage, "candidates_token_count", None),
+                )
+                continue
+            parsed = Extraction.model_validate(data)
+            retry_result = "success"
+            break
+    finally:
+        if first_failure is not None:
+            # 応答本文・入力・例外文字列は個人情報を含みうるため記録しない。
+            logger.warning(
+                "read_otayori retry: first_failure=%s finish_reason=%s "
+                "prompt_token_count=%s thoughts_token_count=%s candidates_token_count=%s "
+                "retry_result=%s",
+                *first_failure, retry_result,
+            )
     out = parsed.model_dump()
     if child:
         for item in out["items"]:
