@@ -9,7 +9,7 @@
 残高の出し方（2026-09-13 変更）:
     以前はカレンダーの完了予定を毎回合計していた。
     それだと「引き換え（マイナス）」が記録できず、90日より前も消えるため、
-    **台帳（ledger）の合算**に変えた。カレンダーの完了は台帳へ取り込む。
+    **台帳（ledger）の合算**に変えた。完了操作の時点で台帳へ記録する。
 """
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ import os
 from typing import Any, Dict, List, Optional
 
 from . import ledger
-from .calendar_tools import list_tasks
 
 # 種別ごとの付与ポイント。calendar_tools._points_for と揃えること。
 RULES: Dict[str, int] = {
@@ -48,48 +47,47 @@ def points_for(kind: str, fixed_count: int = 0) -> int:
 # ------------------------------------------------------------------ 取り込み
 
 def sync_from_calendar(child: str, days: int = 90) -> int:
-    """完了済みの予定を台帳に取り込む。**同じ予定は二度入らない。**
+    """旧呼び出し元との互換用。加点は set_status だけで行う。"""
+    return 0
 
-    カレンダー側で完了にしたものを台帳に反映するための橋渡し。
-    何度呼んでも結果が変わらないので、残高を出す前に毎回呼んでよい。
 
-    Returns:
-        今回新しく取り込んだ件数
-    """
-    try:
-        data = list_tasks(days=days)
-    except Exception:  # noqa: BLE001
-        # カレンダーに繋がらなくても残高表示は止めない
-        return 0
-    added = 0
-    for t in data.get("items", []):
-        if t.get("child") != child or t.get("status") != "done":
-            continue
-        pts = t.get("points") or 0
-        if not pts or ledger.has_ref(child, t["id"]):
-            continue
-        ledger.add(
-            child=child,
-            delta=pts,
-            reason=t.get("kind", "unknown"),
-            ref_id=t["id"],
-            title=t.get("summary", "").replace("✓ ", "").split("｜")[-1],
-        )
-        added += 1
-    return added
+def record_status(task: Dict[str, Any], status: str, done_at: str) -> str:
+    """予定ごとの状態と加点・取消を一体で保存し、確定した完了時刻を返す。"""
+    import hashlib
+
+    key = "task_completion_" + hashlib.sha256(task["id"].encode()).hexdigest()
+
+    def change(current, balance, extra):
+        current = current or {}
+        entry = current.get("entry")
+        if status == "done":
+            if current.get("done_at"):
+                return current, [], current["done_at"]
+            entry = ledger.make_entry(
+                child=task.get("child", ""), delta=int(task.get("points") or 0),
+                reason=task.get("kind", "unknown"), ref_id=task["id"],
+                title=task.get("summary", "").lstrip("✓ ").split("｜")[-1],
+            )
+            entry["created_at"] = done_at
+            return {"done_at": done_at, "entry": entry}, [entry], done_at
+        rows = []
+        if entry and current.get("done_at"):
+            entry = {**entry, "revoked": True, "revoked_at": ledger._now()}
+            rows.append(entry)
+        return {"done_at": "", "entry": entry}, rows, ""
+
+    return ledger.transact_setting_entries(key, task.get("child", ""), change)
 
 
 # ------------------------------------------------------------------ 残高と履歴
 
 def balance(child: str) -> int:
     """その子の現在の残高。台帳の合算。"""
-    sync_from_calendar(child)
     return ledger.balance(child)
 
 
 def history(child: str, limit: int = 30) -> List[Dict[str, Any]]:
     """何で増えた／減ったかの履歴。子どもに見せる用。"""
-    sync_from_calendar(child)
     out = []
     for e in ledger.history(child, limit=limit):
         out.append(

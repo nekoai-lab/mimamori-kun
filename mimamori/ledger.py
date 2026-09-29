@@ -124,7 +124,9 @@ class _LocalStore:
             new, added, result = fn(settings.get(key), bal,
                                     {k: settings.get(k) for k in read_keys})
             settings[key] = new
-            data["entries"].extend(added)
+            by_id = {e["id"]: e for e in data["entries"]}
+            by_id.update({e["id"]: e for e in added})
+            data["entries"] = list(by_id.values())
             self._write(data)
             return result
 
@@ -319,8 +321,9 @@ def transact_setting(key: str, fn: Callable[[Any], Any]) -> Any:
 def transact_setting_entries(key, child, fn, read_keys=()):
     """設定・残高の確認と設定・台帳行の保存をまとめる。
 
-    fn(設定, 残高, 追加で読む設定) -> (新設定, 追加する台帳行, 結果)。
+    fn(設定, 残高, 追加で読む設定) -> (新設定, 保存する台帳行, 結果)。
     Firestore は競合時に fn を再実行するため、外部への副作用を起こさないこと。
+    台帳行は id で upsert する（取消も設定と一体で保存できる）。
     child が空なら残高は使わない。既存の transact_setting の契約は変えない。
     """
     return store().transact_setting_entries(key, child, fn, read_keys)

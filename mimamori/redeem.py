@@ -92,7 +92,6 @@ def request(child: str, label: str, cost: int, yen: int = 0,
     if request_key is not None and (not isinstance(request_key, str) or
             not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", request_key)):
         raise ValueError("申込のキーが正しくありません。")
-    points.sync_from_calendar(child)
 
     def change(saved, bal, settings):
         rows = saved or []

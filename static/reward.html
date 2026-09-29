@@ -429,7 +429,7 @@ function paintHistory(){
   list.replaceChildren();
   $("#start").hidden=true;
   if(history==null) return;
-  const rows=[...history].sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  const rows=history.filter(e=>!e.revoked).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
   for(const e of rows){
     const li=element("li");
     li.appendChild(element("span",shortDate(e.date),"date"));
