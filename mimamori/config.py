@@ -19,6 +19,22 @@ def _thinking_budget() -> int:
     return 512
 
 
+def validate_quota_project() -> None:
+    """ローカルのクラウド利用では、環境変数だけで課金先を確認する。"""
+    if "K_SERVICE" in os.environ:
+        return
+    uses_vertex = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "").lower() in {"true", "1"}
+    if not uses_vertex and os.getenv("MIMAMORI_LEDGER") != "firestore":
+        return
+    project = os.getenv("GOOGLE_CLOUD_PROJECT", "")
+    quota_project = os.getenv("GOOGLE_CLOUD_QUOTA_PROJECT", "")
+    if not project.strip() or not quota_project.strip() or quota_project != project:
+        raise RuntimeError(
+            "GOOGLE_CLOUD_QUOTA_PROJECT が GOOGLE_CLOUD_PROJECT と一致していません。"
+            "課金先を固定するため、.env に GOOGLE_CLOUD_QUOTA_PROJECT を入れてください。"
+        )
+
+
 def _children():
     raw = os.getenv("MIMAMORI_CHILDREN", "上の子:junior_high,下の子:elementary")
     out = []
