@@ -16,12 +16,10 @@ ISSUES = ("relative", "no_month", "year_cross", "weekday_mismatch", "vague",
 
 # 「まで／までに」の揺れを拾い、原文の日付表現が大きく違う候補は分ける。
 QUESTION_DATE_RATIO = 0.82
-# 「はちまき準備／持参」を拾い、「運動会／運動会振替休業日」は分ける。
-QUESTION_TITLE_RATIO = 0.6
 
 
-def _question_norm(text):
-    """補足のかっこを中身ごと除く（入れ子にも対応）。保存する原文は変えない。"""
+def _title_parts(text):
+    """言い換え用の本文と補足を分ける。完全一致のキーには使わない。"""
     text = unicodedata.normalize("NFKC", text or "")
     pairs = {"(": ")", "[": "]", "{": "}", "【": "】", "「": "」",
              "『": "』", "〈": "〉", "《": "》", "〔": "〕"}
@@ -34,7 +32,39 @@ def _question_norm(text):
             spans.append((start, index + 1))
     # 閉じていないかっこ以降の本文まで消さない。
     removed = {index for start, end in spans for index in range(start, end)}
-    return dedupe.norm("".join(char for index, char in enumerate(text) if index not in removed))
+    title = dedupe.norm("".join(char for index, char in enumerate(text) if index not in removed))
+    supplements = tuple(dedupe.norm(text[start + 1:end - 1])
+                        for start, end in sorted(spans))
+    return title, supplements
+
+
+_TITLE_VERBS = sorted(("準備", "持参", "用意", "持ってくる", "持っていく",
+                       "持ってくること", "持ってくるもの"), key=len, reverse=True)
+
+
+def _title_paraphrase(a, b):
+    a, a_supplements = _title_parts(a)
+    b, b_supplements = _title_parts(b)
+    if a_supplements and b_supplements and a_supplements != b_supplements:
+        return False
+    short, long = sorted((a, b), key=len)
+    if len(short) >= 2 and long.endswith(short):
+        return True
+
+    def stem(title):
+        for verb in _TITLE_VERBS:
+            if title.endswith(verb):
+                return title[:-len(verb)]
+        return None
+
+    a_stem, b_stem = stem(a), stem(b)
+    return a_stem is not None and len(a_stem) >= 2 and a_stem == b_stem
+
+
+def _question_key(item):
+    return (item.get("child"), dedupe.norm(item.get("title")),
+            unicodedata.normalize("NFKC", item.get("date_text") or ""))
+
 
 
 # 長い語を先に取り、再来週を来週、翌々日を翌日として扱わない。
@@ -66,27 +96,28 @@ def _date_anchors(text):
 
 
 def _question_matches(candidates, rows):
-    """読み取り開始時の記録だけに、件名完全一致→類似度順で1対1に割り当てる。"""
-    keys = [(_question_norm(r.get("title")), _question_norm(r.get("date_text")),
-             _date_anchors(r.get("date_text")))
-            for r in rows]
+    """完全一致を優先し、未回答だけに言い換えを1対1で割り当てる。"""
+    keys = [_question_key(r) for r in rows]
+    anchors = [_date_anchors(r.get("date_text")) for r in rows]
     edges = []
     for i, item in enumerate(candidates):
-        title, text = _question_norm(item.get("title")), _question_norm(item.get("date_text"))
-        anchors = _date_anchors(item.get("date_text"))
+        key = _question_key(item)
+        item_anchors = _date_anchors(item.get("date_text"))
         for j, row in enumerate(rows):
             if (row.get("child") != item.get("child") or
                     row["state"] not in ("waiting", "registering", "answered", "registered")):
                 continue
-            old_title, old_text, old_anchors = keys[j]
-            if anchors != old_anchors:
+            if key == keys[j]:
+                edges.append((True, 1.0, i, j))
                 continue
-            title_score = dedupe.similarity(title, old_title)
-            date_score = dedupe.similarity(text, old_text)
-            if title_score >= QUESTION_TITLE_RATIO and date_score >= QUESTION_DATE_RATIO:
-                edges.append((title == old_title, title_score, date_score, i, j))
+            if row["state"] not in ("waiting", "registering") or item_anchors != anchors[j]:
+                continue
+            date_score = dedupe.similarity(key[2], keys[j][2])
+            if (date_score >= QUESTION_DATE_RATIO and
+                    _title_paraphrase(item.get("title"), row.get("title"))):
+                edges.append((False, date_score, i, j))
     matches, used = {}, set()
-    for _, _, _, i, j in sorted(edges, key=lambda e: (-e[0], -e[1], -e[2], e[3], e[4])):
+    for _, _, i, j in sorted(edges, key=lambda e: (-e[0], -e[1], e[2], e[3])):
         if i not in matches and j not in used:
             matches[i] = rows[j]
             used.add(j)
@@ -190,8 +221,7 @@ def enqueue(items):
     # 同じ読み取り内では正規化後の完全一致だけをまとめる。
     unique = {}
     for item in candidates:
-        key = (item.get("child"), _question_norm(item.get("title")),
-               _question_norm(item.get("date_text")), _date_anchors(item.get("date_text")))
+        key = _question_key(item)
         unique.setdefault(key, item)
     candidates = list(unique.values())
     outcome = {}

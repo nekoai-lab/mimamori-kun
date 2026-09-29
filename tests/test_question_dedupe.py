@@ -170,9 +170,10 @@ def test_fuzzy_paraphrases(capture, state, before, after, old_date, new_date):
     ledger.transact_setting(dates.KEY, lambda rows: [dict(r, state=state) for r in rows])
     result = capture(c, [question(title=after, date_text=new_date)])
     pending = state in ("waiting", "registering")
-    assert result.get("date_questions_count", 0) == int(pending)
-    assert result["skipped_titles"] == ([] if pending else [after])
-    assert records() == [dict(original, state=state)]
+    assert result["date_questions_count"] == 1
+    assert result["skipped_titles"] == []
+    assert records()[0] == dict(original, state=state)
+    assert len(records()) == (1 if pending else 2)
 
 
 @pytest.mark.parametrize("before,after,old_date,new_date", [
@@ -210,12 +211,12 @@ def test_fuzzy_one_existing_row_cannot_absorb_two_candidates():
     assert records()[1]["title"] == "はちまき持参"
 
 
-def test_fuzzy_best_score_wins_before_input_order():
-    dates.enqueue([question(title="運動会予行練習")])
-    ledger.transact_setting(dates.KEY, lambda rows: [dict(r, state="answered") for r in rows])
-    result = dates.enqueue([question(title="予行練習"), question(title="運動会の予行練習")])
-    assert result == {"count": 1, "skipped_titles": ["運動会の予行練習"]}
-    assert records()[1]["title"] == "予行練習"
+def test_fuzzy_one_pending_row_accepts_only_one_paraphrase():
+    dates.enqueue([question(title="予行練習")])
+    result = dates.enqueue([question(title="運動会予行練習"), question(title="秋の予行練習")])
+    assert result == {"count": 2, "skipped_titles": []}
+    assert len(records()) == 2
+    assert records()[1]["title"] == "秋の予行練習"
 
 
 def test_fuzzy_siblings_remain_separate():
@@ -225,14 +226,13 @@ def test_fuzzy_siblings_remain_separate():
 
 
 @pytest.mark.parametrize("brackets", ["(黒い布)", "（黒い布）", "【黒い布】", "[黒い布]", "〔黒い布〕", "（黒い【布】）"])
-def test_fuzzy_brackets_and_batch_exact_duplicates(brackets):
+def test_batch_keeps_supplements_and_rereads_exactly(brackets):
     batch = [question(title="はちまき持参", date_text="今週の金曜日まで"),
              question(title=f"はちまき{brackets} 持参", date_text="今週の金曜日まで（朝）")]
-    assert dates.enqueue(batch) == {"count": 1, "skipped_titles": []}
-    assert len(records()) == 1
-    original = records()[0]
-    assert dates.enqueue(batch[::-1])["count"] == 1
-    assert records() == [original]
+    assert dates.enqueue(batch) == {"count": 2, "skipped_titles": []}
+    original = records()
+    assert dates.enqueue(batch[::-1])["count"] == 2
+    assert records() == original
 
 
 def test_fuzzy_two_pending_prints_survive_rereading():
@@ -244,11 +244,12 @@ def test_fuzzy_two_pending_prints_survive_rereading():
     assert records() == original
 
 
-def test_fuzzy_normalizes_existing_title_and_date_supplements():
-    dates.enqueue([question(title="はちまき【黒い布】準備", date_text="今週の金曜日まで（朝に提出）")])
+def test_date_supplement_is_part_of_original_date_similarity():
+    dates.enqueue([question(title="はちまき【黒い布】準備", date_text="今週の金曜日まで（朝に教室で先生に提出）")])
     original = records()
     assert dates.enqueue([question(title="はちまき持参", date_text=" 今週の 金曜日までに ")])["count"] == 1
-    assert records() == original
+    assert len(records()) == 2
+    assert records()[0] == original[0]
 
 
 @pytest.mark.parametrize("state", ["waiting", "registering", "registered", "answered"])
@@ -295,3 +296,74 @@ def test_date_anchor_spelling_variations(old_date, new_date):
     original = records()
     assert dates.enqueue([question(date_text=new_date)]) == {"count": 1, "skipped_titles": []}
     assert records() == original
+
+
+@pytest.mark.parametrize("state", ["waiting", "registering", "registered", "answered"])
+@pytest.mark.parametrize("before,after,date_text", [
+    ("算数プリント 提出", "国語プリント 提出", "今週の金曜日まで"),
+    ("保護者会 出欠票 提出", "遠足 出欠票 提出", "今週の金曜日まで"),
+    ("持ち物(体操服)", "持ち物(水着)", "来週の月曜日"),
+])
+def test_distinct_questions_are_never_silently_dropped(capture, state, before, after, date_text):
+    c = client()
+    capture(c, [question(title=before, date_text=date_text)])
+    original = records()[0]
+    if state == "registered":
+        assert c.post(f"/api/date_questions/{original['id']}/register",
+                      json={"date": "2026-12-09"}).status_code == 200
+    else:
+        ledger.transact_setting(dates.KEY, lambda rows: [dict(r, state=state) for r in rows])
+    result = capture(c, [question(title=after, date_text=date_text)])
+    assert result["date_questions_count"] == 1
+    assert result["skipped"] == 0
+    assert [r["title"] for r in records()] == [before, after]
+
+
+def test_batch_preserves_different_parenthesis_contents(capture):
+    result = capture(client(), [question(title=t, date_text="来週の月曜日")
+                                for t in ("持ち物(体操服)", "持ち物(水着)")])
+    assert result["date_questions_count"] == 2
+    assert result["skipped"] == 0
+    assert [r["title"] for r in records()] == ["持ち物(体操服)", "持ち物(水着)"]
+
+
+@pytest.mark.parametrize("old_date,new_date", [
+    ("今週の金曜日まで", "今週の金曜日までに"),
+    ("今週の金曜日まで", " 今週の金曜日まで "),
+    ("今週の金曜日まで(朝)", "今週の金曜日まで"),
+])
+def test_nonexact_dates_do_not_match_completed_question(old_date, new_date):
+    dates.enqueue([question(date_text=old_date)])
+    ledger.transact_setting(dates.KEY, lambda rows: [dict(r, state="registered") for r in rows])
+    assert dates.enqueue([question(date_text=new_date)]) == {"count": 1, "skipped_titles": []}
+    assert len(records()) == 2
+
+@pytest.mark.parametrize("verb", [
+    "準備", "持参", "用意", "持ってくる", "持っていく", "持ってくること", "持ってくるもの",
+])
+def test_allowed_terminal_verbs(verb):
+    dates.enqueue([question(title="はちまき準備")])
+    original = records()
+    assert dates.enqueue([question(title=f"はちまき{verb}")]) == {"count": 1, "skipped_titles": []}
+    assert records() == original
+
+
+@pytest.mark.parametrize("before,after", [
+    ("服準備", "服持参"),
+    ("会", "運動会"),
+    ("はちまき準備", "はちまき"),
+    ("はちまき持参", "はちまき持参予定"),
+    ("はちまき(黒い布)準備", "はちまき(赤い布)持参"),
+])
+def test_title_paraphrase_boundaries(before, after):
+    dates.enqueue([question(title=before)])
+    dates.enqueue([question(title=after)])
+    assert len(records()) == 2
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_full_exact_key_precedes_date_paraphrase(reverse):
+    dates.enqueue([question()])
+    batch = [question(date_text="来週の水曜日までに"), question()]
+    assert dates.enqueue(batch[::-1] if reverse else batch)["count"] == 2
+    assert [r["date_text"] for r in records()] == ["来週の水曜日まで", "来週の水曜日までに"]
