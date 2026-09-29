@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+import re
 from typing import Any, Dict, List, Optional
 
 from . import ledger, points
@@ -68,10 +69,6 @@ def requests(child: str = "", month: str = "", status: str = "") -> List[Dict[st
     return sorted(rows, key=lambda r: r.get("at", ""), reverse=True)
 
 
-def _save(rows: List[Dict[str, Any]]) -> None:
-    ledger.set_setting(K_REQ, rows[-200:])
-
-
 def used_this_month(child: str = "") -> Dict[str, int]:
     """今月すでに使ったぶん。**断られたものは数えない。**"""
     rows = [r for r in requests(child=child, month=_month())
@@ -89,37 +86,59 @@ def remaining(child: str = "") -> Dict[str, Any]:
     }
 
 
-def request(child: str, label: str, cost: int, yen: int = 0) -> Dict[str, Any]:
-    """子が申し込む。**ここでポイントを引く**（断られたら戻す）。"""
-    if not child or not label:
-        raise ValueError("だれが・なにと交換するかが要ります。")
-    cost = int(cost)
-    if cost <= 0:
-        raise ValueError("交換に必要なポイントが正しくありません。")
+def request(child: str, label: str, cost: int, yen: int = 0,
+            request_key: Optional[str] = None, allowed_rewards=None) -> Dict[str, Any]:
+    """同じ子・キーは最初の申込を返す。キーなしは毎回新しい申込。"""
+    if request_key is not None and (not isinstance(request_key, str) or
+            not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", request_key)):
+        raise ValueError("申込のキーが正しくありません。")
+    points.sync_from_calendar(child)
 
-    c, used = cap(), used_this_month(child)
-    if c["count"] and used["count"] + 1 > c["count"]:
-        raise ValueError(f"今月の交換は{c['count']}回までです。来月になったらまた申し込めます。")
-    if c["yen"] and int(yen) and used["yen"] + int(yen) > c["yen"]:
-        raise ValueError(f"今月の上限（{c['yen']}円）をこえます。おうちの人と相談してください。")
+    def change(saved, bal, settings):
+        rows = saved or []
+        if request_key is not None:
+            for row in rows:
+                if row.get("child") == child and row.get("request_key") == request_key:
+                    return rows, [], row
+        if not child or not label:
+            raise ValueError("だれが・なにと交換するかが要ります。")
+        if int(cost) <= 0:
+            raise ValueError("交換に必要なポイントが正しくありません。")
+        if allowed_rewards is not None and not any(
+            r.get("label") == label and
+            int(r.get("points") or r.get("cost") or 0) == int(cost) and
+            int(r.get("yen") or 0) == int(yen or 0) for r in allowed_rewards
+        ):
+            raise ValueError("交換できるものの中から選んでください。")
+        c = {"yen": 0, "count": 0}
+        for k in c:
+            try:
+                c[k] = max(0, int((settings[K_CAP] or {}).get(k, 0)))
+            except (TypeError, ValueError):
+                pass
+        used = [r for r in rows if r.get("child") == child and
+                _month(r.get("at", "")) == _month() and
+                r.get("status") in (REQUESTED, APPROVED, HANDED)]
+        if c["count"] and len(used) + 1 > c["count"]:
+            raise ValueError(f"今月の交換は{c['count']}回までです。来月になったらまた申し込めます。")
+        if c["yen"] and int(yen) and sum(int(r.get("yen") or 0) for r in used) + int(yen) > c["yen"]:
+            raise ValueError(f"今月の上限（{c['yen']}円）をこえます。おうちの人と相談してください。")
+        if bal < int(cost):
+            raise ValueError("ポイントが足りません")
+        request_id = uuid.uuid4().hex
+        entry = ledger.make_entry(child, -int(cost), "redeem", created_by="parent",
+                                  title=label, redeem_id=request_id)
+        row = {
+            "id": request_id, "child": child, "label": label, "cost": int(cost),
+            "yen": int(yen or 0), "status": REQUESTED, "at": _now(),
+            "ledger_id": entry["id"], "decided_at": "", "handed_at": "", "note": "",
+        }
+        if request_key is not None:
+            row["request_key"] = request_key
+        # キーを忘れると古い再送で再び引かれるので、200件で切り捨てない。
+        return rows + [row], [entry], row
 
-    entry = points.redeem(child, cost, label)          # 残高が足りなければここで落ちる
-    row = {
-        "id": uuid.uuid4().hex[:8],
-        "child": child,
-        "label": label,
-        "cost": cost,
-        "yen": int(yen or 0),
-        "status": REQUESTED,
-        "at": _now(),
-        "ledger_id": entry.get("id", ""),
-        "decided_at": "",
-        "handed_at": "",
-        "note": "",
-    }
-    rows = (ledger.get_setting(K_REQ) or []) + [row]
-    _save(rows)
-    return row
+    return ledger.transact_setting_entries(K_REQ, child, change, (K_CAP,))
 
 
 def _find(rows: List[Dict[str, Any]], request_id: str) -> Dict[str, Any]:
@@ -129,46 +148,44 @@ def _find(rows: List[Dict[str, Any]], request_id: str) -> Dict[str, Any]:
     raise ValueError("その申し込みが見つかりませんでした。")
 
 
+def _decide(request_id: str, status: str, note: str = "") -> Dict[str, Any]:
+    def change(saved, _bal, _settings):
+        rows = saved or []
+        r = _find(rows, request_id)
+        allowed = (REQUESTED,) if status == APPROVED else (REQUESTED, APPROVED)
+        if r["status"] not in allowed:
+            raise ValueError(f"いまの状態は「{LABEL.get(r['status'], r['status'])}」です。")
+        if status == REJECTED and not note.strip():
+            raise ValueError("断るときは、理由を書いてください（子どもに伝わります）。")
+        r["status"] = status
+        added = []
+        if status == HANDED:
+            r["handed_at"] = _now()
+            if not r.get("decided_at"):
+                r["decided_at"] = r["handed_at"]
+        else:
+            r["decided_at"] = _now()
+            r["note"] = note.strip() if status == REJECTED else note
+        if status == REJECTED:
+            added.append(ledger.make_entry(
+                r["child"], r["cost"], "adjust", created_by="parent",
+                title=f"「{r['label']}」の交換を取りやめ：{note.strip()}", redeem_id=r["id"]))
+        return rows, added, r
+
+    return ledger.transact_setting_entries(K_REQ, "", change)
+
+
 def approve(request_id: str, note: str = "") -> Dict[str, Any]:
-    rows = ledger.get_setting(K_REQ) or []
-    r = _find(rows, request_id)
-    if r["status"] != REQUESTED:
-        raise ValueError(f"いまの状態は「{LABEL.get(r['status'], r['status'])}」です。")
-    r["status"] = APPROVED
-    r["decided_at"] = _now()
-    r["note"] = note
-    _save(rows)
-    return r
+    return _decide(request_id, APPROVED, note)
 
 
 def reject(request_id: str, note: str = "") -> Dict[str, Any]:
-    """断る。**引いたポイントは戻す。**理由は必ず残す。"""
-    rows = ledger.get_setting(K_REQ) or []
-    r = _find(rows, request_id)
-    if r["status"] not in (REQUESTED, APPROVED):
-        raise ValueError(f"いまの状態は「{LABEL.get(r['status'], r['status'])}」です。")
-    if not note.strip():
-        raise ValueError("断るときは、理由を書いてください（子どもに伝わります）。")
-    r["status"] = REJECTED
-    r["decided_at"] = _now()
-    r["note"] = note.strip()
-    _save(rows)
-    points.adjust(r["child"], r["cost"], f"「{r['label']}」の交換を取りやめ：{note.strip()}")
-    return r
+    """状態を変えるのと同時に、一度だけポイントを戻す。"""
+    return _decide(request_id, REJECTED, note)
 
 
 def hand(request_id: str) -> Dict[str, Any]:
-    """手渡した。ここで初めて「終わり」。買って渡すのは人がやる。"""
-    rows = ledger.get_setting(K_REQ) or []
-    r = _find(rows, request_id)
-    if r["status"] not in (APPROVED, REQUESTED):
-        raise ValueError(f"いまの状態は「{LABEL.get(r['status'], r['status'])}」です。")
-    r["status"] = HANDED
-    r["handed_at"] = _now()
-    if not r.get("decided_at"):
-        r["decided_at"] = r["handed_at"]
-    _save(rows)
-    return r
+    return _decide(request_id, HANDED)
 
 
 # ---------------------------------------------------------------- あと何日

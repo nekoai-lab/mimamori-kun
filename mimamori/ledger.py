@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import tempfile
 import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -61,9 +62,17 @@ class _LocalStore:
             return {"entries": [], "settings": {}}
 
     def _write(self, data: Dict[str, Any]) -> None:
-        self.path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        # 同じファイルシステム上で置き換える。書き込み失敗で元の台帳を壊さない。
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                             dir=self.path.parent, delete=False) as f:
+                temporary = Path(f.name)
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            temporary.replace(self.path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     def append(self, entry: Dict[str, Any]) -> Dict[str, Any]:
         with _LOCAL_LOCK:
@@ -73,7 +82,8 @@ class _LocalStore:
         return entry
 
     def entries(self, child: Optional[str] = None) -> List[Dict[str, Any]]:
-        rows = self._read()["entries"]
+        with _LOCAL_LOCK:
+            rows = self._read()["entries"]
         return [r for r in rows if child is None or r.get("child") == child]
 
     def update(self, entry_id: str, patch: Dict[str, Any]) -> bool:
@@ -103,6 +113,20 @@ class _LocalStore:
             data["settings"][key] = new
             self._write(data)
             return new
+
+
+    def transact_setting_entries(self, key, child, fn, read_keys=()):
+        with _LOCAL_LOCK:
+            data = self._read()
+            settings = data.setdefault("settings", {})
+            bal = sum(e["delta"] for e in data["entries"]
+                      if e.get("child") == child and not e.get("revoked"))
+            new, added, result = fn(settings.get(key), bal,
+                                    {k: settings.get(k) for k in read_keys})
+            settings[key] = new
+            data["entries"].extend(added)
+            self._write(data)
+            return result
 
 
 class _FirestoreStore:
@@ -156,6 +180,35 @@ class _FirestoreStore:
         return run(self._db.transaction())
 
 
+    def transact_setting_entries(self, key, child, fn, read_keys=()):
+        from google.cloud import firestore
+
+        settings = self._family.collection("settings")
+        entries = self._family.collection("points_ledger")
+        ref = settings.document(key)
+
+        @firestore.transactional
+        def run(tx):
+            snap = ref.get(transaction=tx)
+            extra = {}
+            for k in read_keys:
+                other = settings.document(k).get(transaction=tx)
+                extra[k] = other.to_dict().get("value") if other.exists else None
+            # 読み取りはすべて書き込みより前。残高確認も同じスナップショットで行う。
+            rows = (entries.where("child", "==", child).stream(transaction=tx)
+                    if child else [])
+            bal = sum(e.get("delta", 0) for e in (r.to_dict() for r in rows)
+                      if not e.get("revoked"))
+            new, added, result = fn(snap.to_dict().get("value") if snap.exists else None,
+                                    bal, extra)
+            tx.set(ref, {"value": new})
+            for entry in added:
+                tx.set(entries.document(entry["id"]), entry)
+            return result
+
+        return run(self._db.transaction())
+
+
 _store = None
 
 
@@ -185,15 +238,16 @@ def store():
 
 # ------------------------------------------------------------------ 台帳の操作
 
-def add(
+def make_entry(
     child: str,
     delta: int,
     reason: str,
     ref_id: Optional[str] = None,
     created_by: str = "agent",
     title: str = "",
+    redeem_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """台帳に1行足す。**既存の行は書き換えない。**"""
+    """保存前の台帳行を作る。トランザクション内でも外部への書き込みはしない。"""
     entry = {
         "id": uuid.uuid4().hex,
         "child": child,
@@ -205,7 +259,15 @@ def add(
         "created_at": _now(),
         "revoked": False,
     }
-    return store().append(entry)
+    if redeem_id is not None:
+        entry["redeem_id"] = redeem_id
+    return entry
+
+
+def add(child: str, delta: int, reason: str, ref_id: Optional[str] = None,
+        created_by: str = "agent", title: str = "") -> Dict[str, Any]:
+    """台帳に1行足す。既存の行は書き換えない。"""
+    return store().append(make_entry(child, delta, reason, ref_id, created_by, title))
 
 
 def revoke(entry_id: str) -> bool:
@@ -252,3 +314,13 @@ def transact_setting(key: str, fn: Callable[[Any], Any]) -> Any:
     fn はやり直しで何度か呼ばれることがあるので、外の状態を変えないこと（結果は返り値で受け取る）。
     """
     return store().transact_setting(key, fn)
+
+
+def transact_setting_entries(key, child, fn, read_keys=()):
+    """設定・残高の確認と設定・台帳行の保存をまとめる。
+
+    fn(設定, 残高, 追加で読む設定) -> (新設定, 追加する台帳行, 結果)。
+    Firestore は競合時に fn を再実行するため、外部への副作用を起こさないこと。
+    child が空なら残高は使わない。既存の transact_setting の契約は変えない。
+    """
+    return store().transact_setting_entries(key, child, fn, read_keys)
