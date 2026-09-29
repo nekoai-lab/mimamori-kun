@@ -23,6 +23,8 @@ from mimamori import ledger
 from mimamori.kid_agent import talk
 from mimamori.calendar_tools import (
     create_events,
+    validate_updates,
+    undo_update,
     event_meta,
     list_events,
     list_raw,
@@ -440,13 +442,17 @@ def register(req: RegisterRequest, request: Request):
         # 子どもは自分のぶんだけ入れられる。「子が入れた」として親に知らせる。保留にはできない
         for i in req.items:
             if i.get("child") not in (None, "", "不明", user):
-                raise HTTPException(403, "自分のぶんだけ入れられます。")
+                raise HTTPException(400 if i.get("branch") in ("moved", "diff") else 403,
+                                    "自分のぶんだけ入れられます。")
         req.items = [dict(i, child=user) for i in req.items]
         req.source, req.pending = "kid", False
     kid = req.source == "kid"
     items = [dict(i, source=("kid" if kid else "parent")) for i in req.items]
     try:
-        results = create_events(items, "pending" if req.pending else "todo")
+        validate_updates(items)
+        results = create_events(items, "pending" if req.pending else "todo", actor=user)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"カレンダー登録に失敗しました: {e}") from e
 
@@ -518,10 +524,15 @@ def api_register_undo(req: UndoRequest, request: Request):
     if len(req.ids) > 60:
         raise HTTPException(400, "一度に取り消せるのは60件までです。")
     for eid in req.ids:
-        _child_can_undo(request, eid)
+        if not eid.startswith("update:"):
+            _child_can_undo(request, eid)
     done, failed = 0, []
     for eid in req.ids:
         try:
+            if eid.startswith("update:"):
+                undo_update(eid, _user(request), auth.is_parent(_user(request)))
+                done += 1
+                continue
             r = set_status(eid, "rejected")
             if r.get("status") == "error":
                 failed.append(eid)

@@ -85,16 +85,33 @@ def test_phone_then_pc_extract_register_once(monkeypatch, first_title, second_ti
     first = extract(phone)
     assert first["skipped"] == 0
     assert len(first["items"]) == 1
+    demo_event = next(e.copy() for e in calendar_tools._demo_store if e["id"] == "d5")
+    moves_demo = dedupe.norm(first_title) == dedupe.norm(demo_event["summary"])
+    if moves_demo:
+        assert first["items"][0]["branch"] == "moved"
+        assert first["items"][0]["matched_id"] == demo_event["id"]
+        assert demo_event["date"] != base["date"]
     # 同名の初期予定があるケースは moved。親が選んだ候補を登録する。
     # 子ども画面でも same 以外は登録対象になる。
     response = phone.post("/api/register", json={"items": first["items"]})
     assert response.status_code == 200
     assert [r["status"] for r in response.json()["results"]] == ["ok"]
+    if moves_demo:
+        moved = next(e for e in calendar_tools._demo_store if e["id"] == demo_event["id"])
+        assert moved["date"] == base["date"]
+        assert moved["summary"] == demo_event["summary"]
+        assert response.json()["results"][0]["id"] == demo_event["id"]
     second = extract(pc)
     assert second == {"items": [], "skipped": 1, "skipped_titles": [second_title]}
-    # 完全一致は画面から登録しない。同日分は1件、デモの別日分はそのまま。
+    # 完全一致は画面から登録しない。同日分は1件、日程変更なら既存のID・件名を保つ。
     rows = calendar_tools.list_raw(base["date"], base["date"])
     assert len(rows) == 1
-    assert rows[0]["summary"] == first_title
+    assert rows[0]["summary"] == (demo_event["summary"] if moves_demo else first_title)
     assert rows[0]["id"] == response.json()["results"][0]["id"]
-    assert any(e["id"] == "d5" for e in calendar_tools._demo_store)
+    if moves_demo:
+        same_event = [e for e in calendar_tools._demo_store
+                      if dedupe.norm(e["summary"]) == dedupe.norm(demo_event["summary"])]
+        assert len(same_event) == 1
+        assert same_event[0]["id"] == demo_event["id"]
+    else:
+        assert any(e["id"] == "d5" for e in calendar_tools._demo_store)
