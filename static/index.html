@@ -275,6 +275,7 @@ a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-of
 const $ = s => document.querySelector(s);
 let picked = null, extraction = null, previewURL = "";
 let audience = "pending", currentChild = "", generation = 0, busy = false;
+let registrationUncertain = false;
 let photoConsumed = false, manualLocked = false, undoTick = null;
 const isKid = () => audience === "kid";
 const current = token => token === generation;
@@ -353,7 +354,7 @@ $("#identity-retry").addEventListener("click", confirmIdentity);
 function controls(){
   $("#file").disabled = busy || !canAct();
   $("#album").disabled = busy || !canAct();
-  $("#go").disabled = busy || !picked || !canAct() || photoConsumed;
+  $("#go").disabled = busy || !picked || !canAct() || photoConsumed || registrationUncertain;
   $("#qadd").disabled = busy || !canAct() || manualLocked;
   $("#qsame").disabled = busy || !canAct() || manualLocked;
 }
@@ -361,7 +362,7 @@ function selectedChild(){
   const child = $("#child").value;
   if(!child || child === currentChild) return;
   currentChild = child; qChild = child; generation++;
-  busy = false; photoConsumed = false; manualLocked = false;
+  busy = false; photoConsumed = false; registrationUncertain = false; manualLocked = false;
   extraction = null; picked = null;
   if(previewURL) URL.revokeObjectURL(previewURL);
   previewURL = "";
@@ -410,7 +411,7 @@ async function choosePhoto(e){
   const f = e.target.files[0];
   if(!f){ $("#note").textContent = "写真を選ぶか、手でいれられます。"; return; }
   if(f.type && !f.type.startsWith("image/")){ readFailure(); revealResult(document.activeElement); return; }
-  extraction = null; photoConsumed = false;
+  extraction = null; photoConsumed = false; registrationUncertain = false;
   picked = f;
   if(previewURL) URL.revokeObjectURL(previewURL);
   previewURL = URL.createObjectURL(f);
@@ -426,7 +427,7 @@ for(const id of ["#file", "#album"]){
 }
 $("#go").addEventListener("click", readPhoto);
 async function readPhoto(){
-  if(!canAct() || !picked || busy || photoConsumed) return;
+  if(!canAct() || !picked || busy || photoConsumed || registrationUncertain) return;
   if(navigator.onLine === false){
     $("#note").textContent = "つながったら、よみとろう。写真はこのページにだけ残ります。閉じると失われます。";
     return;
@@ -619,6 +620,7 @@ function collect(){
       child: who ? who.textContent.trim() : src.child,
       title: el.querySelector('[data-f="title"]').value,
       date: el.querySelector('[data-f="date"]').value,
+      date_edited: src.date_edited === true || el.querySelector('[data-f="date"]').value !== src.date,
       time_start: el.querySelector('[data-f="time_start"]').value || null,
       branch: src.branch || "new",
       matched_id: src.matched_id || null,
@@ -630,14 +632,32 @@ function collect(){
 }
 
 async function doRegister(){
-  if(!canAct() || busy || photoConsumed) return;
+  if(!canAct() || isKid() || busy || registrationUncertain) return;
   const items = collect();
   if(!items.length){ $("#regnote").textContent = "チェックが入っていません"; return; }
-  photoConsumed = true;
   busy = true; controls(); $("#reg").disabled = true;
   const token = generation;
-  await registerItems(items, token);
-  if(current(token)){ $("#result").innerHTML = ""; busy = false; controls(); }
+  const data = await registerItems(items, token);
+  if(!current(token)) return;
+  if(data){
+    const remaining = [];
+    document.querySelectorAll(".item").forEach(el => {
+      const index = items.findIndex(i => i.id === el.dataset.id);
+      const result = data.results.find(r => r.input_index === index);
+      if(index >= 0 && result && result.status === "ok"){
+        el.remove(); photoConsumed = true;
+      }else{
+        remaining.push(el.dataset.id);
+        if(index >= 0 && (!result || result.status !== "rejected")) registrationUncertain = true;
+        if(result && result.status === "rejected")
+          el.insertAdjacentHTML("beforeend", '<p class="err">'+esc(result.error)+'</p>');
+      }
+    });
+    extraction.items = extraction.items.filter(i => remaining.includes(i.id));
+    if(!remaining.length) $("#result").innerHTML = "";
+  }else registrationUncertain = true;
+  busy = false; controls();
+  if($("#reg")) $("#reg").disabled = registrationUncertain;
 }
 async function registerItems(items, token, reveal = true){
   if(!canAct() || !current(token)) return;
@@ -648,13 +668,15 @@ async function registerItems(items, token, reveal = true){
     const data = await qPost(items);
     if(!current(token)) return;
     showRegistered(data, items.length);
+    return data;
   }catch(err){
     if(current(token)) $("#completion").insertAdjacentHTML("afterbegin", '<div class="err">入ったか たしかめられなかったよ。もう一度送る前に、一覧で確認してね。</div>'+exits());
   }finally { if(current(token)){ $("#note").textContent = ""; if(reveal) revealResult(origin); } }
 }
 function showRegistered(data, expected){
   const ok = data.results.filter(r => r.status === "ok");
-  const ng = data.results.filter(r => r.status !== "ok");
+  const ng = data.results.filter(r => r.status !== "ok" && r.status !== "rejected");
+  const rejected = data.results.filter(r => r.status === "rejected");
   const missing = Math.max(0, expected - data.results.length);
   let h = '';
   if(ok.length){
@@ -665,6 +687,8 @@ function showRegistered(data, expected){
   }
   if(ng.length || missing) h += '<div class="err">入ったか たしかめられなかったよ。未確認 '+(ng.length+missing)+'件。成功したぶんは送り直さず、一覧で確認してね。<ul>'
     + ng.map(r => '<li>'+esc(r.title)+'</li>').join('')+'</ul></div>';
+  if(rejected.length) h += '<div class="err">登録していない候補があります。日付を直して登録してください。<ul>'
+    + rejected.map(r => '<li>'+esc(r.title)+'：'+esc(r.error)+'</li>').join('')+'</ul></div>';
   h += exits();
   // 以前の成功表示も残す。undo は直近の成功したまとまりにだけ付ける。
   if($("#undo")) $("#undo").remove();
@@ -738,7 +762,7 @@ async function qPost(items){
     body: JSON.stringify({items: items, pending: false, source: isKid() ? "kid" : "parent"})
   });
   const j = await res.json();
-  if (!res.ok || !Array.isArray(j.results)) throw new Error("登録を確認できませんでした");
+  if ((!res.ok && !(res.status === 400 && Array.isArray(j.results) && j.results.every(r => r.status === "rejected"))) || !Array.isArray(j.results)) throw new Error("登録を確認できませんでした");
   return j;
 }
 

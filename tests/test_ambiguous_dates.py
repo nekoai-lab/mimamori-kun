@@ -276,3 +276,45 @@ def test_unknown_child_requires_valid_selection_before_registration(monkeypatch,
     body["child"] = "下の子"
     assert c.post(f"/api/date_questions/{id_}/register", json=body).status_code == 200
     assert any(r["child"] == "下の子" and r["summary"] == "運動会" for r in calendar_tools._demo_store)
+
+
+@pytest.mark.parametrize("original,chosen", [
+    ("12月5日（土）", "2026-12-06"),
+    ("12月5日（金）", "2026-12-06"),
+    ("1月8日", "2027-01-09"),
+])
+def test_parent_edited_date_registers_without_rechecking_source(original, chosen):
+    c = client()
+    r = c.post("/api/register", json={"items": [item(date_text=original, date=chosen, date_edited=True)]})
+    assert r.status_code == 200
+    assert r.json()["results"][0]["status"] == "ok"
+    assert next(r for r in calendar_tools._demo_store if r["summary"] == "運動会")["date"] == chosen
+
+
+@pytest.mark.parametrize("patch", [
+    {"date": "2026-12-06"},
+    {"date_text": "12月5日（金）"},
+    {"date": None, "date_edited": True},
+    {"date": "2026-02-30", "date_edited": True},
+    {"date": "20261206", "date_edited": True},
+    {"date_issues": ["low_confidence"], "date_edited": True},
+    {"end_date": "2026-12-04", "date_edited": True},
+])
+def test_rejected_date_does_not_block_valid_candidate(patch):
+    c = client()
+    bad = item(**patch)
+    good = item(title="登録できる予定")
+    r = c.post("/api/register", json={"items": [bad, good]})
+    assert r.status_code == 200
+    results = r.json()["results"]
+    assert [(r["input_index"], r["status"]) for r in results] == [(0, "rejected"), (1, "ok")]
+    assert results[0]["error"]
+    assert not any(r["summary"] == bad["title"] for r in calendar_tools._demo_store)
+    assert any(r["summary"] == good["title"] for r in calendar_tools._demo_store)
+    assert c.post("/api/register", json={"items": [bad]}).status_code == 400
+
+
+def test_child_cannot_claim_parent_date_edit():
+    c = client(True)
+    r = c.post("/api/register", json={"items": [item(child="下の子", date="2026-12-06", date_edited=True)]})
+    assert r.status_code == 400

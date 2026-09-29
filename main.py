@@ -448,14 +448,6 @@ def register(req: RegisterRequest, request: Request):
     """
     if not req.items:
         raise HTTPException(400, "登録するものがありません。")
-    for i in req.items:
-        _check_item(i)
-        try:
-            issues = ambiguous_dates.check(i)["date_issues"]
-        except (TypeError, ValueError):
-            raise HTTPException(400, "日付の確認情報が不正です。")
-        if issues:
-            raise HTTPException(400, "日付の確認が必要です。『確認すること』から日付を選んでください。")
     user = _user(request)
     if not auth.is_parent(user):
         # 子どもは自分のぶんだけ入れられる。「子が入れた」として親に知らせる。保留にはできない
@@ -467,6 +459,29 @@ def register(req: RegisterRequest, request: Request):
         req.source, req.pending = "kid", False
     kid = req.source == "kid"
     items = [dict(i, source=("kid" if kid else "parent")) for i in req.items]
+    # 日付の不備は候補ごとに返す。未登録が確実なものだけ画面で修正・再送できる。
+    accepted, rejected = [], []
+    for index, i in enumerate(items):
+        try:
+            _check_item(i)
+            date = dt.date.fromisoformat(i.get("date") or "")
+            end = dt.date.fromisoformat(i["end_date"]) if i.get("end_date") else date
+            if end < date:
+                raise ValueError()
+            # 親が指定した日付は原文と照合しない。モデルの未解決理由は残す。
+            edited = auth.is_parent(user) and i.get("date_edited") is True
+            issues = i.get("date_issues") if edited else ambiguous_dates.check(i)["date_issues"]
+            if issues:
+                raise HTTPException(400, "日付の確認が必要です。この候補の日付を直してください。")
+        except (HTTPException, TypeError, ValueError) as exc:
+            rejected.append({"input_index": index, "title": i.get("title", ""),
+                             "status": "rejected", "error": exc.detail if isinstance(exc, HTTPException)
+                             else "有効な日付を選んでください。"})
+        else:
+            accepted.append((index, i))
+    items = [i for _, i in accepted]
+    if not items:
+        return JSONResponse(status_code=400, content={"results": rejected, "notice": None})
     try:
         validate_updates(items)
         results = create_events(items, "pending" if req.pending else "todo", actor=user)
@@ -474,6 +489,9 @@ def register(req: RegisterRequest, request: Request):
         raise HTTPException(400, str(e)) from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"カレンダー登録に失敗しました: {e}") from e
+
+    results = [dict(result, input_index=index) for (index, _), result in zip(accepted, results)]
+    results = sorted(results + rejected, key=lambda r: r["input_index"])
 
     notice = None
     if kid:
