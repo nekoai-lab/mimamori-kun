@@ -23,6 +23,7 @@ from mimamori.agent import read_otayori, read_year_plan, stream_otayori
 from mimamori import appearance as appearance_mod
 from mimamori import ambiguous_dates
 from mimamori import auth
+from mimamori import dedupe
 from mimamori import images as images_mod
 from mimamori import ledger
 from mimamori.kid_agent import talk
@@ -676,6 +677,24 @@ def api_date_register(id_: str, req: DateAnswer, request: Request):
     if row["state"] == "registered":
         return row["result"]
     try:
+        # 読めないときは従来どおり登録する。時刻・持ち物の差分更新はしない。
+        try:
+            existing = list_raw(row["chosen_date"], row["chosen_date"])
+        except Exception:  # noqa: BLE001
+            existing = []
+        title = row.get("title") or ""
+        same = next((ev for ev in existing
+                     if ev.get("id") and ev.get("status") != "rejected"
+                     and ev.get("child") == row["child"]
+                     and ev.get("date") == row["chosen_date"]
+                     and dedupe.norm(title)
+                     and (dedupe.norm(title) == dedupe.norm(ev.get("summary", ""))
+                          or ambiguous_dates._title_paraphrase(title, ev.get("summary", "")))), None)
+        if same:
+            result = {"state": "registered", "already": True,
+                      "results": [{"status": "same", "id": same["id"], "title": title}]}
+            ambiguous_dates.finish(id_, result)
+            return result
         results = create_events([_date_calendar_item(row)], "todo", actor=_user(request))
         if len(results) == 1 and results[0].get("status") == "error":
             _date_action(id_, "retry")
@@ -741,12 +760,20 @@ def api_register_undo(req: UndoRequest, request: Request):
         raise HTTPException(400, "取り消すものがありません。")
     if len(req.ids) > 60:
         raise HTTPException(400, "一度に取り消せるのは60件までです。")
+    # 日付確認で参照しただけの予定は、この結果から取り消せない。
+    referenced_ids = {r["id"] for row in (ledger.get_setting(ambiguous_dates.KEY) or [])
+                      if (row.get("result") or {}).get("already")
+                      for r in row["result"].get("results", [])
+                      if r.get("status") == "same" and r.get("id")}
     for eid in req.ids:
         if not eid.startswith("update:"):
             _child_can_undo(request, eid)
     done, failed = 0, []
     for eid in req.ids:
         try:
+            if eid in referenced_ids:
+                failed.append(eid)
+                continue
             if eid.startswith("update:"):
                 undo_update(eid, _user(request), auth.is_parent(_user(request)))
                 done += 1
