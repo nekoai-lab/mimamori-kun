@@ -112,10 +112,10 @@ routes.set('/api/register',registerOK);
 routes.set('/api/extract',()=>response({items:[item()],date_questions_count:1}));
 await choose();await readPhoto();
 assert.equal(registrations().length,1);assert.equal(registrations()[0].items.length,1);
-assert.match(nodes.get('result').innerHTML,/日付は おうちの人に きいてもらうね/);
+assert.match(nodes.get('result').innerHTML,/日付が わからないものは おうちの人に きいてもらうね/);
 routes.set('/api/extract',()=>response({items:[],date_questions_count:1}));
 await choose();await readPhoto();assert.equal(registrations().length,1);
-assert.match(nodes.get('result').innerHTML,/日付は おうちの人に きいてもらうね/);
+assert.match(nodes.get('result').innerHTML,/日付が わからないものは おうちの人に きいてもらうね/);
 ''')
 
 

@@ -79,6 +79,7 @@ input:focus,textarea:focus,button:focus-visible{outline:2px solid var(--accent);
 .btn.primary{background:var(--accent);color:var(--paper);border-color:var(--accent)}
 .btn.primary:disabled{opacity:.45;cursor:not-allowed}
 .btn.ghost{background:transparent;color:var(--ink-2);border-color:var(--line-strong)}
+.retry-secondary .btn{font-size:12.5px;padding:8px 12px}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:16px}
 .spinner{width:15px;height:15px;border:2px solid var(--accent-soft);border-top-color:var(--accent);
   border-radius:50%;animation:spin .8s linear infinite;display:inline-block;vertical-align:-2px}
@@ -277,6 +278,7 @@ a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-of
 </dialog>
 <script>
 const $ = s => document.querySelector(s);
+let resizedPhoto = null;
 let picked = null, extraction = null, previewURL = "";
 let audience = "pending", currentChild = "", generation = 0, busy = false;
 let registrationUncertain = false;
@@ -359,6 +361,7 @@ function controls(){
   $("#file").disabled = busy || !canAct();
   $("#album").disabled = busy || !canAct();
   $("#go").disabled = busy || !picked || !canAct() || photoConsumed || registrationUncertain;
+  if($("#retry-read")) $("#retry-read").disabled = $("#go").disabled;
   $("#qadd").disabled = busy || !canAct() || manualLocked;
   $("#qsame").disabled = busy || !canAct() || manualLocked;
 }
@@ -367,7 +370,7 @@ function selectedChild(){
   if(!child || child === currentChild) return;
   currentChild = child; qChild = child; generation++;
   busy = false; photoConsumed = false; registrationUncertain = false; manualLocked = false;
-  extraction = null; picked = null;
+  extraction = null; picked = null; resizedPhoto = null;
   if(previewURL) URL.revokeObjectURL(previewURL);
   previewURL = "";
   $("#preview").removeAttribute("src"); $("#preview").style.display = "none";
@@ -406,8 +409,11 @@ function revealResult(origin, selector){
 function readFailure(temporary=false){
   const message = temporary ? (isKid() ? "いまは 読めないよ。すこし まってから もういちど" : "いまは読み取りが混み合っています。少し待ってからもう一度お試しください") : "うまく読めなかったよ。文字がはっきり写っているか見てね。";
   $("#result").innerHTML = '<div class="err">'+message
-    + '<div class="row"><button class="btn ghost" id="retake">とりなおす</button>'
+    + (temporary ? '<p>'+(isKid() ? '写真は そのままで いいよ' : '写真を撮り直す必要はありません')+'</p>'
+      + '<div class="row"><button class="btn primary" id="retry-read">'+(isKid() ? 'もういちど よむ' : 'もう一度読み取る')+'</button></div>' : '')
+    + '<div class="row'+(temporary ? ' retry-secondary' : '')+'"><button class="btn ghost" id="retake">とりなおす</button>'
     + '<button class="btn ghost" id="qfall">手でいれる</button></div></div>';
+  if(temporary) $("#retry-read").addEventListener("click", readPhoto);
   $("#retake").addEventListener("click", () => $("#file").click());
   $("#qfall").addEventListener("click", openManual);
 }
@@ -417,7 +423,7 @@ async function choosePhoto(e){
   if(!f){ $("#note").textContent = "写真を選ぶか、手でいれられます。"; return; }
   if(f.type && !f.type.startsWith("image/")){ readFailure(); revealResult(document.activeElement); return; }
   extraction = null; photoConsumed = false; registrationUncertain = false;
-  picked = f;
+  picked = f; resizedPhoto = null;
   if(previewURL) URL.revokeObjectURL(previewURL);
   previewURL = URL.createObjectURL(f);
   $("#preview").src = previewURL; $("#preview").style.display = "block";
@@ -451,7 +457,8 @@ async function shrinkPhoto(file){
   finally { if(url) URL.revokeObjectURL(url); }
 }
 async function readEvents(res, onEvent){
-  if(!res.ok || !res.body) throw new Error();
+  if(!res.ok) throw Object.assign(new Error(), {temporary:[408,429,503,504].includes(res.status)});
+  if(!res.body) throw new Error();
   const reader = res.body.getReader(), decoder = new TextDecoder();
   let buffer = "", done = null;
   function line(text){
@@ -499,8 +506,10 @@ async function readPhoto(){
   fd.append("hint", isKid() ? "" : $("#hint").value);
   const timer = setTimeout(() => { if(current(token)) $("#note").textContent = "もう少しかかっているよ"; }, 15000);
   try{
-    fd.append("image", await shrinkPhoto(picked));
+    const image = resizedPhoto || await shrinkPhoto(picked);
     if(!current(token)) return;
+    resizedPhoto = image;
+    fd.append("image", image);
     const partial = {items:[], date_questions_count:0};
     const res = await fetch("/api/extract/stream", {method:"POST", body:fd});
     const data = await readEvents(res, event => {
@@ -558,15 +567,19 @@ async function kidCandidates(data, token){
     });
     $("#result").insertAdjacentHTML("beforeend", exits());
   }
-  $("#result").insertAdjacentHTML("afterbegin", dateQuestionMessage(data));
+  $("#result").insertAdjacentHTML("afterbegin", skippedKidMessage(data) + dateQuestionMessage(data));
 }
 function dateQuestionMessage(data){
   if(!data.date_questions_count) return "";
-  return '<p class="skipped">'+(isKid() ? '日付は おうちの人に きいてもらうね（'+data.date_questions_count+'件）' :
+  return '<p class="skipped">'+(isKid() ? '日付が わからないものは おうちの人に きいてもらうね（'+data.date_questions_count+'件）' :
     '日付が はっきりしないもの '+data.date_questions_count+'件は「確認すること」で聞きます')+'</p>';
 }
+function skippedKidMessage(data){
+  return data.skipped ? '<p class="ok">やることは もう 入っていたよ（'+data.skipped+'件）</p>' : '';
+}
 function emptyResult(data){
-  $("#result").innerHTML = dateQuestionMessage(data) + '<div class="ok">'+(data.date_questions_count ? '日付の確認を待っています' : data.skipped ? 'もう入っていたよ' : 'やることは見つからなかったよ')+'</div>'
+  $("#result").innerHTML = skippedKidMessage(data) + dateQuestionMessage(data)
+    + (!data.skipped && !data.date_questions_count ? '<div class="ok">やることは見つからなかったよ</div>' : '')
     + exits() + '<button class="btn ghost" id="another-photo">別の写真</button>';
   $("#another-photo").addEventListener("click", () => $("#album").click());
 }

@@ -257,7 +257,7 @@ def test_only_ambiguous_ownership_requires_confirmation():
     ''')
 
 
-@pytest.mark.parametrize("skipped,message", [(0,"やることは見つからなかったよ"),(2,"もう入っていたよ")])
+@pytest.mark.parametrize("skipped,message", [(0,"やることは見つからなかったよ"),(2,"やることは もう 入っていたよ（2件）")])
 def test_empty_and_duplicate_have_exit_without_registering(skipped,message):
     run_js(f'''
       await start();
