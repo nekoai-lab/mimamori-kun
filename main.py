@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from mimamori.agent import read_otayori, read_year_plan
 from mimamori import appearance as appearance_mod
+from mimamori import ambiguous_dates
 from mimamori import auth
 from mimamori import images as images_mod
 from mimamori import ledger
@@ -390,6 +391,18 @@ async def extract(request: Request, image: UploadFile = File(...), hint: str = F
                                     child=None if auth.is_parent(user) else user)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"読み取りに失敗しました: {e}") from e
+    waiting = result.pop("date_questions", [])
+    # API 境界でも検査する。子どもの帰属はセッションから決める。
+    candidates = []
+    for item in result["items"]:
+        checked = ambiguous_dates.check(item)
+        (waiting if checked["date_issues"] else candidates).append(checked)
+    if not auth.is_parent(user):
+        waiting = [dict(i, child=user) for i in waiting]
+    result["items"] = candidates
+    count = ambiguous_dates.enqueue(waiting)
+    if count:
+        result["date_questions_count"] = count
     return JSONResponse(result)
 
 
@@ -401,7 +414,7 @@ class RegisterRequest(BaseModel):
 
 KINDS = ("event", "deadline", "homework", "bring")
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
-_TIME = re.compile(r"\d{2}:\d{2}")
+_TIME = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]")
 
 
 def _check_item(item: Dict[str, Any]) -> None:
@@ -436,8 +449,6 @@ def register(req: RegisterRequest, request: Request):
     """
     if not req.items:
         raise HTTPException(400, "登録するものがありません。")
-    for i in req.items:
-        _check_item(i)
     user = _user(request)
     if not auth.is_parent(user):
         # 子どもは自分のぶんだけ入れられる。「子が入れた」として親に知らせる。保留にはできない
@@ -449,6 +460,29 @@ def register(req: RegisterRequest, request: Request):
         req.source, req.pending = "kid", False
     kid = req.source == "kid"
     items = [dict(i, source=("kid" if kid else "parent")) for i in req.items]
+    # 日付の不備は候補ごとに返す。未登録が確実なものだけ画面で修正・再送できる。
+    accepted, rejected = [], []
+    for index, i in enumerate(items):
+        try:
+            _check_item(i)
+            date = dt.date.fromisoformat(i.get("date") or "")
+            end = dt.date.fromisoformat(i["end_date"]) if i.get("end_date") else date
+            if end < date:
+                raise ValueError()
+            # 親が指定した日付は原文と照合しない。モデルの未解決理由は残す。
+            edited = auth.is_parent(user) and i.get("date_edited") is True
+            issues = i.get("date_issues") if edited else ambiguous_dates.check(i)["date_issues"]
+            if issues:
+                raise HTTPException(400, "日付の確認が必要です。この候補の日付を直してください。")
+        except (HTTPException, TypeError, ValueError) as exc:
+            rejected.append({"input_index": index, "title": i.get("title", ""),
+                             "status": "rejected", "error": exc.detail if isinstance(exc, HTTPException)
+                             else "有効な日付を選んでください。"})
+        else:
+            accepted.append((index, i))
+    items = [i for _, i in accepted]
+    if not items:
+        return JSONResponse(status_code=400, content={"results": rejected, "notice": None})
     try:
         validate_updates(items)
         results = create_events(items, "pending" if req.pending else "todo", actor=user)
@@ -456,6 +490,9 @@ def register(req: RegisterRequest, request: Request):
         raise HTTPException(400, str(e)) from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"カレンダー登録に失敗しました: {e}") from e
+
+    results = [dict(result, input_index=index) for (index, _), result in zip(accepted, results)]
+    results = sorted(results + rejected, key=lambda r: r["input_index"])
 
     notice = None
     if kid:
@@ -476,6 +513,84 @@ def register(req: RegisterRequest, request: Request):
     return {"results": results, "notice": notice}
 
 
+
+class DateAnswer(BaseModel):
+    time_start: Optional[str] = None
+    time_end: Optional[str] = None
+    date: dt.date
+    end_date: Optional[dt.date] = None
+    child: Optional[str] = None
+
+
+@app.get("/api/date_questions", dependencies=[Depends(parent_only)])
+def api_date_questions():
+    ambiguous_dates.remind()
+    return {"items": ambiguous_dates.pending()}
+
+
+def _date_action(id_, action, date=None, end_date=None, child=None, **kwargs):
+    try:
+        return ambiguous_dates.change(id_, action, date, end_date, child, **kwargs)
+    except KeyError as exc:
+        raise HTTPException(404, "日付の確認待ちが見つかりません。") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/api/date_questions/{id_}/later", dependencies=[Depends(parent_only)])
+def api_date_later(id_: str):
+    _date_action(id_, "later")
+    return {"state": "waiting"}
+
+
+@app.post("/api/date_questions/{id_}/dismiss", dependencies=[Depends(parent_only)])
+def api_date_dismiss(id_: str):
+    _date_action(id_, "dismiss")
+    return {"state": "dismissed"}
+
+
+@app.post("/api/date_questions/{id_}/confirmed", dependencies=[Depends(parent_only)])
+def api_date_confirmed(id_: str):
+    _date_action(id_, "confirmed")
+    return {"state": "registered"}
+
+
+def _date_calendar_item(row):
+    # #52 の照合・更新情報は持ち越さない。
+    item = {k: row[k] for k in ("kind", "title", "child", "school_level", "bring", "note",
+                                "time_start", "time_end") if k in row}
+    item.update(date=row["chosen_date"], end_date=row["chosen_end_date"], source="parent", branch="new")
+    item["note"] = (item.get("note", "") + "\nプリントの表記：" + row["date_text"]).strip()
+    return item
+
+
+@app.post("/api/date_questions/{id_}/register", dependencies=[Depends(parent_only)])
+def api_date_register(id_: str, req: DateAnswer, request: Request):
+    if req.end_date and req.end_date < req.date:
+        raise HTTPException(400, "いつまでは、いつから以降の日付を選んでください。")
+    row = _date_action(id_, "register", req.date.isoformat(),
+                       req.end_date.isoformat() if req.end_date else None, req.child,
+                       times={k: getattr(req, k) for k in ("time_start", "time_end") if k in req.model_fields_set},
+                       validate=lambda candidate: _check_item(_date_calendar_item(candidate)))
+    if row["state"] == "registered":
+        return row["result"]
+    try:
+        results = create_events([_date_calendar_item(row)], "todo", actor=_user(request))
+        if len(results) == 1 and results[0].get("status") == "error":
+            _date_action(id_, "retry")
+            raise HTTPException(502, "カレンダーに登録できませんでした。もう一度登録できます。")
+        if len(results) != 1 or results[0].get("status") != "ok":
+            raise ValueError("登録結果を確認できませんでした。")
+        result = {"results": results, "state": "registered"}
+        ambiguous_dates.finish(id_, result)
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # 通信切断時は再送せず、親がカレンダーを確認して解消する。
+        raise HTTPException(502, "登録結果を確認できません。カレンダーを確認してください。二重登録を避けるため再送を止めています。") from exc
+
+
 @app.post("/api/notify/test", dependencies=[Depends(parent_only)])
 def api_notify_test():
     """送り先が本当に届くかを、1本だけ投げて確かめる。"""
@@ -494,6 +609,7 @@ def api_notify_config():
 
 @app.get("/api/notices", dependencies=[Depends(parent_only)])
 def api_notices(unseen: bool = False):
+    ambiguous_dates.remind()
     return {"items": notify_mod.notices(unseen_only=unseen)}
 
 
@@ -557,6 +673,9 @@ def tasks(request: Request, days: int = 14):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"タスクの取得に失敗しました: {e}") from e
     user = _user(request)
+    if auth.is_parent(user):
+        ambiguous_dates.remind()
+        data["date_questions"] = ambiguous_dates.pending()
     if not auth.is_parent(user):
         # 子どもには自分のぶんだけ（兄弟のやること・ポイントは見せない）
         data["items"] = [i for i in data["items"] if i.get("child") == user]

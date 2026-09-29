@@ -613,3 +613,85 @@ def test_retry_after_shared_selector_watch_expires_allows_explicit_child_selecti
       assert.equal($('#file').disabled,false);
       assert.equal(audience,'kid');
     """, 500)
+
+
+PARENT_CANDIDATES = r'''
+await start();
+routes.set('/api/extract',()=>response({items:[item({id:'a', date_text:'9月28日（月）'}),item({id:'b'})]}));
+await choose();
+await readPhoto();
+// 実際の collect/doRegister に編集できる候補 DOM を渡す。
+const rows = extraction.items.map(src => {
+  const row = new Element(); row.dataset.id=src.id;
+  const fields = {selected:{checked:true},title:{value:src.title},date:{value:src.date},
+    child:{textContent:src.child},note:{value:''},time_start:{value:''}};
+  row.fields=fields;
+  row.querySelector = selector => fields[selector.match(/data-f="([^"]+)"/)[1]];
+  return row;
+});
+document.querySelectorAll = selector => selector === '.item' ? rows.filter(r=>r.isConnected) : [];
+'''
+
+
+def test_parent_date_edit_sent_and_registered():
+    run_js(PARENT_CANDIDATES + r'''
+rows[0].fields.date.value='2026-10-04';
+routes.set('/api/register',opts=>{
+  const items=JSON.parse(opts.body).items;
+  assert.equal(items[0].date_edited,true);
+  assert.equal(items[0].date,'2026-10-04');
+  assert.equal(items[0].date_text,'9月28日（月）');
+  assert.equal(items[1].date_edited,false);
+  return response({results:items.map((i,input_index)=>({status:'ok',title:i.title,id:'e'+input_index,input_index}))});
+});
+await doRegister();
+assert.equal(registrations().length,1);
+assert.equal($('#result').innerHTML,'');
+assert.equal(photoConsumed,true);
+assert.match($('#completion').innerHTML,/2 件をカレンダーに登録/);
+''', 'parent')
+
+
+@pytest.mark.parametrize('partial', [False, True])
+def test_rejected_candidates_remain_editable_without_resending_success(partial):
+    run_js(PARENT_CANDIDATES + r'''
+rows[0].fields.title.value='編集した件名';
+routes.set('/api/register',()=>response({results:[
+  {input_index:0,status:'rejected',title:'編集した件名',error:'日付を直してください。'},
+  {input_index:1,status:PARTIAL?'ok':'rejected',title:'候補B',id:'saved',error:'日付を直してください。'}
+]},PARTIAL?200:400));
+await doRegister();
+assert.equal(photoConsumed,PARTIAL);
+assert.equal(registrationUncertain,false);
+assert.equal($('#reg').disabled,false);
+assert.ok($('#result').innerHTML);
+assert.equal(rows[0].isConnected,true);
+assert.match(rows[0].innerHTML,/日付を直してください/);
+assert.equal(rows[1].isConnected,!PARTIAL);
+assert.equal(rows[0].fields.title.value,'編集した件名');
+rows[0].fields.date.value='2026-10-04';
+if(!PARTIAL) rows[1].fields.date.value='2026-10-05';
+routes.set('/api/register',opts=>{
+  const items=JSON.parse(opts.body).items;
+  assert.equal(items.length,PARTIAL?1:2);
+  assert.equal(items[0].id,'a'); assert.equal(items[0].date_edited,true);
+  return response({results:items.map((i,input_index)=>({status:'ok',title:i.title,id:'e'+input_index,input_index}))});
+});
+await doRegister();
+assert.equal(registrations().length,2);
+assert.equal($('#result').innerHTML,'');
+assert.equal(photoConsumed,true);
+'''.replace('PARTIAL', 'true' if partial else 'false'), 'parent')
+
+
+def test_parent_unknown_registration_keeps_candidates_but_prevents_resend():
+    run_js(PARENT_CANDIDATES + r'''
+routes.set('/api/register',()=>{throw new Error('network');});
+await doRegister();
+assert.equal(photoConsumed,false);
+assert.equal(rows[0].isConnected,true);
+assert.equal(registrationUncertain,true);
+assert.equal($('#reg').disabled,true);
+await doRegister();await readPhoto();
+assert.equal(registrations().length,1);
+''', 'parent')
