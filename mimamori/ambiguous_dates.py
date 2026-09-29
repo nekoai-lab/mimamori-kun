@@ -14,6 +14,115 @@ JST = dt.timezone(dt.timedelta(hours=9))
 ISSUES = ("relative", "no_month", "year_cross", "weekday_mismatch", "vague",
           "undecided", "multiple", "recurring", "low_confidence")
 
+# 「まで／までに」の揺れを拾い、原文の日付表現が大きく違う候補は分ける。
+QUESTION_DATE_RATIO = 0.82
+
+
+def _title_parts(text):
+    """言い換え用の本文と補足を分ける。完全一致のキーには使わない。"""
+    text = unicodedata.normalize("NFKC", text or "")
+    pairs = {"(": ")", "[": "]", "{": "}", "【": "】", "「": "」",
+             "『": "』", "〈": "〉", "《": "》", "〔": "〕"}
+    stack, spans = [], []
+    for index, char in enumerate(text):
+        if char in pairs:
+            stack.append((index, pairs[char]))
+        elif stack and char == stack[-1][1]:
+            start, _ = stack.pop()
+            spans.append((start, index + 1))
+    # 閉じていないかっこ以降の本文まで消さない。
+    removed = {index for start, end in spans for index in range(start, end)}
+    title = dedupe.norm("".join(char for index, char in enumerate(text) if index not in removed))
+    supplements = tuple(dedupe.norm(text[start + 1:end - 1])
+                        for start, end in sorted(spans))
+    return title, supplements
+
+
+_TITLE_VERBS = sorted(("準備", "持参", "用意", "持ってくる", "持っていく",
+                       "持ってくること", "持ってくるもの"), key=len, reverse=True)
+
+
+def _title_paraphrase(a, b):
+    a, a_supplements = _title_parts(a)
+    b, b_supplements = _title_parts(b)
+    if a_supplements and b_supplements and a_supplements != b_supplements:
+        return False
+    short, long = sorted((a, b), key=len)
+    if len(short) >= 2 and long.endswith(short):
+        return True
+
+    def stem(title):
+        for verb in _TITLE_VERBS:
+            if title.endswith(verb):
+                return title[:-len(verb)]
+        return None
+
+    a_stem, b_stem = stem(a), stem(b)
+    return a_stem is not None and len(a_stem) >= 2 and a_stem == b_stem
+
+
+def _question_key(item):
+    return (item.get("child"), dedupe.norm(item.get("title")),
+            unicodedata.normalize("NFKC", item.get("date_text") or ""))
+
+
+
+# 長い語を先に取り、再来週を来週、翌々日を翌日として扱わない。
+_DATE_WORDS = (
+    "今日", "本日", "明日", "明後日", "あさって", "昨日", "一昨日",
+    "今週", "来週", "再来週", "翌週", "前週", "先週",
+    "今月", "来月", "再来月", "翌月", "前月", "先月",
+    "今年", "来年", "再来年", "翌年", "前年", "昨年",
+    "前日", "翌日", "翌々日", "当日", "前々日",
+    "上旬", "中旬", "下旬", "初旬", "末", "月末", "月初",
+)
+_DATE_ANCHORS = re.compile(
+    r"(?P<number>[0-9]+)|(?P<word>"
+    + "|".join(sorted(_DATE_WORDS, key=len, reverse=True))
+    + r")|(?P<weekday>[月火水木金土日])曜日?|\(\s*(?P<paren>[月火水木金土日])(?:曜日?)?\s*\)"
+)
+
+
+def _date_anchors(text):
+    """補足を消す前の原文から日付の決め手を順に保持する。時刻の数字も含む。"""
+    text = unicodedata.normalize("NFKC", text or "")
+    anchors = []
+    for match in _DATE_ANCHORS.finditer(text):
+        number, word, weekday, paren = match.groups()
+        anchors.append(("number", number) if number is not None else
+                       ("word", word) if word is not None else
+                       ("weekday", weekday or paren))
+    return tuple(anchors)
+
+
+def _question_matches(candidates, rows):
+    """完全一致を優先し、未回答だけに言い換えを1対1で割り当てる。"""
+    keys = [_question_key(r) for r in rows]
+    anchors = [_date_anchors(r.get("date_text")) for r in rows]
+    edges = []
+    for i, item in enumerate(candidates):
+        key = _question_key(item)
+        item_anchors = _date_anchors(item.get("date_text"))
+        for j, row in enumerate(rows):
+            if (row.get("child") != item.get("child") or
+                    row["state"] not in ("waiting", "registering", "answered", "registered")):
+                continue
+            if key == keys[j]:
+                edges.append((True, 1.0, i, j))
+                continue
+            if row["state"] not in ("waiting", "registering") or item_anchors != anchors[j]:
+                continue
+            date_score = dedupe.similarity(key[2], keys[j][2])
+            if (date_score >= QUESTION_DATE_RATIO and
+                    _title_paraphrase(item.get("title"), row.get("title"))):
+                edges.append((False, date_score, i, j))
+    matches, used = {}, set()
+    for _, _, i, j in sorted(edges, key=lambda e: (-e[0], -e[1], e[2], e[3])):
+        if i not in matches and j not in used:
+            matches[i] = rows[j]
+            used.add(j)
+    return matches
+
 
 def now():
     return dt.datetime.now(JST)
@@ -109,26 +218,31 @@ def enqueue(items):
     stamp = now().isoformat()
     candidates = [dict(i, id=uuid.uuid4().hex, created_at=stamp, state="waiting", reminded_at=None)
                   for i in items]
+    # 同じ読み取り内では正規化後の完全一致だけをまとめる。
+    unique = {}
+    for item in candidates:
+        key = _question_key(item)
+        unique.setdefault(key, item)
+    candidates = list(unique.values())
     outcome = {}
 
     def add(old):
         rows = list(old or [])
+        matches = _question_matches(candidates, rows)
         question_ids, skipped = set(), []
-        for item in candidates:
+        for index, item in enumerate(candidates):
             title = dedupe.norm(item.get("title", ""))
             child = item.get("child")
             text = unicodedata.normalize("NFKC", item.get("date_text") or "")
             related = [r for r in rows if r.get("child") == child
                        and dedupe.norm(r.get("title", "")) == title]
-            same = [r for r in related if
-                    unicodedata.normalize("NFKC", r.get("date_text") or "") == text]
-            if any(r["state"] in ("answered", "registered") for r in same):
+            same = matches.get(index)
+            if same and same["state"] in ("answered", "registered"):
                 skipped.append(item.get("title", ""))
                 continue
-            pending_ids = {r["id"] for r in same if r["state"] in ("waiting", "registering")}
-            if pending_ids:
+            if same:
                 # 再読込でも未回答の確認を案内する。同一バッチの重複は1件と数える。
-                question_ids.update(pending_ids)
+                question_ids.add(same["id"])
                 continue
             # 原文が違うと分かる登録済み予定を、件名だけの照合で拾い直さない。
             other_rows = [r for r in related
