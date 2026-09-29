@@ -404,7 +404,7 @@ function revealResult(origin, selector){
   target.scrollIntoView({block:"start", behavior:"instant"});
 }
 function readFailure(temporary=false){
-  const message = temporary ? (isKid() ? "いまは よめないよ。すこし まってから もういちど ためしてね" : "いまは読み取りが混み合っています。少し待ってからもう一度お試しください") : "うまく読めなかったよ。文字がはっきり写っているか見てね。";
+  const message = temporary ? (isKid() ? "いまは 読めないよ。すこし まってから もういちど" : "いまは読み取りが混み合っています。少し待ってからもう一度お試しください") : "うまく読めなかったよ。文字がはっきり写っているか見てね。";
   $("#result").innerHTML = '<div class="err">'+message
     + '<div class="row"><button class="btn ghost" id="retake">とりなおす</button>'
     + '<button class="btn ghost" id="qfall">手でいれる</button></div></div>';

@@ -11,13 +11,13 @@ def test_error_stream_shows_role_specific_message(audience, temporary):
       if(!TEMPORARY){
         routes.set('/api/extract/stream',()=>streamResponse([{type:'error',temporary:true}]));
         await choose(); if(AUTH==='parent') await readPhoto();
-        assert.match($('#result').innerHTML,AUTH==='parent'?/混み合っています/:/いまは よめないよ/);
+        assert.match($('#result').innerHTML,AUTH==='parent'?/混み合っています/:/いまは 読めないよ/);
       }
       routes.set('/api/extract/stream',()=>streamResponse([{type:'error',temporary:TEMPORARY}]));
       await choose(); if(AUTH==='parent') await readPhoto();
       const text=$('#result').innerHTML;
       if(TEMPORARY){
-        assert.match(text,AUTH==='parent' ? /いまは読み取りが混み合っています。少し待ってからもう一度お試しください/ : /いまは よめないよ。すこし まってから もういちど ためしてね/);
+        assert.match(text,AUTH==='parent' ? /いまは読み取りが混み合っています。少し待ってからもう一度お試しください/ : /いまは 読めないよ。すこし まってから もういちど/);
         assert.doesNotMatch(text,/文字がはっきり/);
       }else assert.match(text,/うまく読めなかったよ。文字がはっきり写っているか見てね。/);
       assert.equal(registrations().length,0);

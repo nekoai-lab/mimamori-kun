@@ -412,7 +412,7 @@ def _read_failure(exc, user):
     if temporary:
         detail = ("いまは読み取りが混み合っています。少し待ってからもう一度お試しください"
                   if auth.is_parent(user) else
-                  "いまは よめないよ。すこし まってから もういちど ためしてね")
+                  "いまは 読めないよ。すこし まってから もういちど")
     return dict(detail=detail, temporary=temporary)
 
 

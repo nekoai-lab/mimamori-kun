@@ -66,7 +66,7 @@ def test_temporary_api_failure(api, fake_runner, monkeypatch, caplog, kind, chil
             assert response.status_code == 503
             result = response.json()
     assert result['temporary'] is True
-    assert result['detail'] == ('いまは よめないよ。すこし まってから もういちど ためしてね' if child else
+    assert result['detail'] == ('いまは 読めないよ。すこし まってから もういちど' if child else
                                 'いまは読み取りが混み合っています。少し待ってからもう一度お試しください')
     failures = [r for r in caplog.records if r.name == 'main']
     status = int(kind) if kind.isdigit() else None
