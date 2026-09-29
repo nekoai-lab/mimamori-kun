@@ -257,6 +257,8 @@ Cloud Run（`K_SERVICE` がある環境）は `json` を指定しても Firestor
 
 ### 3. Cloud Run へ
 
+現行の準備・実行順・戻し方は [デプロイ手順](docs/デプロイ手順.md) を参照してください。
+
 ```bash
 ./deploy.sh
 ```

@@ -1,8 +1,6 @@
-.git/
-.gitignore
-__pycache__/
-*.pyc
-.venv/
-venv/
-.env
-samples/*.png
+/*
+!/Dockerfile
+!/requirements.txt
+!/main.py
+!/mimamori/
+!/static/
