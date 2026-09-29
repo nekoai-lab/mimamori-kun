@@ -31,7 +31,9 @@ def test_progress_reset_and_registration_only_after_done(audience):
       assert.equal(($('#result').innerHTML.match(/<li>/g)||[]).length,2);
       await send({type:'question',item:item({title:'非表示の質問'})});
       assert.doesNotMatch($('#result').innerHTML,/非表示の質問/);
-      assert.match($('#result').innerHTML,/日付を 確かめるものが あるよ（1件）/);
+      assert.match($('#result').innerHTML,AUTH==='child'
+        ? /日付を 確かめるものが あるよ（1件）/
+        : /日付を確認するものがあります（1件）/);
       assert.doesNotMatch($('#result').innerHTML,/確認すること|聞きます|きいてもらうね/);
       assert.doesNotMatch($('#result').innerHTML,/<button/);
       await doRegister();

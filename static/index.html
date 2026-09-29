@@ -571,7 +571,7 @@ async function kidCandidates(data, token){
 }
 function dateQuestionMessage(data, saved = true){
   if(!data.date_questions_count) return "";
-  if(!saved) return '<p class="skipped">日付を 確かめるものが あるよ（'+data.date_questions_count+'件）</p>';
+  if(!saved) return '<p class="skipped">'+(isKid() ? '日付を 確かめるものが あるよ' : '日付を確認するものがあります')+'（'+data.date_questions_count+'件）</p>';
   return '<p class="skipped">'+(isKid() ? '日付が わからないものは おうちの人に きいてもらうね（'+data.date_questions_count+'件）' :
     '日付が はっきりしないもの '+data.date_questions_count+'件は「確認すること」で聞きます')+'</p>';
 }
