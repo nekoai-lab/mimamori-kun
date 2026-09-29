@@ -20,10 +20,12 @@ def capture(request, monkeypatch, fake_runner):
         response = c.post(request.param, files={"image": ("fixture.png", b"fixture", "image/png")})
         assert response.status_code == 200
         if request.param.endswith("/stream"):
-            result = json.loads(response.text.splitlines()[-1])
+            read.events = [json.loads(line) for line in response.text.splitlines()]
+            result = read.events[-1]
             assert result["type"] == "done"
             return result
         return response.json()
+    read.events = []
     return read
 
 
@@ -47,6 +49,7 @@ def test_repeat_question(capture, child, state):
     c = client(child)
     first = capture(c, [question()])
     assert first["date_questions_count"] == 1
+    first_question_events = [e["type"] for e in capture.events if e["type"] == "question"]
     original_id = records()[0]["id"]
     if state == "registered":
         parent = client()
@@ -55,7 +58,12 @@ def test_repeat_question(capture, child, state):
     elif state != "waiting":
         ledger.transact_setting(dates.KEY, lambda rows: [dict(r, state=state) for r in rows])
     second = capture(c, [question(title="社会科見学 A 参加同意書 提出")])
-    assert second.get("date_questions_count", 0) == 0
+    assert second.get("date_questions_count", 0) == int(state in ("waiting", "registering"))
+    assert second["items"] == []
+    if state in ("waiting", "registering"):
+        assert [e["type"] for e in capture.events if e["type"] == "question"] == first_question_events
+        if capture.events:
+            assert first_question_events == ["question"]
     assert len(records()) == 1 and records()[0]["id"] == original_id
     assert records()[0]["state"] == state
     assert len(events()) == (1 if state == "registered" else 0)
@@ -105,7 +113,7 @@ def test_atomic_enqueue_and_batch_duplicates(monkeypatch):
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(lambda _: dates.enqueue([question(), question()]), range(4)))
     assert len(records()) == 1
-    assert sum(r["count"] for r in results) == 1
+    assert all(r["count"] == 1 for r in results)
     assert all(r["skipped_titles"] == [] for r in results)
 
 
@@ -118,7 +126,7 @@ def test_nfkc_date_text_and_calendar_failure(monkeypatch, state):
     monkeypatch.setattr(calendar_tools, "list_raw", unavailable)
     result = dates.enqueue([question(date_text="12月中旬")])
     assert len(records()) == 1
-    assert result["count"] == 0
+    assert result["count"] == int(state == "waiting")
     assert len(result["skipped_titles"]) == int(state == "registered")
     assert dates.enqueue([question(date_text="１月中旬")])["count"] == 1
 

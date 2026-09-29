@@ -113,7 +113,7 @@ def enqueue(items):
 
     def add(old):
         rows = list(old or [])
-        count, skipped = 0, []
+        question_ids, skipped = set(), []
         for item in candidates:
             title = dedupe.norm(item.get("title", ""))
             child = item.get("child")
@@ -125,7 +125,10 @@ def enqueue(items):
             if any(r["state"] in ("answered", "registered") for r in same):
                 skipped.append(item.get("title", ""))
                 continue
-            if any(r["state"] in ("waiting", "registering") for r in same):
+            pending_ids = {r["id"] for r in same if r["state"] in ("waiting", "registering")}
+            if pending_ids:
+                # 再読込でも未回答の確認を案内する。同一バッチの重複は1件と数える。
+                question_ids.update(pending_ids)
                 continue
             # 原文が違うと分かる登録済み予定を、件名だけの照合で拾い直さない。
             other_rows = [r for r in related
@@ -144,9 +147,9 @@ def enqueue(items):
                 skipped.append(item.get("title", ""))
                 continue
             rows.append(item)
-            count += 1
+            question_ids.add(item["id"])
         # Firestore の再試行ごとに結果を置き換える（加算しない）。
-        outcome.update(count=count, skipped_titles=skipped)
+        outcome.update(count=len(question_ids), skipped_titles=skipped)
         return rows
 
     ledger.transact_setting(KEY, add)
