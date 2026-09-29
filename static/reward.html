@@ -137,8 +137,8 @@ body.nav-in-flow .page-bottom{display:none}
 </div></header>
 <main id="main">
   <h1 id="heading" class="sr-only">ごほうび</h1>
-  <p class="balance-label muted" id="balance-label">いまの ポイント</p>
-  <p class="balance" id="balance-line" role="group" aria-label="いまの ポイント"><b id="balance">—</b><span id="balance-unit" aria-hidden="true">pt</span></p>
+  <p class="balance-label muted" id="balance-label">いま つかえる ポイント</p>
+  <p class="balance" id="balance-line" role="group" aria-label="いま つかえる ポイントは まだ わからないよ"><b id="balance">—</b><span id="balance-unit" aria-hidden="true">pt</span></p>
   <p id="status" role="status">よみこんでいるよ</p>
   <p id="error" role="alert" hidden></p>
   <button id="auth-retry" type="button" hidden>もういちど たしかめる</button>
@@ -164,6 +164,7 @@ body.nav-in-flow .page-bottom{display:none}
     <details id="history-box"><summary>たまった記録</summary><div><ul id="history" class="history"></ul></div></details>
     <details id="handed-box" hidden><summary>うけとった ごほうび</summary><div><ul id="handed" class="history"></ul></div></details>
     <details id="rules-box"><summary>ポイントのきまり</summary><div>
+      <p>『きょう がんばった』は きょう おわらせた ぶん。『いま つかえる』は ごほうびに つかえる ぶんで、もうしこむと へるよ。</p>
       <table><tbody id="rules"></tbody></table>
       <p class="muted">テストは 点数ではなく、なおした もんだいの 数で つくよ。ごほうびは おうちの人と きめるよ。</p>
     </div></details>
@@ -319,8 +320,8 @@ function icon(label){
 // ---------------------------------------------------------------- 子の画面を描く
 function paintBalance(){
   const b=$("#balance");
-  if(balance==null){ b.textContent="—"; $("#balance-line").setAttribute("aria-label","いまの ポイントは まだ わからないよ"); }
-  else{ b.textContent=String(balance); $("#balance-line").setAttribute("aria-label","いまの ポイント "+balance+"ポイント"); }
+  if(balance==null){ b.textContent="—"; $("#balance-line").setAttribute("aria-label","いま つかえる ポイントは まだ わからないよ"); }
+  else{ b.textContent=String(balance); $("#balance-line").setAttribute("aria-label","いま つかえる ポイント "+balance+"ポイント"); }
 }
 function paintCards(){
   const box=$("#rewards");
@@ -362,7 +363,7 @@ function paintCards(){
     if(st.kind==="ready"){
       if(open===reward.label){
         const ex=element("div",undefined,"explain");
-        ex.appendChild(element("p","もうしこむと、いまの ポイントから "+cost+"pt へるよ。おうちの人が みおくりに したら もどるよ。"));
+        ex.appendChild(element("p","もうしこむと、いま つかえる ポイントから "+cost+"pt へるよ。おうちの人が みおくりに したら もどるよ。"));
         const row=element("div",undefined,"actions");
         const go=button(cost+"ptを つかって もうしこむ","primary",()=>askFor(reward));
         go.disabled=!st.can;
@@ -736,7 +737,7 @@ function setAudience(parent){
   $("#child").hidden=!parent;
   $("#heading").textContent=parent?"ごほうび（おうちの人）":"ごほうび";
   $("#heading").classList.toggle("sr-only",!parent);
-  $("#balance-label").textContent=parent?"選んでいる子の ポイント":"いまの ポイント";
+  $("#balance-label").textContent=parent?"選んでいる子の つかえるポイント":"いま つかえる ポイント";
   document.querySelector("[data-appearance-picker]").hidden=parent;
   document.querySelector("[data-profile-menu]").hidden=parent;
   if(!parent) $("#nav").innerHTML='<a href="/kid">きょう</a><a href="/?mode=kid">とる</a><a href="/reward" aria-current="page">ごほうび</a>';

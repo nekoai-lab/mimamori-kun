@@ -775,3 +775,48 @@ await saveCap();
 assert.equal(posts().length,2);
 assert.equal(text('#capnote'),'保存しました');
 '''.replace("STATUS", str(status)))
+
+
+def test_points_label_initial():
+    assert 'id="balance-label">いま つかえる ポイント</p>' in HTML
+    assert re.search(r'id="balance-line"[^>]*aria-label="いま つかえる ポイントは まだ わからないよ"[^>]*><b id="balance">—</b>', HTML)
+
+
+def test_points_label_rules_explanation():
+    rules_box = KID_VIEW.split('<details id="rules-box">')[1].split('</details>')[0]
+    assert '<p>『きょう がんばった』は きょう おわらせた ぶん。『いま つかえる』は ごほうびに つかえる ぶんで、もうしこむと へるよ。</p>' in rules_box
+
+
+@pytest.mark.parametrize('state', ['loading', 'failed', 'zero', 'available'])
+def test_points_label_balance_states(state):
+    run_js('''
+setAudience(false);load();
+const slow=deferred();
+replies=[()=>slow.promise,{items:[],remaining:{}}];
+const pending=loadChild(false);
+if(STATE==='loading'){
+  assert.equal(text('#balance'),'—');
+  assert.equal(document.querySelector('#balance-line').attrs['aria-label'],'いま つかえる ポイントは まだ わからないよ');
+}
+slow.resolve(STATE==='failed'?{ok:false}:{ok:true,json:async()=>({balance:STATE==='zero'?0:34})});
+await pending;
+assert.equal(text('#balance-label'),'いま つかえる ポイント');
+if(STATE==='failed'){
+  assert.equal(text('#balance'),'—');
+  assert.equal(document.querySelector('#balance-line').attrs['aria-label'],'いま つかえる ポイントは まだ わからないよ');
+}else{
+  const value=STATE==='zero'?0:34;
+  assert.equal(text('#balance'),String(value));
+  assert.equal(document.querySelector('#balance-line').attrs['aria-label'],'いま つかえる ポイント '+value+'ポイント');
+}
+'''.replace('STATE', repr(state)))
+
+
+def test_points_label_parent_and_return_to_child():
+    run_js('''
+setAudience(true);load();
+assert.equal(text('#balance-label'),'選んでいる子の つかえるポイント');
+assert.equal(document.querySelector('#balance-line').attrs['aria-label'],'いま つかえる ポイント 34ポイント');
+setAudience(false);
+assert.equal(text('#balance-label'),'いま つかえる ポイント');
+''')
