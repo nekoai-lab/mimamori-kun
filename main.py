@@ -33,7 +33,7 @@ from mimamori.calendar_tools import (
     service_account_email,
     set_status,
 )
-from mimamori.config import config
+from mimamori.config import config, validate_quota_project
 from mimamori import notify as notify_mod
 from mimamori import points as points_mod
 from mimamori import redeem as redeem_mod
@@ -48,6 +48,7 @@ def _key(title: str) -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_quota_project()
     # 保存先の設定と、Firestore を選んだ場合の接続を起動時に確かめる。
     ledger.store()
     yield
