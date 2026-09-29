@@ -72,6 +72,19 @@ def test_cloud_run_skips_check(monkeypatch, cloud_usage, service):
     validate_quota_project()
 
 
+def test_cloud_run_skips_check_without_quota(monkeypatch, cloud_usage):
+    monkeypatch.setenv("K_SERVICE", "test-service")
+    monkeypatch.delenv("GOOGLE_CLOUD_QUOTA_PROJECT", raising=False)
+    validate_quota_project()
+
+
+def test_cloud_run_lifespan_without_quota(monkeypatch, cloud_usage):
+    monkeypatch.setenv("K_SERVICE", "test-service")
+    monkeypatch.delenv("GOOGLE_CLOUD_QUOTA_PROJECT", raising=False)
+    with TestClient(main.app):
+        ledger.store.assert_called_once_with()
+
+
 @pytest.mark.parametrize("vertex", [None, "FALSE", "false", "0", ""])
 @pytest.mark.parametrize("backend", [None, "json"])
 def test_local_without_cloud_needs_no_quota(monkeypatch, vertex, backend):
