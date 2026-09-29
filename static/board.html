@@ -223,7 +223,7 @@ button:focus-visible,a:focus-visible,summary:focus-visible,select:focus-visible,
 #exceptions{margin-top:16px}
 .action-feedback{color:var(--ink)}
 .action-feedback.is-warning{color:var(--late-ink)}
-[data-action], [data-action] button, [data-action] [tabindex], [data-card] summary, [data-card] a, #headline{scroll-margin-top:calc(var(--board-header-height, 100px) + 16px)}
+[data-action], [data-action] button, [data-action] [tabindex], [data-card] summary, [data-card] a, #headline, .date-context, .date-feedback, #actionMsg{scroll-margin-top:calc(var(--board-header-height, 100px) + 16px)}
 .action-feedback:empty{display:none}
 .date-question{padding:12px 0;border-bottom:1px solid var(--line-strong);overflow-wrap:anywhere}
 .date-question button{font:inherit;min-width:44px;min-height:44px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface);color:var(--ink);padding:6px;white-space:normal}
@@ -247,7 +247,7 @@ button:focus-visible,a:focus-visible,summary:focus-visible,select:focus-visible,
     <p id="freshness"></p>
   </section>
   <button id="reload" type="button">再読込</button>
-  <p id="actionMsg" role="alert"></p>
+  <p id="actionMsg" role="alert" tabindex="-1"></p>
   <section id="dateQuestions" aria-label="日付の確認待ち"></section>
   <div id="exceptions" class="list"></div>
   <section id="notice" aria-label="新しい知らせ" hidden></section>
@@ -1053,36 +1053,59 @@ function dateMonths(today){
   return Array.from({length:12},(_,i)=>({year:year+Math.floor((month-1+i)/12),month:(month-1+i)%12+1}));
 }
 function dateDays(year,month){return new Date(Date.UTC(year,month,0)).getUTCDate();}
+function focusDateContext(target){
+  document.documentElement.style.setProperty('--board-header-height',document.querySelector('header').getBoundingClientRect().height+'px');
+  target.focus({preventScroll:true});
+  target.scrollIntoView({block:'start',behavior:'instant'});
+}
 function renderDateQuestions(){
+  const root=$('#dateQuestions'), active=document.activeElement;
+  const oldCard=active?.closest('[data-date-id]');
+  const ordinal=oldCard?[...oldCard.querySelectorAll(active.tagName)].indexOf(active):-1;
+  const selection=oldCard && active.tagName==='INPUT'?[active.selectionStart,active.selectionEnd,active.selectionDirection]:null;
+  // 一覧の更新でも、ほかの予定で入力中の時刻を消さない。
+  for(const card of root.querySelectorAll('[data-date-id]')){
+    const draft=dateDrafts.get(card.dataset.dateId);
+    if(draft) for(const input of card.querySelectorAll('[data-date-time]')) draft[input.dataset.dateTime]=input.value;
+  }
   const rows=data?.date_questions||[];
   $('#dateQuestions').innerHTML=rows.map(row=>{
     const d=dateDrafts.get(row.id)||{step:'month',part:'start'};
     const button=(action,label,extra='')=>'<button type="button" data-date-action="'+action+'" '+extra+(d.busy?' disabled':'')+'>'+label+'</button>';
+    const context=text=>'<p class="date-context" tabindex="-1">'+text+'</p>';
+    const subject=esc(dateQuestionTitle(row))+' '+esc(d.child||row.child);
+    const selected=d.start?dateLabel(d.start)+(d.end?' 〜 '+dateLabel(d.end):''):'';
     let h='<article class="date-question" data-date-id="'+esc(row.id)+'"><h3>'+esc(dateQuestionTitle(row))+'</h3><p>'+esc(row.child)+'</p>'+
       '<p>プリントには「'+esc(row.date_text)+'」とあるよ。何月何日？</p>';
     if(row.state==='registering') return h+'<p role="status">登録結果を確認できません。カレンダーを確認してください。二重登録を避けるため再送を止めています。</p><div class="date-actions">'+button('confirmed','カレンダーを確認した：入っていた')+button('dismiss','とうろくしない')+'</div><p role="status" tabindex="-1" class="date-feedback">'+esc(d.message||'')+'</p></article>';
     if(d.step==='summary' && row.child==='不明' && !data.children.includes(d.child)){
-      h+='<p>だれの予定？</p><div class="date-actions">'+data.children.map(child=>
+      h+=context(subject+' '+selected+' だれの予定？')+'<div class="date-actions">'+data.children.map(child=>
         button('child',esc(child),'data-child="'+esc(child)+'"')).join('')+'</div>';
     }else if(d.step==='summary'){
-      h+='<p>'+esc(dateQuestionTitle(row))+' '+dateLabel(d.start)+(d.end?' 〜 '+dateLabel(d.end):'')+' '+esc(d.child||row.child)+'　これで とうろくする？</p>'+
-        ['time_start','time_end'].map((key,i)=>'<label>'+(i?'終了時刻':'開始時刻')+'（HH:MM・空欄は終日）<input style="min-height:44px" type="text" data-date-time="'+key+'" value="'+esc(d[key]??row[key]??'')+'"></label>').join('')+
-        button('register','とうろくする')+button('reset','なおす');
+      h+=context(esc(dateQuestionTitle(row))+' '+selected+' '+esc(d.child||row.child)+'　これで とうろくする？')+
+        ['time_start','time_end'].map((key,i)=>'<label>'+(i?'終了時刻':'開始時刻')+'（HH:MM・空欄は終日）<input style="min-height:44px" type="text" data-date-time="'+key+'" value="'+esc(d[key]??row[key]??'')+'"'+(d.busy?' disabled':'')+'></label>').join('')+
+        button('register','とうろくする','aria-label="'+esc(dateQuestionTitle(row))+'を '+selected+'で とうろくする"')+button('reset','なおす');
     }else if(d.step==='confirm'){
-      h+='<p>'+dateLabel(d.choice)+'で いい？</p>'+button('ok','これでOK')+button('reselect','えらびなおす');
+      h+=context(subject+' '+dateLabel(d.choice)+'で いい？')+button('ok','これでOK')+button('reselect','えらびなおす');
     }else{
-      if(row.date_is_range) h+='<p>'+(d.part==='end'?'いつまで':'いつから')+'</p>';
+      const prompt=row.date_is_range?(d.part==='end'?dateLabel(d.start)+'から、いつまで？':'いつから？'):'何月何日？';
       if(d.step==='day'){
-        h+='<p>'+dateMonthLabel(d.year,d.month)+'</p><div class="date-days">';
+        h+=context(subject+' '+prompt+' '+dateMonthLabel(d.year,d.month))+'<div class="date-days">';
         for(let day=1;day<=31;day++) h+=button('day',day,'data-day="'+day+'" aria-label="'+day+'日"'+(day>dateDays(d.year,d.month)?' disabled':''));
         h+='</div>'+button('reselect','月をえらびなおす');
       }else{
-        h+='<div class="date-months">'+dateMonths(data.today).map(m=>button('month',dateMonthLabel(m.year,m.month),'data-year="'+m.year+'" data-month="'+m.month+'"')).join('')+'</div>';
+        h+=context(subject+' '+prompt)+'<div class="date-months">'+dateMonths(data.today).map(m=>button('month',dateMonthLabel(m.year,m.month),'data-year="'+m.year+'" data-month="'+m.month+'"')).join('')+'</div>';
       }
     }
     h+='<div class="date-actions">'+button('later','あとで確認する')+button('dismiss','とうろくしない')+'</div>';
     return h+'<p role="status" tabindex="-1" class="date-feedback">'+esc(d.message||'')+'</p></article>';
   }).join('');
+  if(oldCard){
+    const same=[...root.querySelectorAll('[data-date-id]')].find(c=>c.dataset.dateId===oldCard.dataset.dateId);
+    const next=(active.matches('.date-feedback')?same?.querySelector('.date-feedback'):same?.querySelectorAll(active.tagName)[ordinal])||same?.querySelector('.date-context')||$('#actionMsg');
+    next.focus({preventScroll:true});
+    if(selection && next.tagName==='INPUT') next.setSelectionRange(...selection);
+  }
 }
 $('#dateQuestions').addEventListener('click',async e=>{
   const btn=e.target.closest('[data-date-action]'), card=btn?.closest('[data-date-id]');
@@ -1111,7 +1134,11 @@ $('#dateQuestions').addEventListener('click',async e=>{
     if(action==='register' && d.step!=='summary') return;
     if(action==='register' && row.child==='不明' && !data.children.includes(d.child)) return;
     if(action==='register') for(const key of ['time_start','time_end']) d[key]=card.querySelector('[data-date-time="'+key+'"]').value;
-    d.busy=true;d.message='保存しています';renderDateQuestions();
+    d.busy=true;d.message='「'+dateQuestionTitle(row)+'」を保存しています';
+    const status=card.querySelector('.date-feedback');
+    status.textContent=d.message;
+    if(document.activeElement===btn) focusDateContext(status);
+    for(const control of card.querySelectorAll('button, input')) control.disabled=true;
     try{
       const j=await readJSON('/api/date_questions/'+encodeURIComponent(id)+'/'+action,{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify(action==='register'?{date:d.start,end_date:d.end||null,child:d.child||row.child,time_start:d.time_start||null,time_end:d.time_end||null}:{})});
@@ -1127,10 +1154,18 @@ $('#dateQuestions').addEventListener('click',async e=>{
       }
     }
     finally{d.busy=false;}
+    const active=document.activeElement;
+    const waiting=active?.closest('[data-date-id]')?.dataset.dateId===id && active.matches('.date-feedback');
+    renderDateQuestions();renderConclusion();
+    if(waiting){
+      const next=[...$('#dateQuestions').querySelectorAll('[data-date-id]')].find(c=>c.dataset.dateId===id);
+      focusDateContext(next?.querySelector('.date-feedback')||$('#actionMsg'));
+    }
+    return;
   }
   renderDateQuestions();renderConclusion();
   const next=$('#dateQuestions').querySelector('[data-date-id="'+id+'"]');
-  (next?.querySelector(d.message?'.date-feedback':'button:not(:disabled)')||$('#headline')).focus();
+  focusDateContext(next.querySelector('.date-context'));
 });
 
 load();

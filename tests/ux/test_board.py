@@ -57,7 +57,9 @@ function node(tag='div',attrs={}) {
     closest(sel){return this.matches(sel)?this:this.parentElement?.closest(sel)||null;},
     querySelectorAll(sel){return this.children.flatMap(c=>[...(c.matches(sel)?[c]:[]),...c.querySelectorAll(sel)]);},
     querySelector(sel){return this.querySelectorAll(sel)[0]||null;},
-    focus(){if(!this.disabled)doc.activeElement=this;},
+    setSelectionRange(start,end,direction='none'){this.selectionStart=start;this.selectionEnd=end;this.selectionDirection=direction;},
+    scrollIntoView(options){this.scrollCalls??=[];this.scrollCalls.push(options);},
+    focus(options){this.focusOptions=options;if(!this.disabled)doc.activeElement=this;},
     async click(){if(this.disabled)return;for(let p=this;p;p=p.parentElement)for(const fn of p.handlers.click||[])await fn({target:this});},
     getBoundingClientRect(){return {height:100};}
   };
@@ -82,7 +84,7 @@ function fetch(url,opts){
   if(queue?.length){const r=queue.shift();if(r instanceof Error)return Promise.reject(r);return Promise.resolve(r);}
   return Promise.resolve(reply(url==='/api/tasks'?defaultTasks:url.startsWith('/api/notices?')?defaultNotices:{}));
 }
-const doc={querySelector:el,querySelectorAll:sel=>doc.body.querySelectorAll(sel),hidden:false,addEventListener(ev,fn){this[ev]=fn;},documentElement:{style:{setProperty(){}}}};
+const doc={querySelector:el,querySelectorAll:sel=>doc.body.querySelectorAll(sel),hidden:false,addEventListener(ev,fn){this[ev]=fn;},documentElement:{style:{setProperty(k,v){this[k]=v;}}}};
 doc.body=node('body');doc.activeElement=doc.body;
 const context=vm.createContext({document:doc,fetch,console,assert,el,calls,responses,reply,task,tasks,notice,
   node,boardHTML:input.html,boardCSS:input.css,
