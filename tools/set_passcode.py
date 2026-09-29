@@ -6,7 +6,8 @@
     python3 tools/set_passcode.py おうちの人
     python3 tools/set_passcode.py 下の子
 
-    # 本番の台帳（Firestore）に入れる。ADC（gcloud auth application-default login）が要る
+    # 本番の台帳（Firestore）に入れる。ADC が要る。
+    # GOOGLE_CLOUD_QUOTA_PROJECT を GOOGLE_CLOUD_PROJECT と同じ値で export しておく。
     MIMAMORI_LEDGER=firestore GOOGLE_CLOUD_PROJECT=<プロジェクト> python3 tools/set_passcode.py おうちの人
 
     # すべての端末をログアウトさせる（合言葉を変えたあとなど）
@@ -24,6 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from mimamori import auth, ledger  # noqa: E402
+from mimamori.config import validate_quota_project  # noqa: E402
 
 
 def main(argv: list) -> int:
@@ -31,6 +33,11 @@ def main(argv: list) -> int:
         print(__doc__.strip())
         return 2
     target = argv[0]
+    try:
+        validate_quota_project()
+    except RuntimeError as exc:
+        print(exc, file=sys.stderr)
+        return 1
     print(f"台帳: {ledger.store().kind}")
 
     if target == "--logout-all":

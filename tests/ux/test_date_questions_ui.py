@@ -125,7 +125,7 @@ q.title='上の子｜運動会';renderDateQuestions();
 assert.match(area.innerHTML,/<h3>運動会<\/h3>/);
 assert.ok(!area.innerHTML.includes('上の子｜'));
 await month(10);await day(17);await press('ok');
-assert.match(area.innerHTML,/<p>運動会 10月17日（土） 上の子　これで とうろくする？<\/p>/);
+assert.match(area.innerHTML,/<p[^>]*>運動会 10月17日（土） 上の子　これで とうろくする？<\/p>/);
 assert.equal(q.title,'上の子｜運動会');
 q.title='運動会｜集合';renderDateQuestions();
 assert.match(area.innerHTML,/<h3>運動会｜集合<\/h3>/);
@@ -137,15 +137,15 @@ def test_year_labels_follow_today_for_month_day_confirmation_and_summary():
 const labels=()=>area.querySelectorAll('[data-date-action="month"]').map(b=>b.textContent);
 assert.ok(labels().includes('10月'));assert.ok(!labels().includes('2026年 10月'));
 assert.ok(labels().includes('2027年 1月'));
-await month(10);assert.match(area.innerHTML,/<p>10月<\/p>/);
-await day(17);assert.match(area.innerHTML,/<p>10月17日（土）で いい？<\/p>/);
+await month(10);assert.match(area.innerHTML,/<p[^>]*>運動会 上の子 何月何日？ 10月<\/p>/);
+await day(17);assert.match(area.innerHTML,/<p[^>]*>運動会 上の子 10月17日（土）で いい？<\/p>/);
 await press('reselect');await month(1);
-assert.match(area.innerHTML,/<p>2027年 1月<\/p>/);
-await day(3);assert.match(area.innerHTML,/<p>2027年1月3日（日）で いい？<\/p>/);
-await press('ok');assert.match(area.innerHTML,/<p>運動会 2027年1月3日（日） 上の子　これで とうろくする？<\/p>/);
+assert.match(area.innerHTML,/<p[^>]*>運動会 上の子 何月何日？ 2027年 1月<\/p>/);
+await day(3);assert.match(area.innerHTML,/<p[^>]*>運動会 上の子 2027年1月3日（日）で いい？<\/p>/);
+await press('ok');assert.match(area.innerHTML,/<p[^>]*>運動会 2027年1月3日（日） 上の子　これで とうろくする？<\/p>/);
 data.today='2027-01-01';await press('reset');
 assert.ok(labels().includes('1月'));assert.ok(!labels().includes('2027年 1月'));
-await month(1);await day(3);assert.match(area.innerHTML,/<p>1月3日（日）で いい？<\/p>/);
+await month(1);await day(3);assert.match(area.innerHTML,/<p[^>]*>運動会 上の子 1月3日（日）で いい？<\/p>/);
 ''')
 
 
@@ -154,7 +154,7 @@ def test_range_summary_across_years():
 q.date_is_range=true;renderDateQuestions();
 await month(12);await day(30);await press('ok');
 await month(1);await day(3);await press('ok');
-assert.match(area.innerHTML,/<p>運動会 12月30日（水） 〜 2027年1月3日（日） 上の子　これで とうろくする？<\/p>/);
+assert.match(area.innerHTML,/<p[^>]*>運動会 12月30日（水） 〜 2027年1月3日（日） 上の子　これで とうろくする？<\/p>/);
 ''')
 
 
@@ -221,3 +221,99 @@ assert.equal(writes[1].body.time_start,'09:00');
 assert.equal(writes[1].body.time_end,'10:00');
 assert.equal(area.innerHTML,'');
 ''')
+
+
+@pytest.mark.parametrize('last', [False, True])
+def test_date_context_focus_scroll_and_summary_order(last):
+    board(SETUP + r'''
+if(LAST){data.date_questions.unshift(...Array.from({length:6},(_,i)=>({...q,id:'other'+i})));}
+q.title='長い予定名の運動会と親子で参加する学校の集まり';renderDateQuestions();
+// 文字拡大・折り返し後の実測値を毎回読み直す。
+let height=156;
+el('header').getBoundingClientRect=()=>({height});
+const card=()=>area.querySelector('[data-date-id="q"]');
+const click=async(action,value)=>{
+ const buttons=card().querySelectorAll('[data-date-action="'+action+'"]');
+ const b=buttons.find(b=>!value||b.dataset[action]===String(value));b.focus();await b.click();
+};
+function check(words){
+ const target=card().querySelector('.date-context');
+ assert.equal(document.activeElement,target);
+ assert.equal(target.attrs.tabindex,'-1');
+ assert.ok(target.textContent.includes(q.title));
+ for(const word of words)assert.ok(target.textContent.includes(word),target.textContent);
+ assert.equal(target.focusOptions.preventScroll,true);
+ assert.equal(target.scrollCalls.at(-1).block,'start');
+ assert.equal(document.documentElement.style['--board-header-height'],height+'px');
+ assert.match(boardCSS,/\.date-context[^{}]*\{scroll-margin-top:calc\(var\(--board-header-height, 100px\) \+ 16px\)/);
+}
+await click('month',10);check(['10月']);height=212;
+await click('day',17);check(['10月17日（土）','で いい？']);
+await click('reselect');check(['何月何日？']);
+await click('month',10);check(['10月']);
+await click('day',17);check(['10月17日（土）']);
+await click('ok');check(['10月17日（土）','これで とうろくする？']);
+const register=card().querySelector('[data-date-action="register"]');
+assert.equal(register.attrs['aria-label'],q.title+'を 10月17日（土）で とうろくする');
+const order=card().querySelectorAll('p, input, button');
+const summary=order.indexOf(document.activeElement);
+assert.equal(order[summary+1].dataset.dateTime,'time_start');
+assert.equal(order[summary+2].dataset.dateTime,'time_end');
+assert.equal(order[summary+3],register);
+assert.equal(order[summary+4].dataset.dateAction,'reset');
+await click('reset');check(['何月何日？']);
+q.date_is_range=true;
+await click('month',12);await click('day',30);await click('ok');check(['12月30日（水）','いつまで']);
+await click('month',1);check(['12月30日（水）','2027年 1月']);
+await click('day',3);check(['2027年1月3日（日）']);
+await click('ok');check(['12月30日（水） 〜 2027年1月3日（日）']);
+'''.replace('LAST', 'true' if last else 'false'))
+
+
+@pytest.mark.parametrize('action', ['later', 'register', 'dismiss'])
+@pytest.mark.parametrize('failure', [False, True])
+@pytest.mark.parametrize('destination', ['stay', 'reload', 'other_button', 'other_input'])
+def test_date_pending_result_preserves_user_position(action, failure, destination):
+    board(SETUP + r'''
+const action=ACTION, failure=FAILURE, destination=DESTINATION;
+data.date_questions.push({...q,id:'other',title:'別の予定'});
+dateDrafts.set('other',{step:'summary',part:'start',start:'2026-10-18'});
+renderDateQuestions();
+await month(10);await day(17);await press('ok');
+const getCard=id=>area.querySelector('[data-date-id="'+id+'"]');
+const original=getCard('q');
+const button=original.querySelector('[data-date-action="'+action+'"]');button.focus();
+const status=original.querySelector('.date-feedback');
+let release;responses.set('/api/date_questions/q/'+action,[new Promise(r=>release=r)]);
+responses.set('/api/date_questions',[reply({items:[q,{...q,id:'other',title:'別の予定'}]})]);
+const pending=button.click();await tick();
+assert.equal(getCard('q'),original,'送信開始でカードを消さない');
+assert.equal(document.activeElement,status);
+assert.match(status.textContent,/運動会.*保存しています/);
+assert.equal(button.disabled,true);
+let destinationNode;
+if(destination==='reload')destinationNode=el('#reload');
+if(destination==='other_button')destinationNode=getCard('other').querySelector('[data-date-action="reset"]');
+if(destination==='other_input'){
+ destinationNode=getCard('other').querySelector('[data-date-time="time_start"]');destinationNode.value='12:34';destinationNode.setSelectionRange(1,3);
+}
+if(destinationNode)destinationNode.focus();
+release(failure?reply({},502):reply({state:action==='dismiss'?'dismissed':action==='register'?'registered':'waiting'}));
+await pending;
+assert.notEqual(document.activeElement,document.body);
+assert.equal(document.activeElement.isConnected,true);
+if(destination==='stay'){
+ const expected=failure||action==='later'?getCard('q').querySelector('.date-feedback'):el('#actionMsg');
+ assert.equal(document.activeElement,expected);
+ assert.match(expected.textContent,failure?/確認できません/:action==='later'?/あとで確認/:action==='register'?/登録しました/:/確認待ちから外しました/);
+ assert.equal(expected.scrollCalls.at(-1).block,'start');
+}else if(destination==='reload')assert.equal(document.activeElement,destinationNode);
+else {
+ assert.equal(document.activeElement.closest('[data-date-id]').dataset.dateId,'other');
+ if(destination==='other_input'){
+  assert.equal(document.activeElement.dataset.dateTime,'time_start');assert.equal(document.activeElement.value,'12:34');
+  assert.equal(document.activeElement.selectionStart,1);assert.equal(document.activeElement.selectionEnd,3);
+ }else assert.equal(document.activeElement.dataset.dateAction,'reset');
+ assert.equal(document.activeElement.scrollCalls,undefined,'別の操作へスクロールを強制しない');
+}
+'''.replace('ACTION', repr(action)).replace('FAILURE', 'true' if failure else 'false').replace('DESTINATION', repr(destination)))
