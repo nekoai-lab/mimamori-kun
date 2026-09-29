@@ -20,6 +20,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from google.adk.agents import LlmAgent
+from google.adk.planners import BuiltInPlanner
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
@@ -157,6 +158,9 @@ def build_agent(child: Optional[str] = None) -> LlmAgent:
     return LlmAgent(
         name="mimamori_reader",
         model=config.model,
+        planner=BuiltInPlanner(
+            thinking_config=types.ThinkingConfig(thinking_budget=config.thinking_budget)
+        ),
         description="学校のおたよりを読み、カレンダー登録候補を作る",
         instruction=_instruction(child),
         tools=[_scoped_list_events(child) if child else list_events],

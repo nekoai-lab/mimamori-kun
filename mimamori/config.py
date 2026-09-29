@@ -1,6 +1,38 @@
 """環境変数まわり。Cloud Run では --set-env-vars で渡す。"""
+import logging
 import os
 from dataclasses import dataclass, field
+
+
+logger = logging.getLogger(__name__)
+
+
+def _thinking_budget() -> int:
+    raw = os.getenv("MIMAMORI_THINKING_BUDGET", "512")
+    try:
+        budget = int(raw)
+        if budget >= 0:
+            return budget
+    except ValueError:
+        pass
+    logger.warning("MIMAMORI_THINKING_BUDGET must be a non-negative integer; using default")
+    return 512
+
+
+def validate_quota_project() -> None:
+    """ローカルのクラウド利用では、環境変数だけで課金先を確認する。"""
+    if "K_SERVICE" in os.environ:
+        return
+    uses_vertex = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "").lower() in {"true", "1"}
+    if not uses_vertex and os.getenv("MIMAMORI_LEDGER") != "firestore":
+        return
+    project = os.getenv("GOOGLE_CLOUD_PROJECT", "")
+    quota_project = os.getenv("GOOGLE_CLOUD_QUOTA_PROJECT", "")
+    if not project.strip() or not quota_project.strip() or quota_project != project:
+        raise RuntimeError(
+            "GOOGLE_CLOUD_QUOTA_PROJECT が GOOGLE_CLOUD_PROJECT と一致していません。"
+            "課金先を固定するため、.env に GOOGLE_CLOUD_QUOTA_PROJECT を入れてください。"
+        )
 
 
 def _children():
@@ -32,6 +64,7 @@ class Config:
     project: str = field(default_factory=lambda: os.getenv("GOOGLE_CLOUD_PROJECT", ""))
     location: str = field(default_factory=lambda: os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1"))
     model: str = field(default_factory=lambda: os.getenv("MIMAMORI_MODEL", "gemini-2.5-flash"))
+    thinking_budget: int = field(default_factory=_thinking_budget)
     calendar_id: str = field(default_factory=lambda: os.getenv("MIMAMORI_CALENDAR_ID", "primary"))
     timezone: str = field(default_factory=lambda: os.getenv("MIMAMORI_TZ", "Asia/Tokyo"))
     children: list = field(default_factory=_children)

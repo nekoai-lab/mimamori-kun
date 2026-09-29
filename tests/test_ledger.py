@@ -34,6 +34,7 @@ def firestore_environment(monkeypatch, request):
     elif request.param.endswith("firestore"):
         monkeypatch.setenv("MIMAMORI_LEDGER", "firestore")
     monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+    monkeypatch.setenv("GOOGLE_CLOUD_QUOTA_PROJECT", "test-project")
 
 
 @pytest.mark.parametrize("project", [None, "", "   "])
