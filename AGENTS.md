@@ -4,3 +4,5 @@
 
 Codex の役割（実装レーン兼 QA。自分のコードは自分でレビューしない）は
 `~/Projects/ai-dev-harness/policies/agents.md`、QA の範囲は [QA_RULES.md](QA_RULES.md) を参照。
+
+`tasks/current.md` は変更しない（まとめるのは Claude Code）。
