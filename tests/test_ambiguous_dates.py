@@ -87,13 +87,17 @@ def test_clear_weekday_and_rain_reserve(monkeypatch):
 
 @pytest.mark.parametrize("missing_text", [False, True])
 def test_model_stub_partition_precedes_dedupe(monkeypatch, missing_text):
-    class Runner:
-        def __init__(self, **kwargs): self.session_service = self
-        async def create_session(self, **kwargs): return SimpleNamespace(id="test")
-        async def run_async(self, **kwargs):
-            yield SimpleNamespace(is_final_response=lambda: True, content=SimpleNamespace(parts=[SimpleNamespace(
-                text=json.dumps({"summary": "架空", "items": [item(date_text="" if missing_text else "明後日", date="2026-12-05" if missing_text else None), item()]}))]))
-    monkeypatch.setattr(agent, "InMemoryRunner", Runner)
+    class Client:
+        def __init__(self): self.aio = self; self.models = self
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def generate_content_stream(self, **kwargs):
+            async def chunks():
+                yield SimpleNamespace(
+                    text=json.dumps({"summary": "架空", "items": [item(date_text="" if missing_text else "明後日", date="2026-12-05" if missing_text else None), item()]}),
+                    usage_metadata=None, candidates=[])
+            return chunks()
+    monkeypatch.setattr(agent.genai, "Client", Client)
     checked = []
     def review(items, child):
         checked.extend(items)

@@ -114,6 +114,13 @@ const setTimeout = (fn, ms) => { timers.set(++timerId,{fn,ms}); return timerId; 
 const clearTimeout = id => timers.delete(id);
 const setInterval = setTimeout, clearInterval = clearTimeout;
 const response = (data, status=200) => ({ok:status>=200 && status<300, status, json:async()=>data});
+const streamResponse = events => {
+  const chunks=events.map(e=>new TextEncoder().encode(JSON.stringify(e)+'\n'));
+  return {ok:true, body:{getReader:()=>({
+    read:async()=>chunks.length ? {value:chunks.shift(),done:false} : {done:true},
+    cancel:async()=>{}, releaseLock:()=>{}
+  })}};
+};
 const children = [{name:'下の子',school_level:'elementary'}, {name:'上の子',school_level:'junior_high'}];
 const fetch = async (url, opts={}) => {
   calls.push({url,opts});
@@ -123,6 +130,12 @@ const fetch = async (url, opts={}) => {
     return response({role:authValue}, typeof authValue==='number' ? authValue : 200);
   }
   if(url==='/api/config') return response({children},configStatus);
+  if(url==='/api/extract/stream' && !routes.has(url)){
+    const res = await routes.get('/api/extract')(opts);
+    if(!res.ok) return res;
+    const data = await res.json();
+    return streamResponse([{type:'received'}, {type:'reading'}, {type:'done',...data}]);
+  }
   if(!routes.has(url)) throw new Error('Unexpected fetch: '+url);
   return await routes.get(url)(opts);
 };

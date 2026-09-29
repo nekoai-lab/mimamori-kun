@@ -2,8 +2,6 @@
 import logging
 
 import pytest
-from google.adk.models.llm_request import LlmRequest
-from google.adk.planners import BuiltInPlanner
 
 from mimamori import agent
 from mimamori.config import Config
@@ -18,12 +16,8 @@ def test_reader_thinking_budget(monkeypatch, caplog, child, raw, expected):
         monkeypatch.setenv("MIMAMORI_THINKING_BUDGET", raw)
     monkeypatch.setattr(agent, "config", Config())
 
-    reader = agent.build_agent(child)
-    assert isinstance(reader.planner, BuiltInPlanner)
-    assert reader.planner.thinking_config.thinking_budget == expected
-    request = LlmRequest()
-    reader.planner.apply_thinking_config(request)
-    assert request.config.thinking_config.thinking_budget == expected
+    reader = agent._generation_config(child)
+    assert reader.thinking_config.thinking_budget == expected
     assert not [r for r in caplog.records if r.name == "mimamori.config"]
 
 
@@ -34,9 +28,8 @@ def test_invalid_thinking_budget_uses_default(monkeypatch, caplog, child, raw):
     with caplog.at_level(logging.WARNING, logger="mimamori.config"):
         monkeypatch.setattr(agent, "config", Config())
 
-    reader = agent.build_agent(child)
-    assert isinstance(reader.planner, BuiltInPlanner)
-    assert reader.planner.thinking_config.thinking_budget == 512
+    reader = agent._generation_config(child)
+    assert reader.thinking_config.thinking_budget == 512
     logs = [r for r in caplog.records if r.name == "mimamori.config"]
     assert len(logs) == 1
     assert logs[0].levelno == logging.WARNING

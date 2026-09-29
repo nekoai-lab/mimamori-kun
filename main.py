@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+import logging
+import time
+import asyncio
 import os
 import re
 from contextlib import asynccontextmanager
@@ -11,11 +15,11 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from mimamori.agent import read_otayori, read_year_plan
+from mimamori.agent import read_otayori, read_year_plan, stream_otayori
 from mimamori import appearance as appearance_mod
 from mimamori import ambiguous_dates
 from mimamori import auth
@@ -372,24 +376,71 @@ def get_config(request: Request):
     }
 
 
-@app.post("/api/extract")
-async def extract(request: Request, image: UploadFile = File(...), hint: str = Form("")):
+async def _extract_image(image):
     data = await image.read()
     if not data:
         raise HTTPException(400, "画像が空です。")
     if len(data) > MAX_BYTES:
         raise HTTPException(413, "画像が大きすぎます。12MB 以下にしてください。")
-    # iPhone の写真は HEIC で来る。ここで JPEG に直す。直せないものは理由を返す。
+    return data
+
+
+async def _normalize_extract(data, content_type):
+    started = time.monotonic()
     try:
-        data, content_type = images_mod.normalize(data, image.content_type or "")
+        return await asyncio.to_thread(images_mod.normalize, data, content_type or "")
     except ValueError as e:
-        raise HTTPException(415, str(e)) from e
+        raise HTTPException(415, "画像として開けませんでした。別の形式で送ってください。") from e
+    finally:
+        logging.getLogger(__name__).info(
+            "extract image: received_bytes=%d conversion_seconds=%.3f",
+            len(data), time.monotonic() - started,
+        )
+
+
+@app.post("/api/extract")
+async def extract(request: Request, image: UploadFile = File(...), hint: str = Form("")):
+    data = await _extract_image(image)
+    data, content_type = await _normalize_extract(data, image.content_type)
+    user = _user(request)
     try:
-        user = _user(request)
         result = await read_otayori(data, content_type, hint,
                                     child=None if auth.is_parent(user) else user)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(500, f"読み取りに失敗しました: {e}") from e
+    except Exception as e:
+        raise HTTPException(500, "読み取りに失敗しました。もう一度試してください。") from e
+    return JSONResponse(_finish_extract(result, user))
+
+
+@app.post("/api/extract/stream")
+async def extract_stream(request: Request, image: UploadFile = File(...), hint: str = Form("")):
+    data = await _extract_image(image)
+    user = _user(request)
+
+    async def events():
+        yield {"type": "received"}
+        try:
+            normalized, mime = await _normalize_extract(data, image.content_type)
+            async for event in stream_otayori(
+                normalized, mime, hint, child=None if auth.is_parent(user) else user
+            ):
+                if event["type"] == "done":
+                    result = {k: v for k, v in event.items() if k != "type"}
+                    yield {"type": "done", **_finish_extract(result, user)}
+                else:
+                    yield event
+        except Exception:
+            # SDK の例外本文には入力・接続情報が含まれる可能性がある。
+            yield {"type": "error", "detail": "読み取りに失敗しました。もう一度試してください。"}
+
+    async def lines():
+        async for event in events():
+            yield json.dumps(event, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+def _finish_extract(result, user):
     waiting = result.pop("date_questions", [])
     # API 境界でも検査する。子どもの帰属はセッションから決める。
     candidates = []
@@ -402,7 +453,7 @@ async def extract(request: Request, image: UploadFile = File(...), hint: str = F
     count = ambiguous_dates.enqueue(waiting)
     if count:
         result["date_questions_count"] = count
-    return JSONResponse(result)
+    return result
 
 
 class RegisterRequest(BaseModel):

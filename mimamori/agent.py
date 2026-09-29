@@ -7,7 +7,7 @@
     1. おたよりの画像を読む（マルチモーダル）
     2. 原文の日付表現を残し、あいまいなら親に確認する
     3. どの子・どの学校のものか判定する
-    4. list_events で既存カレンダーを照会し、重複を見つける  ← 書く前に読む
+    4. Python で既存カレンダーを照会し、重複を見つける
     5. 登録候補を JSON で返す（この時点では書かない）
 """
 from __future__ import annotations
@@ -17,17 +17,19 @@ import json
 import logging
 import re
 import uuid
+import time
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from google.adk.agents import LlmAgent
-from google.adk.planners import BuiltInPlanner
+from google import genai
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
 from . import dedupe, ambiguous_dates
 from .calendar_tools import list_events, list_raw
 from .config import config
-from .schema import Extraction
+from .schema import Extraction, Item
 
 APP_NAME = "mimamorikun"
 logger = logging.getLogger(__name__)
@@ -59,13 +61,7 @@ low_confidence: 手書き・かすれ・ぼけで日付を確信できない。
 1. 画像を丁寧に読む。日付、提出期限、持ち物、集合時刻、金額を落とさない。
 2. カレンダーに載せる価値のあるものだけを items にする。
    挨拶文、校長のコラム、一般的な注意書きは載せない。
-3. 期間を決めたら **必ず list_events を呼び**、その期間の既存予定を確認する。
-   同じ行事がアプリと紙の両方から来ることがあるため、重複登録は最も嫌われる失敗。
-   似た予定があれば duplicate_of にその件名を入れる。
-   **日付が数日ずれていても、件名がほぼ同じなら重複とみなす。**
-   おたよりは同じ行事を別の日付で載せることがある（予備日、締切の訂正など）。
-   迷ったら重複と判定してよい。親が画面で外せる。見逃すほうが取り返しがつかない。
-4. 最終出力は JSON のみ。前置きも説明も、コードフェンスも付けない。
+3. 最終出力は JSON のみ。既存予定との照合は後でシステムが行う。
 
 # 学校PCの「れんらくちょう」画面（毎日のもの）
 次の形をしていたら、1日ぶんの連絡です。実物で確かめた読み方に従うこと。
@@ -154,16 +150,11 @@ def _scoped_list_events(child: str):
     return list_events
 
 
-def build_agent(child: Optional[str] = None) -> LlmAgent:
-    return LlmAgent(
-        name="mimamori_reader",
-        model=config.model,
-        planner=BuiltInPlanner(
-            thinking_config=types.ThinkingConfig(thinking_budget=config.thinking_budget)
-        ),
-        description="学校のおたよりを読み、カレンダー登録候補を作る",
-        instruction=_instruction(child),
-        tools=[_scoped_list_events(child) if child else list_events],
+def _generation_config(child=None):
+    return types.GenerateContentConfig(
+        system_instruction=_instruction(child),
+        response_mime_type="application/json", response_schema=Extraction,
+        thinking_config=types.ThinkingConfig(thinking_budget=config.thinking_budget),
     )
 
 
@@ -203,94 +194,158 @@ def _review(items: List[Dict[str, Any]], child: Optional[str] = None) -> Dict[st
     return dedupe.review(items, existing)
 
 
-async def read_otayori(image_bytes: bytes, mime_type: str, hint: str = "",
-                       child: Optional[str] = None) -> Dict[str, Any]:
-    """画像を1枚渡して、登録候補を返す。カレンダーへの書き込みはしない。
+AMBIGUOUS_PROMPT = "日付の書き方があいまいなもの（明後日・今週・来週・今月末まで など）も、落とさず必ず items に1件ずつ入れ、date は null、date_text に原文、date_issues に理由を入れてください。持ち物や準備（体操服を持ってくる など）が書かれた予定も1件にします。"
 
-    child を渡すと（子どもが自分で撮ったとき）、その子の予定だけを見て、候補もその子のものにする。
+
+def closed_items(text: str) -> List[Dict[str, Any]]:
+    """トップレベルの items 配列だけを読む。未完の値は次のチャンクを待つ。
+
+    JSON decoder に文字列・エスケープ・入れ子を任せ、本文中の items や
+    括弧を構文と取り違えない。全体の妥当性はストリーム終了時にも検査する。
     """
-    runner = InMemoryRunner(agent=build_agent(child), app_name=APP_NAME)
-    user_id = "parent"
+    decoder = json.JSONDecoder()
+    pos = len(text) - len(text.lstrip())
+    out = []
+    if text[pos:pos + 1] != "{":
+        return out
+    pos += 1
+    try:
+        while True:
+            while pos < len(text) and text[pos].isspace():
+                pos += 1
+            key, pos = decoder.raw_decode(text, pos)
+            while pos < len(text) and text[pos].isspace():
+                pos += 1
+            if text[pos:pos + 1] != ":":
+                return out
+            pos += 1
+            while pos < len(text) and text[pos].isspace():
+                pos += 1
+            if key == "items":
+                if text[pos:pos + 1] != "[":
+                    return out
+                pos += 1
+                while True:
+                    while pos < len(text) and text[pos].isspace():
+                        pos += 1
+                    value, pos = decoder.raw_decode(text, pos)
+                    if not isinstance(value, dict):
+                        return out
+                    out.append(value)
+                    while pos < len(text) and text[pos].isspace():
+                        pos += 1
+                    if text[pos:pos + 1] != ",":
+                        return out
+                    pos += 1
+            _, pos = decoder.raw_decode(text, pos)
+            while pos < len(text) and text[pos].isspace():
+                pos += 1
+            if text[pos:pos + 1] != ",":
+                return out
+            pos += 1
+    except ValueError:
+        return out
+
+
+async def stream_otayori(image_bytes: bytes, mime_type: str, hint: str = "",
+                         child: Optional[str] = None):
+    """1回の生成を逐次照合。空・不正な応答だけ同じ入力で1回再試行する。"""
     parts = [types.Part.from_bytes(data=image_bytes, mime_type=mime_type)]
-    prompt = "このおたよりを読んで、カレンダー登録候補を JSON で返してください。"
+    prompt = "このおたよりを読んで、カレンダー登録候補を JSON で返してください。\n" + AMBIGUOUS_PROMPT
     if hint.strip():
         prompt += f"\n補足（保護者からのメモ）: {hint.strip()}"
     parts.append(types.Part.from_text(text=prompt))
-
+    contents = types.Content(role="user", parts=parts)
     first_failure = None
     retry_result = "failure"
+    started = time.monotonic()
+    first_item = None
+    usage = None
+    attempt = 0
     try:
-        for attempt in range(2):
-            # 失敗した応答やツール履歴を持ち越さず、同じ画像・補足で読み直す。
-            session = await runner.session_service.create_session(
-                app_name=APP_NAME, user_id=user_id
-            )
-            final = ""
-            trace: List[str] = []
-            finish_reason = None
-            usage = None
-            async for event in runner.run_async(
-                user_id=user_id,
-                session_id=session.id,
-                new_message=types.Content(role="user", parts=parts).model_copy(deep=True),
-            ):
-                if event.content and event.content.parts:
-                    for p in event.content.parts:
-                        if getattr(p, "function_call", None):
-                            trace.append(f"ツール呼び出し: {p.function_call.name}")
-                        if getattr(p, "function_response", None):
-                            trace.append(f"ツール応答: {p.function_response.name}")
-                if event.is_final_response():
-                    final = "".join(
-                        p.text or "" for p in (event.content.parts or [])
-                    ) if event.content else ""
-                    # ADK 1.3 は空の candidate の finish_reason を error_code に保存する。
-                    # 文字がある応答では保持されないため、取得できなければ unknown。
-                    reason = getattr(event, "finish_reason", None) or getattr(event, "error_code", None)
-                    finish_reason = reason if reason in {r.value for r in types.FinishReason} else None
-                    usage = getattr(event, "usage_metadata", None)
-            try:
-                data = _parse_json(final)
-            except ValueError as exc:
-                if attempt:
-                    raise
-                failure = ("empty_response" if not final.strip() else
-                           "invalid_json" if isinstance(exc, json.JSONDecodeError) else
-                           "missing_json")
-                first_failure = (
-                    failure, getattr(finish_reason, "value", finish_reason) or "unknown",
-                    getattr(usage, "prompt_token_count", None),
-                    getattr(usage, "thoughts_token_count", None),
-                    getattr(usage, "candidates_token_count", None),
-                )
-                continue
-            parsed = Extraction.model_validate(data)
-            retry_result = "success"
-            break
+        # 標準の環境変数で Vertex / Gemini API を選ぶ。接続はリクエスト中だけ。
+        async with genai.Client().aio as client:
+            for attempt in range(2):
+                final = ""
+                seen = 0
+                out = dict(items=[], date_questions=[], skipped=0, skipped_titles=[], trace=[])
+                finish_reason = None
+                usage = None
+                yield {"type": "reading"}
+                try:
+                    stream = await client.models.generate_content_stream(
+                        model=config.model, contents=contents.model_copy(deep=True),
+                        config=_generation_config(child),
+                    )
+                    async for chunk in stream:
+                        final += chunk.text or ""
+                        if chunk.usage_metadata:
+                            usage = chunk.usage_metadata
+                        for candidate in chunk.candidates or []:
+                            if candidate.finish_reason:
+                                finish_reason = candidate.finish_reason
+                        for raw in closed_items(final)[seen:]:
+                            seen += 1
+                            if first_item is None:
+                                first_item = time.monotonic() - started
+                            item = Item.model_validate(raw).model_dump()
+                            if child:
+                                item["child"] = child
+                            item = ambiguous_dates.check(item, require_text=True)
+                            if item["date_issues"]:
+                                out["date_questions"].append(item)
+                                yield {"type": "question", "item": item}
+                            else:
+                                verdict = await asyncio.to_thread(_review, [item], child)
+                                out["skipped"] += verdict["skipped"]
+                                out["skipped_titles"].extend(verdict["skipped_titles"])
+                                for item in verdict["items"]:
+                                    item["id"] = uuid.uuid4().hex[:8]
+                                    item.setdefault("selected", True)
+                                    out["items"].append(item)
+                                    yield {"type": "item", "item": item}
+                    parsed = Extraction.model_validate(json.loads(final))
+                    if len(parsed.items) != seen:
+                        raise ValueError("Incomplete items")
+                except ValueError as exc:
+                    if attempt:
+                        raise
+                    failure = ("empty_response" if not final.strip() else
+                               "missing_json" if not final.lstrip().startswith("{") else "invalid_json")
+                    first_failure = (
+                        failure, getattr(finish_reason, "value", finish_reason) or "unknown",
+                        getattr(usage, "prompt_token_count", None),
+                        getattr(usage, "thoughts_token_count", None),
+                        getattr(usage, "candidates_token_count", None),
+                    )
+                    yield {"type": "reset"}
+                    continue
+                out["summary"] = parsed.summary
+                retry_result = "success"
+                yield {"type": "done", **out}
+                return
     finally:
         if first_failure is not None:
-            # 応答本文・入力・例外文字列は個人情報を含みうるため記録しない。
             logger.warning(
                 "read_otayori retry: first_failure=%s finish_reason=%s "
                 "prompt_token_count=%s thoughts_token_count=%s candidates_token_count=%s "
-                "retry_result=%s",
-                *first_failure, retry_result,
+                "retry_result=%s", *first_failure, retry_result,
             )
-    out = parsed.model_dump()
-    if child:
-        for item in out["items"]:
-            item["child"] = child
-    checked = [ambiguous_dates.check(i, require_text=True) for i in out["items"]]
-    out["date_questions"] = [i for i in checked if i["date_issues"]]
-    verdict = _review([i for i in checked if not i["date_issues"]], child)
-    out["items"] = verdict["items"]
-    out["skipped"] = verdict["skipped"]                 # 完全一致。数だけ伝える
-    out["skipped_titles"] = verdict["skipped_titles"]
-    for item in out["items"]:
-        item["id"] = uuid.uuid4().hex[:8]
-        item.setdefault("selected", True)
-    out["trace"] = trace
-    return out
+        logger.info(
+            "read_otayori timing: first_item_seconds=%s total_seconds=%.3f retried=%s "
+            "prompt_token_count=%s thoughts_token_count=%s candidates_token_count=%s",
+            first_item, time.monotonic() - started, bool(attempt),
+            getattr(usage, "prompt_token_count", None),
+            getattr(usage, "thoughts_token_count", None),
+            getattr(usage, "candidates_token_count", None),
+        )
+
+
+async def read_otayori(image_bytes: bytes, mime_type: str, hint: str = "",
+                       child: Optional[str] = None) -> Dict[str, Any]:
+    async for event in stream_otayori(image_bytes, mime_type, hint, child):
+        if event["type"] == "done":
+            return {k: v for k, v in event.items() if k != "type"}
 
 
 # ---------------------------------------------------------------- 年間行事予定表
