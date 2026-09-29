@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime as dt
 import difflib
 import re
+import unicodedata
 from typing import Any, Dict, List, Optional
 
 # これ以上似ていれば「同じもの」とみなす。
@@ -29,11 +30,11 @@ MOVE_DAYS = 21
 
 def norm(text: str) -> str:
     """件名の比べ方。✓・全角半角・空白・かっこの違いで別物にしない。"""
-    s = (text or "").replace("✓", "")
-    s = s.translate(str.maketrans("（）　０１２３４５６７８９", "() 0123456789"))
-    if "｜" in s:
-        s = s.split("｜", 1)[1]
-    s = re.sub(r"[\s()\[\]「」『』・,、.。:：]+", "", s)
+    s = unicodedata.normalize("NFKC", text or "").replace("✓", "")
+    # NFKC は、子の名前との区切り「｜」も半角にする。
+    if "|" in s:
+        s = s.split("|", 1)[1]
+    s = re.sub(r"[\s()\[\]「」『』・,、.。:]+", "", s)
     return s.lower()
 
 
@@ -65,7 +66,10 @@ def classify(item: Dict[str, Any], existing: List[Dict[str, Any]]) -> Dict[str, 
     best, score = None, 0.0
     for ev in existing:
         r = similarity(title, ev.get("summary", ""))
-        if r > score:
+        # 同名の別日予定（デモの初期予定など）が先にあっても、
+        # 同点なら同日の登録済み予定を選ぶ。再取り込みを日程変更にしない。
+        if r > score or (best is not None and r == score
+                         and ev.get("date") == date and best.get("date") != date):
             best, score = ev, r
     if not best or score < SAME_RATIO:
         return {"branch": "new", "matched": None, "changes": [], "score": round(score, 2)}
