@@ -199,6 +199,26 @@ def _review(items: List[Dict[str, Any]], child: Optional[str] = None) -> Dict[st
     return dedupe.review(items, existing)
 
 
+def _normalize_child(item: Dict[str, Any], child: Optional[str] = None) -> None:
+    """モデルの学校段階を子の名前として保存しない。日付の分岐より前に適用する。"""
+    names = {c["name"] for c in config.children}
+    resolved = child or (item["child"] if item["child"] in names else None)
+    if resolved is None:
+        resolved = next((c["name"] for c in config.children
+                         if item["title"].startswith(c["name"] + "｜")), None)
+    if resolved is None:
+        for level in (item["child"], item.get("school_level")):
+            if level not in ("elementary", "junior_high"):
+                continue
+            matches = [c["name"] for c in config.children if c.get("school_level") == level]
+            if len(matches) == 1:
+                resolved = matches[0]
+                break
+    item["child"] = resolved or "不明"
+    if resolved is None:
+        item["needs_review"] = True
+
+
 async def read_otayori(image_bytes: bytes, mime_type: str, hint: str = "",
                        child: Optional[str] = None) -> Dict[str, Any]:
     """画像を1枚渡して、登録候補を返す。カレンダーへの書き込みはしない。
@@ -273,9 +293,8 @@ async def read_otayori(image_bytes: bytes, mime_type: str, hint: str = "",
                 *first_failure, retry_result,
             )
     out = parsed.model_dump()
-    if child:
-        for item in out["items"]:
-            item["child"] = child
+    for item in out["items"]:
+        _normalize_child(item, child)
     checked = [ambiguous_dates.check(i, require_text=True) for i in out["items"]]
     out["date_questions"] = [i for i in checked if i["date_issues"]]
     verdict = _review([i for i in checked if not i["date_issues"]], child)

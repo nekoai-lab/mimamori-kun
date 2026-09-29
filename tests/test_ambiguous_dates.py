@@ -215,3 +215,64 @@ def test_reminder_display_title_and_child_preserve_saved_calendar_title(title, d
     assert dates.pending()[0]["title"] == title
     assert c.post(f"/api/date_questions/{id_}/register", json={"date": "2026-12-12"}).status_code == 200
     assert any(r["summary"] == title for r in calendar_tools._demo_store)
+
+
+@pytest.mark.parametrize("patch,expected", [
+    ({"child": "elementary"}, "下の子"),
+    ({"child": "junior_high"}, "上の子"),
+    ({"child": "不明", "title": "下の子｜運動会"}, "下の子"),
+    ({"child": "elementary", "title": "上の子｜運動会"}, "上の子"),
+    ({"child": "判別不能", "school_level": "elementary"}, "下の子"),
+    ({"child": "判別不能"}, "不明"),
+    ({"child": "下の子", "title": "上の子｜運動会", "school_level": "junior_high"}, "下の子"),
+])
+@pytest.mark.parametrize("waiting", [False, True])
+def test_child_normalization_before_both_branches(monkeypatch, patch, expected, waiting):
+    payload = item(**patch, date_text="明後日" if waiting else "12月5日（土）")
+    class Runner:
+        def __init__(self, **kwargs): self.session_service = self
+        async def create_session(self, **kwargs): return SimpleNamespace(id="test")
+        async def run_async(self, **kwargs):
+            yield SimpleNamespace(is_final_response=lambda: True, content=SimpleNamespace(parts=[SimpleNamespace(
+                text=json.dumps({"summary": "架空", "items": [payload]}))]))
+    monkeypatch.setattr(agent, "InMemoryRunner", Runner)
+    monkeypatch.setattr(agent, "build_agent", lambda child: None)
+    reviewed = []
+    def review(items, child):
+        reviewed.extend(deepcopy(items))
+        return dict(items=items, skipped=0, skipped_titles=[])
+    monkeypatch.setattr(agent, "_review", review)
+    result = asyncio.run(agent.read_otayori(b"dummy", "image/png"))
+    row = result["date_questions" if waiting else "items"][0]
+    assert row["child"] == expected
+    assert row["title"] == payload["title"]
+    if expected == "不明":
+        assert row["needs_review"] is True
+    if not waiting:
+        assert reviewed[0]["child"] == expected
+    # 子どもが撮った場合はモデルの名前・件名より撮った子を優先する。
+    scoped = asyncio.run(agent.read_otayori(b"dummy", "image/png", child="下の子"))
+    assert scoped["date_questions" if waiting else "items"][0]["child"] == "下の子"
+
+
+@pytest.mark.parametrize("waiting", [False, True])
+def test_same_school_level_does_not_choose_arbitrary_child(monkeypatch, waiting):
+    monkeypatch.setattr(agent.config, "children", [
+        {"name": "子A", "school_level": "elementary"},
+        {"name": "子B", "school_level": "elementary"},
+    ])
+    test_child_normalization_before_both_branches(monkeypatch, {"child": "elementary"}, "不明", waiting)
+
+
+@pytest.mark.parametrize("invalid_child", [None, "不明", "elementary", "設定外"])
+def test_unknown_child_requires_valid_selection_before_registration(monkeypatch, invalid_child):
+    c = client()
+    id_ = queued(c, monkeypatch, child="不明")
+    before = deepcopy(calendar_tools.list_tasks())
+    body = {"date": "2026-12-12", "child": invalid_child}
+    assert c.post(f"/api/date_questions/{id_}/register", json=body).status_code == 409
+    assert dates.pending()[0]["state"] == "waiting"
+    assert calendar_tools.list_tasks() == before
+    body["child"] = "下の子"
+    assert c.post(f"/api/date_questions/{id_}/register", json=body).status_code == 200
+    assert any(r["child"] == "下の子" and r["summary"] == "運動会" for r in calendar_tools._demo_store)

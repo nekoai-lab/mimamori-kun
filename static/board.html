@@ -1061,8 +1061,11 @@ function renderDateQuestions(){
     let h='<article class="date-question" data-date-id="'+esc(row.id)+'"><h3>'+esc(dateQuestionTitle(row))+'</h3><p>'+esc(row.child)+'</p>'+
       '<p>プリントには「'+esc(row.date_text)+'」とあるよ。何月何日？</p>';
     if(row.state==='registering') return h+'<p role="status">登録結果を確認できません。カレンダーを確認してください。二重登録を避けるため再送を止めています。</p></article>';
-    if(d.step==='summary'){
-      h+='<p>'+esc(dateQuestionTitle(row))+' '+dateLabel(d.start)+(d.end?' 〜 '+dateLabel(d.end):'')+' '+esc(row.child)+'　これで とうろくする？</p>'+
+    if(d.step==='summary' && row.child==='不明' && !data.children.includes(d.child)){
+      h+='<p>だれの予定？</p><div class="date-actions">'+data.children.map(child=>
+        button('child',esc(child),'data-child="'+esc(child)+'"')).join('')+'</div>';
+    }else if(d.step==='summary'){
+      h+='<p>'+esc(dateQuestionTitle(row))+' '+dateLabel(d.start)+(d.end?' 〜 '+dateLabel(d.end):'')+' '+esc(d.child||row.child)+'　これで とうろくする？</p>'+
         button('register','とうろくする')+button('reset','なおす');
     }else if(d.step==='confirm'){
       h+='<p>'+dateLabel(d.choice)+'で いい？</p>'+button('ok','これでOK')+button('reselect','えらびなおす');
@@ -1095,7 +1098,8 @@ $('#dateQuestions').addEventListener('click',async e=>{
     if(day<1||day>dateDays(d.year,d.month)) return;
     d.choice=d.year+'-'+String(d.month).padStart(2,'0')+'-'+String(day).padStart(2,'0');d.step='confirm';
   }else if(action==='reselect'){d.step='month';}
-  else if(action==='reset'){Object.assign(d,{step:'month',part:'start',start:null,end:null,message:''});}
+  else if(action==='reset'){Object.assign(d,{step:'month',part:'start',start:null,end:null,child:null,message:''});}
+  else if(action==='child' && d.step==='summary' && data.children.includes(btn.dataset.child)){d.child=btn.dataset.child;}
   else if(action==='ok'){
     if(d.part==='end' && d.choice<d.start){d.message='いつまでは、いつから以降の日付を選んでください。';d.step='month';}
     else{
@@ -1104,10 +1108,11 @@ $('#dateQuestions').addEventListener('click',async e=>{
     }
   }else if(['later','dismiss','register'].includes(action)){
     if(action==='register' && d.step!=='summary') return;
+    if(action==='register' && row.child==='不明' && !data.children.includes(d.child)) return;
     d.busy=true;d.message='保存しています';renderDateQuestions();
     try{
       const j=await readJSON('/api/date_questions/'+encodeURIComponent(id)+'/'+action,{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(action==='register'?{date:d.start,end_date:d.end||null}:{})});
+        body:JSON.stringify(action==='register'?{date:d.start,end_date:d.end||null,child:d.child||row.child}:{})});
       if(action==='later') {Object.assign(d,{step:'month',part:'start',message:'あとで確認できるように残しました。'});}
       else if(j.state===(action==='register'?'registered':'dismissed')){
         data.date_questions=data.date_questions.filter(r=>r.id!==id);dateDrafts.delete(id);

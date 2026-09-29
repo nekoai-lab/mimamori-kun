@@ -498,6 +498,7 @@ def register(req: RegisterRequest, request: Request):
 class DateAnswer(BaseModel):
     date: dt.date
     end_date: Optional[dt.date] = None
+    child: Optional[str] = None
 
 
 @app.get("/api/date_questions", dependencies=[Depends(parent_only)])
@@ -506,9 +507,9 @@ def api_date_questions():
     return {"items": ambiguous_dates.pending()}
 
 
-def _date_action(id_, action, date=None, end_date=None):
+def _date_action(id_, action, date=None, end_date=None, child=None):
     try:
-        return ambiguous_dates.change(id_, action, date, end_date)
+        return ambiguous_dates.change(id_, action, date, end_date, child)
     except KeyError as exc:
         raise HTTPException(404, "日付の確認待ちが見つかりません。") from exc
     except ValueError as exc:
@@ -532,7 +533,7 @@ def api_date_register(id_: str, req: DateAnswer, request: Request):
     if req.end_date and req.end_date < req.date:
         raise HTTPException(400, "いつまでは、いつから以降の日付を選んでください。")
     row = _date_action(id_, "register", req.date.isoformat(),
-                       req.end_date.isoformat() if req.end_date else None)
+                       req.end_date.isoformat() if req.end_date else None, req.child)
     if row["state"] == "registered":
         return row["result"]
     # #52 の照合・更新情報は持ち越さない。親が決めた日付で新規登録する。
