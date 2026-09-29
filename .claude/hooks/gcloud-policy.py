@@ -185,6 +185,50 @@ def secret_names(args):
     return names
 
 
+def ignore_matches(rule, relative, is_dir):
+    """Match a gitignore-style rule, including directory ancestors."""
+    pattern = rule[1:] if rule.startswith("!") else rule
+    directory_only = pattern.endswith("/")
+    anchored = pattern.startswith("/")
+    pattern = pattern.strip("/")
+    parts = relative.parts
+
+    def match_parts(patterns, names):
+        if not patterns:
+            return not names
+        if patterns[0] == "**":
+            return match_parts(patterns[1:], names) or bool(names and match_parts(patterns, names[1:]))
+        return bool(names and fnmatch.fnmatchcase(names[0], patterns[0])
+                    and match_parts(patterns[1:], names[1:]))
+
+    for end in range(1, len(parts) + 1):
+        if directory_only and end == len(parts) and not is_dir:
+            continue
+        if anchored or "/" in pattern:
+            matches = match_parts(pattern.split("/"), parts[:end])
+        else:
+            matches = fnmatch.fnmatchcase(parts[end - 1], pattern)
+        if matches:
+            return True
+    return False
+
+
+def upload_included(path, root, rules):
+    # Last matching rule wins. An excluded parent cannot be traversed even if
+    # a later rule would re-include a child (gitignore/gcloud semantics).
+    for candidate in (path, *path.parents):
+        if candidate == root:
+            break
+        included = False
+        for _, rule in rules:
+            if not rule.startswith("#!") and ignore_matches(
+                    rule, candidate.relative_to(root), candidate.is_dir() and not candidate.is_symlink()):
+                included = rule.startswith("!")
+        if not included:
+            return False
+    return True
+
+
 def check(root):
     if not (root / "deploy.sh").is_file():
         print("対象なし: deploy.sh がありません")
@@ -267,8 +311,10 @@ def check(root):
         allowed = 0
         banned = [".git", "docs", "samples", "design", "tests", ".env", ".env.local", "scratchpad", "scratchpads", "scratchpad.tmp"]
         for line, rule in rules[1:]:
-            if not rule.startswith("!") or rule.startswith("#!"):
-                report(".gcloudignore", line, "先頭の全除外以降は ! による許可だけを書いてください")
+            if rule.startswith("#!"):
+                report(".gcloudignore", line, "#! による外部ルールの読み込みは許可されていません")
+                continue
+            if not rule.startswith("!"):
                 continue
             allowed += 1
             parts = rule[1:].strip("/").split("/")
@@ -282,8 +328,9 @@ def check(root):
                 target = root.joinpath(*parts)
                 children = list(target.rglob("*")) if target.is_dir() and not target.is_symlink() else []
                 invalid = target.is_symlink() or any(
-                    child.is_symlink() or any(part in banned or part.startswith((".env", "scratchpad"))
-                                              for part in child.relative_to(target).parts)
+                    upload_included(child, root, rules) and (
+                        child.is_symlink() or any(part in banned or part.startswith((".env", "scratchpad"))
+                                                  for part in child.relative_to(target).parts))
                     for child in children
                 )
             if invalid:

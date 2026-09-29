@@ -3,12 +3,14 @@
 # 今の作業 — mimamori-kun
 
 - 更新日: 2026-09-29
-- 担当エージェント: Claude Code（C・デプロイ前チェック）
+- 担当エージェント: Codex（PR #43、Claude Code の確認指摘を修正）
 - レビュー: UX レビューは PR ごとに `design/reviews/PR-<番号>.md`、`design/UX_REVIEW.md` は目次（2026-09-28 に人が決めた）。#17・#28・#29・#34・#35・#36 は最新判定が ux-pass でよい。UX レビューの担当は `tasks/current.md` を変えない（書き込むのは `design/inbox/UX_REVIEW.md` だけ。UX_RULES.md・CLAUDE.md に明記）
 
 <!-- 上限で交代するときは、次のエージェントがこのファイルだけ読めば続きができるように書く -->
 
 ## 現状
+
+- PR #43 の確認指摘を修正：harness PR #23 の `gcloud-policy.py` をそのまま同期し、`.gcloudignore` でキャッシュ類を除外。デプロイ手順の非秘密名を通常入力・既定名の export に変更。確認結果：pytest 615件成功（依存ライブラリの警告4件）、デプロイ前チェック指摘0件、pytest 後のアップロード対象42件（キャッシュ類0件）、フックは同期元と完全一致。push・deploy.sh・クラウド変更は実行していない。
 
 - ai-dev-harness を適用した直後（2026-09-27）
 - 構成図を `docs/architecture/` に追加（#4）。PRODUCT.md を埋め、README を今の状態に合わせた（#6）
@@ -21,6 +23,8 @@
   - /board の再確認のために `GET /api/status?event_id=`（親だけ）を足した（#35）
 
 ## やり残し
+
+- PR #43：今回の修正はローカルコミットまで。push 後の CI・Claude Code による再確認待ち。
 
 - **次は C（#21、ごほうびの画面）**。A の結合（2）（#38）と F（#24 → #39）はマージ済み。相棒の着替えは F のあとに回さず #38 で入った（ux-pass）
   - 画面の確認とスクリーンショットは毎回 320px（文字200% も）・375px・PC、明暗、テーマを当てた状態でも（UX_RULES.md）
@@ -49,6 +53,8 @@
 - **ドキュメントの見直しは、UX の塊 A〜F（#19〜#24）がマージされてから1本の PR でまとめてやる**：README・docs/現在地.md・docs/WBS.md・docs/画面設計.md・構成図（docs/architecture/）。**それまでは触らない**（塊の PR と衝突させない。2026-09-28 に人が決めた）
 
 ## 次の1手
+
+- PR #43 のローカル修正を共有するときに push し、CI と Claude Code の再確認を行う（今回の依頼では push しない）。
 
 - C（#21）。撮影 → UX レビュー → `design/reviews/PR-<番号>.md` → ux-pass。そのあとデプロイ前チェック → deploy（人が確認してから）→ デプロイ直後の確認
 - 後回し（今の順番のまま）：ドキュメントの見直し（上）・tasks の整理・screenshots の容量ルール（今 29MB）
