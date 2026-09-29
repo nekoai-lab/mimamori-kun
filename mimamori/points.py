@@ -99,6 +99,7 @@ def history(child: str, limit: int = 30) -> List[Dict[str, Any]]:
                 "kind": e.get("reason"),
                 "points": e.get("delta"),
                 "revoked": bool(e.get("revoked")),
+                **({"redeem_id": e["redeem_id"]} if e.get("redeem_id") else {}),
             }
         )
     return out

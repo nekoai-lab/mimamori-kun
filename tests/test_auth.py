@@ -355,9 +355,13 @@ def test_child_redeem_must_match_the_parents_list_exactly(monkeypatch):
     from mimamori import points as points_mod
     seen = []
 
-    def fake_request(child, label, cost, yen=0):
+    real_request = main.redeem_mod.request
+    ledger.add(YOUNGER, 1000, "adjust")
+
+    def fake_request(child, label, cost, yen=0, **kwargs):
+        row = real_request(child, label, cost, yen, **kwargs)
         seen.append((child, label, cost, yen))
-        return {"id": "r1", "child": child}
+        return row
 
     monkeypatch.setattr(main.redeem_mod, "request", fake_request)
     # 同じ名前で値段の違うものを2つ（Codex のレビューの再現）

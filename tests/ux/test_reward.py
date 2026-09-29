@@ -37,6 +37,7 @@ def test_parent_entry_and_no_pace_or_companion_on_kid_screen():
 
 HARNESS = r'''
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto').webcrypto;
 class Element {
   constructor(tag='div'){this.tagName=tag.toUpperCase();this.children=[];this.dataset={};this.attrs={};this.listeners={};this.style={setProperty(k,v){this[k]=v;}};this.value='';this.hidden=false;this.disabled=false;this._text='';this.className='';this.parent=null;
     this.classList={add:(...xs)=>{this.className=[...new Set(this.className.split(' ').filter(Boolean).concat(xs))].join(' ')},remove:(...xs)=>{this.className=this.className.split(' ').filter(x=>!xs.includes(x)).join(' ')},toggle:(x,on)=>{if(on??!this.classList.contains(x))this.classList.add(x);else this.classList.remove(x)},contains:x=>this.className.split(' ').includes(x)};}
@@ -213,7 +214,9 @@ assert.equal(card(W.label).querySelectorAll('[data-ask]').length,0);  // 100pt �
 await go.click();   // 古いボタンから連打しても
 await askFor(G);
 assert.equal(posts().length,1);
-assert.deepEqual(JSON.parse(posts()[0].options.body),{child:'下の子',label:G.label,cost:30,yen:0});
+const body=JSON.parse(posts()[0].options.body);
+assert.match(body.request_key,/^[a-f0-9]{32}$/);
+assert.deepEqual(body,{child:'下の子',label:G.label,cost:30,yen:0,request_key:lastSent.sent.request_key});
 reload({bal:4,items:[{id:'n',label:G.label,cost:30,status:'requested',at:new Date().toISOString()}]});
 slow.resolve({ok:true,status:200,json:async()=>({request:{id:'n'},balance:4})});
 await first;
@@ -256,7 +259,7 @@ load({bal:34,items:[{id:'old',label:G.label,cost:30,status:'handed',at:'2026-09-
 await card(G.label).querySelector('[data-ask]').click();
 replies.push(REPLY);
 // たしかめる：前になかった申込が1件 → 送れた
-reload({bal:4,items:[{id:'new',label:G.label,cost:30,status:'requested',at:new Date().toISOString()}]});
+reload({bal:4,items:[{id:'new',get request_key(){return lastSent?.sent.request_key;},label:G.label,cost:30,status:'requested',at:new Date().toISOString()}]});
 await card(G.label).querySelector('[data-go]').click();
 assert.equal(posts().length,1);
 assert.equal(text('#send-note'),'おうちの人に おくったよ');
@@ -382,7 +385,7 @@ def test_unknown_reply_matches_request_already_decided_by_parent(status):
 load({bal:100});
 await card(G.label).querySelector('[data-ask]').click();
 replies.push(new Error('offline'));
-reload({bal:70,items:[{id:'new',label:G.label,cost:30,status:STATUS,at:new Date().toISOString()}]});
+reload({bal:70,items:[{id:'new',get request_key(){return lastSent?.sent.request_key;},label:G.label,cost:30,status:STATUS,at:new Date().toISOString()}]});
 await card(G.label).querySelector('[data-go]').click();
 assert.equal(text('#send-note'),KID_ST[STATUS]);
 assert.equal(posts().length,1);
@@ -820,3 +823,66 @@ assert.equal(document.querySelector('#balance-line').attrs['aria-label'],'いま
 setAudience(false);
 assert.equal(text('#balance-label'),'いま つかえる ポイント');
 ''')
+
+
+@pytest.mark.parametrize("matches", [0, 1, 2])
+def test_request_key_reconciliation_ignores_other_requests(matches):
+    run_js(r'''
+load({bal:100});
+await card(G.label).querySelector('[data-ask]').click();
+const slow=deferred();
+replies.push(()=>slow.promise);
+const sendingPromise=card(G.label).querySelector('[data-go]').click();
+const key=JSON.parse(posts()[0].options.body).request_key;
+assert.match(key,/^[a-f0-9]{32}$/);
+// POST がまだ返っていなくてもキーを端末に保存済み。
+assert.equal(pendingGet('kid:'+child).sent.request_key,key);
+const items=[{id:'different',label:G.label,cost:30,status:'requested',request_key:'another-request-key'}];
+for(let i=0;i<MATCHES;i++) items.push({id:'match'+i,label:'表示名が変わっても',cost:999,status:'approved',request_key:key});
+reload({bal:70,items});
+slow.resolve({ok:false,status:502,bad:true});
+await sendingPromise;
+assert.equal(posts().length,1);
+if(MATCHES===1){
+ assert.equal(uncertain,null);
+ assert.equal(pendingGet('kid:'+child),null);
+ assert.equal(text('#send-note'),KID_ST.approved);
+ // 次の確定は新しいキー。
+ await card(G.label).querySelector('[data-ask]').click();
+ replies.push({request:{id:'next'}});
+ reload({bal:40,items});
+ await card(G.label).querySelector('[data-go]').click();
+ assert.notEqual(JSON.parse(posts()[1].options.body).request_key,key);
+}else{
+ assert.equal(uncertain.request_key,key);
+ // 再読込後も保存したキーで照合できる。
+ lastSent=JSON.parse(JSON.stringify(pendingGet('kid:'+child)));
+ uncertain=lastSent.sent;
+ reload({bal:70,items:[{id:'recovered',request_key:key,status:'handed'}]});
+ await recheck();
+ assert.equal(uncertain,null);
+ assert.equal(text('#send-note'),KID_ST.handed);
+ assert.equal(posts().length,1);
+}
+'''.replace("MATCHES", str(matches)))
+
+
+@pytest.mark.parametrize("entry_id,revoked,amount,confirmed", [
+    ("target", False, 30, True), ("another", False, 30, False),
+    ("target", True, 30, False), ("target", False, 20, False),
+])
+def test_refund_message_uses_redeem_id(entry_id, revoked, amount, confirmed):
+    import json
+    run_js(r'''
+const now=new Date().toISOString();
+const req={id:'target',label:G.label,cost:30,status:'rejected',decided_at:now,note:'来週'};
+const entry=ENTRY;
+// 別の申込の返金は、名前・額・理由・日付が全部同じでも流用しない。
+if(entry.redeem_id==='another') entry.title='「'+G.label+'」の交換を取りやめ：来週';
+entry.date=now.slice(0,10);
+load({bal:100,items:[req],hist:[entry]});
+assert.equal(refunded(req,[entry],[req]),CONFIRMED);
+const row=document.querySelector('#reqs').children[0];
+assert.equal(row.textContent.includes('ポイントは もどったよ'),CONFIRMED);
+'''.replace("ENTRY", json.dumps({"redeem_id": entry_id, "revoked": revoked, "points": amount,
+                                "kind": "adjust", "title": "名前では照合しない"})).replace("CONFIRMED", str(confirmed).lower()))
