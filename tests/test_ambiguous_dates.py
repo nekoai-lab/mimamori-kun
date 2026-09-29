@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 import main
 from mimamori import agent, ambiguous_dates as dates, auth, calendar_tools, ledger, notify
+from test_extract_retry import fake_runner
 
 TODAY = dt.datetime(2026, 12, 1, 12, tzinfo=dates.JST)
 
@@ -87,13 +88,17 @@ def test_clear_weekday_and_rain_reserve(monkeypatch):
 
 @pytest.mark.parametrize("missing_text", [False, True])
 def test_model_stub_partition_precedes_dedupe(monkeypatch, missing_text):
-    class Runner:
-        def __init__(self, **kwargs): self.session_service = self
-        async def create_session(self, **kwargs): return SimpleNamespace(id="test")
-        async def run_async(self, **kwargs):
-            yield SimpleNamespace(is_final_response=lambda: True, content=SimpleNamespace(parts=[SimpleNamespace(
-                text=json.dumps({"summary": "架空", "items": [item(date_text="" if missing_text else "明後日", date="2026-12-05" if missing_text else None), item()]}))]))
-    monkeypatch.setattr(agent, "InMemoryRunner", Runner)
+    class Client:
+        def __init__(self): self.aio = self; self.models = self
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def generate_content_stream(self, **kwargs):
+            async def chunks():
+                yield SimpleNamespace(
+                    text=json.dumps({"summary": "架空", "items": [item(date_text="" if missing_text else "明後日", date="2026-12-05" if missing_text else None), item()]}),
+                    usage_metadata=None, candidates=[])
+            return chunks()
+    monkeypatch.setattr(agent.genai, "Client", Client)
     checked = []
     def review(items, child):
         checked.extend(items)
@@ -227,16 +232,9 @@ def test_reminder_display_title_and_child_preserve_saved_calendar_title(title, d
     ({"child": "下の子", "title": "上の子｜運動会", "school_level": "junior_high"}, "下の子"),
 ])
 @pytest.mark.parametrize("waiting", [False, True])
-def test_child_normalization_before_both_branches(monkeypatch, patch, expected, waiting):
+def test_child_normalization_before_both_branches(monkeypatch, fake_runner, patch, expected, waiting):
     payload = item(**patch, date_text="明後日" if waiting else "12月5日（土）")
-    class Runner:
-        def __init__(self, **kwargs): self.session_service = self
-        async def create_session(self, **kwargs): return SimpleNamespace(id="test")
-        async def run_async(self, **kwargs):
-            yield SimpleNamespace(is_final_response=lambda: True, content=SimpleNamespace(parts=[SimpleNamespace(
-                text=json.dumps({"summary": "架空", "items": [payload]}))]))
-    monkeypatch.setattr(agent, "InMemoryRunner", Runner)
-    monkeypatch.setattr(agent, "build_agent", lambda child: None)
+    fake_runner.replies = [json.dumps({"summary": "架空", "items": [payload]})] * 2
     reviewed = []
     def review(items, child):
         reviewed.extend(deepcopy(items))
@@ -256,12 +254,12 @@ def test_child_normalization_before_both_branches(monkeypatch, patch, expected, 
 
 
 @pytest.mark.parametrize("waiting", [False, True])
-def test_same_school_level_does_not_choose_arbitrary_child(monkeypatch, waiting):
+def test_same_school_level_does_not_choose_arbitrary_child(monkeypatch, fake_runner, waiting):
     monkeypatch.setattr(agent.config, "children", [
         {"name": "子A", "school_level": "elementary"},
         {"name": "子B", "school_level": "elementary"},
     ])
-    test_child_normalization_before_both_branches(monkeypatch, {"child": "elementary"}, "不明", waiting)
+    test_child_normalization_before_both_branches(monkeypatch, fake_runner, {"child": "elementary"}, "不明", waiting)
 
 
 @pytest.mark.parametrize("invalid_child", [None, "不明", "elementary", "設定外"])

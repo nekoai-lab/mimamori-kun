@@ -1,4 +1,4 @@
-"""#57: モデル・カレンダーへ通信せず、ADK のイベントで再試行を確かめる。"""
+"""#57: モデル・カレンダーへ通信せず、google-genai のチャンクで再試行を確かめる。"""
 import asyncio
 import json
 import logging
@@ -6,9 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from google.adk.events import Event
-from google.adk.models.llm_response import LlmResponse
 from google.genai import types
+from google import genai
 
 import main
 from mimamori import agent
@@ -18,8 +17,7 @@ GOOD = json.dumps({"summary": PRIVATE, "items": []}, ensure_ascii=False)
 
 
 def response(text):
-    # ADK 1.3 の実際の変換を通す（空なら STOP は error_code に入る）。
-    raw = types.GenerateContentResponse(
+    return types.GenerateContentResponse(
         candidates=[types.Candidate(
             content=types.Content(role="model", parts=[] if text is None else [types.Part(text=text)]),
             finish_reason=types.FinishReason.STOP,
@@ -28,31 +26,34 @@ def response(text):
             prompt_token_count=1648, thoughts_token_count=809,
         ),
     )
-    return Event(author="mimamori_reader", **LlmResponse.create(raw).model_dump())
 
 
 @pytest.fixture
 def fake_runner(monkeypatch):
-    state = SimpleNamespace(replies=[], calls=[], sessions=[], agents=[])
+    state = SimpleNamespace(replies=[], calls=[], closed=0)
 
-    class Runner:
-        def __init__(self, agent, app_name):
-            state.agents.append(agent)
-            self.session_service = self
+    class Client:
+        def __init__(self):
+            self.aio = self
+            self.models = self
 
-        async def create_session(self, **kwargs):
-            session = SimpleNamespace(id=str(len(state.sessions)))
-            state.sessions.append(session)
-            return session
+        async def __aenter__(self):
+            return self
 
-        async def run_async(self, **kwargs):
+        async def __aexit__(self, *args):
+            state.closed += 1
+
+        async def generate_content_stream(self, **kwargs):
             state.calls.append(kwargs)
             reply = state.replies.pop(0)
             if isinstance(reply, Exception):
                 raise reply
-            yield response(reply)
+            async def chunks():
+                for part in reply if isinstance(reply, list) else [reply]:
+                    yield response(part)
+            return chunks()
 
-    monkeypatch.setattr(agent, "InMemoryRunner", Runner)
+    monkeypatch.setattr(genai, "Client", Client)
     return state
 
 
@@ -69,25 +70,24 @@ def retry_logs(caplog):
     (None, "empty_response"), ("   ", "empty_response"),
     (PRIVATE, "missing_json"), ('{"summary": "' + PRIVATE + '",}', "invalid_json"),
 ])
-def test_retry_recovers_with_fresh_session(fake_runner, caplog, first, kind, child):
+def test_retry_recovers_with_same_input(fake_runner, caplog, first, kind, child):
     caplog.set_level(logging.WARNING, logger="mimamori.agent")
     fake_runner.replies = [first, GOOD]
     out = read(child)
     assert out["summary"] == PRIVATE
     assert len(fake_runner.calls) == 2
-    assert len(fake_runner.sessions) == 2
+    assert fake_runner.closed == 1
     a, b = fake_runner.calls
-    assert a["session_id"] != b["session_id"]
-    assert a["new_message"] == b["new_message"]
-    assert a["new_message"].parts[0].inline_data.data == b"dummy image"
+    assert a["contents"] == b["contents"]
+    assert a["contents"].parts[0].inline_data.data == b"dummy image"
     if child:
-        assert f"child は必ず {child}" in fake_runner.agents[0].instruction
-        assert fake_runner.agents[0].tools[0] is not agent.list_events
+        assert f"child は必ず {child}" in fake_runner.calls[0]["config"].system_instruction
+        assert not fake_runner.calls[0]["config"].tools
     logs = retry_logs(caplog)
     assert len(logs) == 1
     message = logs[0].getMessage()
     assert f"first_failure={kind}" in message
-    assert f"finish_reason={'STOP' if first is None else 'unknown'}" in message
+    assert "finish_reason=STOP" in message
     assert "prompt_token_count=1648 thoughts_token_count=809 candidates_token_count=None" in message
     assert "retry_result=success" in message
     assert PRIVATE not in caplog.text
@@ -96,7 +96,7 @@ def test_retry_recovers_with_fresh_session(fake_runner, caplog, first, kind, chi
 
 def test_two_empty_responses_raise_original_error(fake_runner, caplog):
     fake_runner.replies = [None, None]
-    with pytest.raises(ValueError, match="^JSON が見つかりません: $"):
+    with pytest.raises(ValueError):
         read()
     assert len(fake_runner.calls) == 2
     assert len(retry_logs(caplog)) == 1
@@ -135,5 +135,5 @@ def test_extract_two_empty_responses_returns_existing_500(fake_runner, monkeypat
     with TestClient(main.app) as client:
         result = client.post("/api/extract", files={"image": ("test.png", b"dummy image", "image/png")})
     assert result.status_code == 500
-    assert result.json() == {"detail": "読み取りに失敗しました: JSON が見つかりません: "}
+    assert result.json() == {"detail": "読み取りに失敗しました。もう一度試してください。"}
     assert len(fake_runner.calls) == 2

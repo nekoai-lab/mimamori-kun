@@ -199,7 +199,7 @@ def test_browser_sends_match_and_update_undo_id():
     from pathlib import Path
 
     html = Path("static/index.html").read_text()
-    collect = html.split("function collect(){", 1)[1].split("async function doRegister", 1)[0]
+    collect = html.split("function collect(includeUnchecked=false){", 1)[1].split("async function doRegister", 1)[0]
     script = """
 const src = {id: 'candidate', matched_id: 'task52', branch: 'diff',
              child: '上の子', bring: ['鉛筆', '水筒']};
@@ -209,7 +209,7 @@ const fields = {selected: {checked: true}, note: {value: '水筒 / 集合は教�
  time_start: {value: ''}};
 const document = {querySelectorAll: () => [{dataset: {id: 'candidate'},
  querySelector: selector => fields[selector.match(/data-f="([^"]+)"/)[1]]}]};
-""" + "function collect(){" + collect + "console.log(JSON.stringify(collect()));"
+""" + "function collect(includeUnchecked=false){" + collect + "console.log(JSON.stringify(collect()));"
     items = json.loads(subprocess.check_output(["node", "-e", script], text=True))
     assert items[0]["matched_id"] == "task52"
     assert items[0]["branch"] == "diff"
