@@ -163,6 +163,29 @@ assert.equal(document.querySelector('#start').hidden,true);
 ''')
 
 
+def test_history_hides_revoked_completion():
+    run_js(r'''
+load({bal:3,hist:[
+  {title:'こくご',date:'2026-09-28',points:3,revoked:true},
+  {title:'こくご',date:'2026-09-29',points:3,revoked:false},
+]});
+assert.deepEqual(document.querySelector('#history').children.map(row=>row.textContent),['9/29こくご+3 pt']);
+assert.equal(document.querySelector('#start').hidden,true);
+''')
+
+
+def test_revoked_only_history_is_empty_and_starts_at_zero():
+    run_js(r'''
+const hist=[{title:'こくご',date:'2026-09-28',points:3,revoked:true}];
+load({bal:0,hist});
+assert.equal(text('#history'),'まだ 記録は ないよ');
+assert.equal(document.querySelector('#start').hidden,false);
+load({bal:3,hist});
+assert.equal(text('#history'),'まだ 記録は ないよ');
+assert.equal(document.querySelector('#start').hidden,true);
+''')
+
+
 def test_request_statuses_and_refund_only_when_confirmed():
     run_js(r'''
 const now=new Date().toISOString();
