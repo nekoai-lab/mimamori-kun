@@ -18,6 +18,8 @@ import uuid
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
+from googleapiclient.errors import HttpError
+
 from .config import config
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
@@ -542,11 +544,19 @@ def create_events(items: List[Dict[str, Any]], status: str = "todo", actor: str 
                 results.append({"title": item.get("title", "?"), "status": "error", "error": str(e)})
             continue
         try:
-            ev = _svc().events().insert(calendarId=config.calendar_id, body=_body(item, status)).execute()
+            write = _svc().events().insert(calendarId=config.calendar_id, body=_body(item, status))
+        except Exception as e:  # noqa: BLE001
+            # execute 前なので、まだカレンダーには書かれていない。
+            results.append({"title": item.get("title", "?"), "status": "error", "error": str(e)})
+            continue
+        try:
+            ev = write.execute()
             results.append({"title": item["title"], "status": "ok",
                             "link": ev.get("htmlLink", ""), "id": ev.get("id", "")})
         except Exception as e:  # noqa: BLE001
-            results.append({"title": item.get("title", "?"), "status": "error", "error": str(e)})
+            # タイムアウト・5xx は書き込み後の応答喪失かもしれない。
+            rejected = isinstance(e, HttpError) and 400 <= e.resp.status < 500 and e.resp.status != 408
+            results.append({"title": item.get("title", "?"), "status": "error" if rejected else "unknown", "error": str(e)})
     return results
 
 

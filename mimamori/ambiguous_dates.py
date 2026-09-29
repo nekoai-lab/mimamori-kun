@@ -108,7 +108,7 @@ def pending():
                   key=lambda r: r["created_at"])
 
 
-def change(id_, action, date=None, end_date=None, child=None):
+def change(id_, action, date=None, end_date=None, child=None, *, validate=None, times=None):
     """トランザクション内では副作用を起こさず、登録の権利だけ確保する。"""
     def update(old):
         rows = old or []
@@ -117,7 +117,12 @@ def change(id_, action, date=None, end_date=None, child=None):
             raise KeyError(id_)
         if row["state"] == "registered" and action == "register":
             return rows
-        if row["state"] != "waiting":
+        if row["state"] == "registering" and action in ("dismiss", "confirmed", "retry"):
+            row["state"] = {"dismiss": "dismissed", "confirmed": "registered", "retry": "waiting"}[action]
+            if action == "confirmed":
+                row["result"] = {"state": "registered", "results": [], "confirmed": True}
+            return rows
+        if row["state"] != "waiting" or action == "confirmed":
             raise ValueError("この項目は処理済みか、登録結果の確認が必要です。")
         if action == "dismiss":
             row["state"] = "dismissed"
@@ -127,8 +132,10 @@ def change(id_, action, date=None, end_date=None, child=None):
             chosen_child = child if child is not None else row.get("child")
             if chosen_child not in [c["name"] for c in config.children]:
                 raise ValueError("だれの予定か選んでください。")
-            row["child"] = chosen_child
-            row.update(state="registering", chosen_date=date, chosen_end_date=end_date)
+            candidate = dict(row, child=chosen_child, chosen_date=date, chosen_end_date=end_date, **(times or {}))
+            if validate:
+                validate(candidate)
+            row.update(candidate, state="registering")
         return rows
     rows = ledger.transact_setting(KEY, update)
     return next(r for r in rows if r["id"] == id_)
@@ -137,7 +144,7 @@ def change(id_, action, date=None, end_date=None, child=None):
 def finish(id_, result):
     def update(old):
         for row in old or []:
-            if row["id"] == id_:
+            if row["id"] == id_ and row["state"] == "registering":
                 row.update(state="registered", result=result)
         return old
     ledger.transact_setting(KEY, update)

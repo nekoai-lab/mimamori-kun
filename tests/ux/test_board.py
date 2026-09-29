@@ -24,7 +24,7 @@ function node(tag='div',attrs={}) {
     hidden:false,options:[],dataset:{},handlers:{},files:[],open:false,_html:'',_disabled:false,
     get id(){return this.attrs.id||'';},
     get isConnected(){return this===doc.body || !!this.parentElement?.isConnected;},
-    setAttribute(k,v){this.attrs[k]=v;if(k.startsWith('data-'))this.dataset[k.slice(5).replace(/-([a-z])/g,(_,c)=>c.toUpperCase())]=v;},
+    setAttribute(k,v){this.attrs[k]=v;if(k==='value')this.value=v;if(k.startsWith('data-'))this.dataset[k.slice(5).replace(/-([a-z])/g,(_,c)=>c.toUpperCase())]=v;},
     addEventListener(ev,fn){(this.handlers[ev]??=[]).push(fn);},
     get disabled(){return this._disabled;},
     set disabled(v){this._disabled=v;if(v&&doc.activeElement===this)doc.activeElement=doc.body;},

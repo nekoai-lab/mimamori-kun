@@ -166,7 +166,7 @@ def test_child_handoff_and_parent_only(monkeypatch):
     assert row["child"] == "下の子"
     assert "date_questions" not in c.get("/api/tasks").json()
     assert c.get("/api/date_questions").status_code == 403
-    for action in ("register", "later", "dismiss"):
+    for action in ("register", "later", "dismiss", "confirmed"):
         assert c.post(f"/api/date_questions/{row['id']}/{action}", json={"date": "2026-12-12"}).status_code == 403
 
 
@@ -316,3 +316,85 @@ def test_child_cannot_claim_parent_date_edit():
     c = client(True)
     r = c.post("/api/register", json={"items": [item(child="下の子", date="2026-12-06", date_edited=True)]})
     assert r.status_code == 400
+
+
+@pytest.mark.parametrize("field", ["time_start", "time_end"])
+@pytest.mark.parametrize("bad_time", ["9:30", "9時", "24:00", "12:60"])
+def test_date_validation_failure_can_be_corrected_and_retried(monkeypatch, field, bad_time):
+    c = client()
+    id_ = queued(c, monkeypatch, **{field: bad_time})
+    before = deepcopy(calendar_tools.list_tasks())
+    body = {"date": "2026-12-12"}
+    response = c.post(f"/api/date_questions/{id_}/register", json=body)
+    assert response.status_code == 400
+    assert "HH:MM" in response.json()["detail"]
+    assert dates.pending()[0]["state"] == "waiting"
+    assert calendar_tools.list_tasks() == before
+    body[field] = "09:30"
+    assert c.post(f"/api/date_questions/{id_}/register", json=body).status_code == 200
+    assert dates.pending() == []
+
+
+def test_definite_calendar_error_returns_to_waiting(monkeypatch):
+    c = client()
+    id_ = queued(c, monkeypatch)
+    real_create = main.create_events
+    monkeypatch.setattr(main, "create_events", lambda *a, **kw: [{"status": "error"}])
+    url = f"/api/date_questions/{id_}/register"
+    assert c.post(url, json={"date": "2026-12-12"}).status_code == 502
+    assert dates.pending()[0]["state"] == "waiting"
+    monkeypatch.setattr(main, "create_events", real_create)
+    assert c.post(url, json={"date": "2026-12-12"}).status_code == 200
+
+
+@pytest.mark.parametrize("action", ["dismiss", "confirmed"])
+@pytest.mark.parametrize("failure", ["exception", "unknown", "empty"])
+def test_unknown_result_can_be_resolved_without_another_write(monkeypatch, action, failure):
+    c = client()
+    id_ = queued(c, monkeypatch)
+    calls = []
+    def unknown(*args, **kwargs):
+        calls.append(1)
+        if failure == "exception":
+            raise TimeoutError()
+        return [{"status": "unknown"}] if failure == "unknown" else []
+    monkeypatch.setattr(main, "create_events", unknown)
+    assert c.post(f"/api/date_questions/{id_}/register", json={"date": "2026-12-12"}).status_code == 502
+    assert dates.pending()[0]["state"] == "registering"
+    assert c.post(f"/api/date_questions/{id_}/later").status_code == 409
+    assert c.post(f"/api/date_questions/{id_}/{action}").status_code == 200
+    assert dates.pending() == []
+    assert c.get("/api/tasks").json()["date_questions"] == []
+    assert calls == [1]
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("09:30", "09:30"), ("9:30", "09:30"), ("9時", "09:00"),
+    ("９時３０分", "09:30"), ("0:00", "00:00"), ("23:59", "23:59"),
+    ("24:00", None), ("9:60", None), ("午前か午後の9時", None),
+    ("9時頃", None), ("", None), (None, None), (930, None),
+])
+def test_extracted_time_normalization(value, expected):
+    from mimamori.schema import Extraction
+    parsed = Extraction.model_validate({"summary": "架空", "items": [item(time_start=value, time_end=value)]})
+    result = parsed.model_dump()["items"][0]
+    assert result["time_start"] == result["time_end"] == expected
+
+
+@pytest.mark.parametrize("failure,expected", [("timeout", "registering"), ("500", "registering"), ("400", "waiting")])
+def test_real_calendar_transport_classifies_failure(monkeypatch, failure, expected):
+    from googleapiclient.errors import HttpError
+    from httplib2 import Response
+    c = client()
+    id_ = queued(c, monkeypatch)
+    class Service:
+        def events(self): return self
+        def insert(self, **kwargs): return self
+        def execute(self):
+            if failure == "timeout":
+                raise TimeoutError()
+            raise HttpError(Response({"status": failure}), b'{"error":{"message":"fixture"}}')
+    monkeypatch.setattr(calendar_tools, "DEMO", False)
+    monkeypatch.setattr(calendar_tools, "_svc", lambda: Service())
+    assert c.post(f"/api/date_questions/{id_}/register", json={"date": "2026-12-12"}).status_code == 502
+    assert dates.pending()[0]["state"] == expected

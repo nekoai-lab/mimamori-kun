@@ -1,4 +1,6 @@
 """#59: 既存の DOM/fetch ハーネスで親の確定フローと撮る画面を検証する。"""
+import pytest
+
 from test_board import run_js as board
 from test_capture import run_js as capture
 
@@ -85,9 +87,10 @@ q.date_text='<img src=x onerror=alert(1)>';renderDateQuestions();
 assert.match(area.innerHTML,/&lt;img/);
 await month(10);await day(3);await press('ok');
 responses.set('/api/date_questions/q/register',[reply({},502)]);
+responses.set('/api/date_questions',[reply({items:[q]})]);
 await press('register');assert.match(area.innerHTML,/保存結果を確認できません/);
 assert.equal(data.date_questions.length,1);
-q.state='registering';await load();assert.equal(area.querySelectorAll('button').length,0);
+q.state='registering';await load();assert.equal(area.querySelectorAll('button').length,2);
 assert.match(area.innerHTML,/二重登録/);
 ''')
 
@@ -177,4 +180,44 @@ await press('register');
 assert.equal(calls.length,1);
 assert.equal(calls[0].body.child,'下の子');
 assert.equal(calls[0].body.date,'2026-10-17');
+''')
+
+
+@pytest.mark.parametrize("action,state", [("dismiss", "dismissed"), ("confirmed", "registered")])
+def test_unknown_result_shows_resolution_actions_and_removes_card(action, state):
+    board(SETUP + r'''
+await month(10);await day(3);await press('ok');
+responses.set('/api/date_questions/q/register',[reply({detail:'カレンダーを確認してください。'},502)]);
+responses.set('/api/date_questions',[reply({items:[{...q,state:'registering'}]})]);
+await press('register');
+assert.match(area.innerHTML,/カレンダーを確認してください/);
+assert.equal(area.querySelector('[data-date-action="register"]'),null);
+assert.match(area.innerHTML,/カレンダーを確認した：入っていた/);
+assert.match(area.innerHTML,/とうろくしない/);
+assert.match(boardCSS,/\.date-question button\{[^}]*min-width:44px;min-height:44px/);
+''' + f"""
+responses.set('/api/date_questions/q/{action}',[reply({{state:'{state}'}})]);
+await press('{action}');
+assert.equal(area.innerHTML,'');
+assert.equal(calls.filter(c=>c.url.endsWith('/register')).length,1);
+""")
+
+
+def test_validation_reason_and_time_correction_retry():
+    board(SETUP + r'''
+q.time_start='9時';q.time_end='10時';
+await month(10);await day(3);await press('ok');
+responses.set('/api/date_questions/q/register',[reply({detail:'時刻は HH:MM の形で入れてください。'},400),reply({state:'registered'})]);
+responses.set('/api/date_questions',[reply({items:[q]})]);
+await press('register');
+assert.match(area.innerHTML,/時刻は HH:MM の形で入れてください/);
+assert.equal(area.querySelector('[data-date-time="time_start"]').value,'9時');
+area.querySelector('[data-date-time="time_start"]').value='09:00';
+area.querySelector('[data-date-time="time_end"]').value='10:00';
+await press('register');
+const writes=calls.filter(c=>c.url.endsWith('/register'));
+assert.equal(writes.length,2);
+assert.equal(writes[1].body.time_start,'09:00');
+assert.equal(writes[1].body.time_end,'10:00');
+assert.equal(area.innerHTML,'');
 ''')

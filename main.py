@@ -483,7 +483,7 @@ class RegisterRequest(BaseModel):
 
 KINDS = ("event", "deadline", "homework", "bring")
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
-_TIME = re.compile(r"\d{2}:\d{2}")
+_TIME = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]")
 
 
 def _check_item(item: Dict[str, Any]) -> None:
@@ -584,6 +584,8 @@ def register(req: RegisterRequest, request: Request):
 
 
 class DateAnswer(BaseModel):
+    time_start: Optional[str] = None
+    time_end: Optional[str] = None
     date: dt.date
     end_date: Optional[dt.date] = None
     child: Optional[str] = None
@@ -595,9 +597,9 @@ def api_date_questions():
     return {"items": ambiguous_dates.pending()}
 
 
-def _date_action(id_, action, date=None, end_date=None, child=None):
+def _date_action(id_, action, date=None, end_date=None, child=None, **kwargs):
     try:
-        return ambiguous_dates.change(id_, action, date, end_date, child)
+        return ambiguous_dates.change(id_, action, date, end_date, child, **kwargs)
     except KeyError as exc:
         raise HTTPException(404, "日付の確認待ちが見つかりません。") from exc
     except ValueError as exc:
@@ -616,29 +618,45 @@ def api_date_dismiss(id_: str):
     return {"state": "dismissed"}
 
 
+@app.post("/api/date_questions/{id_}/confirmed", dependencies=[Depends(parent_only)])
+def api_date_confirmed(id_: str):
+    _date_action(id_, "confirmed")
+    return {"state": "registered"}
+
+
+def _date_calendar_item(row):
+    # #52 の照合・更新情報は持ち越さない。
+    item = {k: row[k] for k in ("kind", "title", "child", "school_level", "bring", "note",
+                                "time_start", "time_end") if k in row}
+    item.update(date=row["chosen_date"], end_date=row["chosen_end_date"], source="parent", branch="new")
+    item["note"] = (item.get("note", "") + "\nプリントの表記：" + row["date_text"]).strip()
+    return item
+
+
 @app.post("/api/date_questions/{id_}/register", dependencies=[Depends(parent_only)])
 def api_date_register(id_: str, req: DateAnswer, request: Request):
     if req.end_date and req.end_date < req.date:
         raise HTTPException(400, "いつまでは、いつから以降の日付を選んでください。")
     row = _date_action(id_, "register", req.date.isoformat(),
-                       req.end_date.isoformat() if req.end_date else None, req.child)
+                       req.end_date.isoformat() if req.end_date else None, req.child,
+                       times={k: getattr(req, k) for k in ("time_start", "time_end") if k in req.model_fields_set},
+                       validate=lambda candidate: _check_item(_date_calendar_item(candidate)))
     if row["state"] == "registered":
         return row["result"]
-    # #52 の照合・更新情報は持ち越さない。親が決めた日付で新規登録する。
-    item = {k: row[k] for k in ("kind", "title", "child", "school_level", "bring", "note",
-                                "time_start", "time_end") if k in row}
-    item.update(date=row["chosen_date"], end_date=row["chosen_end_date"], source="parent", branch="new")
-    item["note"] = (item.get("note", "") + "\nプリントの表記：" + row["date_text"]).strip()
     try:
-        _check_item(item)
-        results = create_events([item], "todo", actor=_user(request))
+        results = create_events([_date_calendar_item(row)], "todo", actor=_user(request))
+        if len(results) == 1 and results[0].get("status") == "error":
+            _date_action(id_, "retry")
+            raise HTTPException(502, "カレンダーに登録できませんでした。もう一度登録できます。")
         if len(results) != 1 or results[0].get("status") != "ok":
             raise ValueError("登録結果を確認できませんでした。")
         result = {"results": results, "state": "registered"}
         ambiguous_dates.finish(id_, result)
         return result
+    except HTTPException:
+        raise
     except Exception as exc:
-        # Calendar は台帳と一括 commit できない。通信切断時は再送せず、確認対象として残す。
+        # 通信切断時は再送せず、親がカレンダーを確認して解消する。
         raise HTTPException(502, "登録結果を確認できません。カレンダーを確認してください。二重登録を避けるため再送を止めています。") from exc
 
 

@@ -1,6 +1,9 @@
 """おたよりから抜き出す構造。UI と Calendar 登録の共通言語。"""
+import re
+import unicodedata
+
 from typing import Any, List, Literal, Optional
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 Kind = Literal["event", "deadline", "homework", "bring"]
 
@@ -24,6 +27,19 @@ class Item(BaseModel):
             for k, v in data.items()
             if not (v is None and k in cls.model_fields and not cls.model_fields[k].is_required())
         }
+
+    @field_validator("time_start", "time_end", mode="before")
+    @classmethod
+    def _normalize_time(cls, value):
+        if not isinstance(value, str):
+            return None
+        value = unicodedata.normalize("NFKC", value).strip()
+        match = re.fullmatch(r"([0-9]{1,2})(?::([0-9]{2})|時(?:([0-9]{1,2})分)?)", value)
+        if not match:
+            return None
+        hour, minute, japanese_minute = match.groups()
+        hour, minute = int(hour), int(minute or japanese_minute or 0)
+        return f"{hour:02}:{minute:02}" if hour < 24 and minute < 60 else None
 
     kind: Kind = Field(description="event=行事 / deadline=提出期限 / homework=宿題 / bring=持ち物")
     title: str = Field(description="カレンダーに出す短い件名。子どもの名前を先頭に付ける")
