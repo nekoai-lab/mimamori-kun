@@ -317,3 +317,17 @@ else {
  assert.equal(document.activeElement.scrollCalls,undefined,'別の操作へスクロールを強制しない');
 }
 '''.replace('ACTION', repr(action)).replace('FAILURE', 'true' if failure else 'false').replace('DESTINATION', repr(destination)))
+
+
+def test_already_registered_message_does_not_offer_undo_or_mutate_event():
+    board(SETUP + r'''
+await month(10);await day(17);await press('ok');
+responses.set('/api/date_questions/q/register',[reply({state:'registered',already:true,results:[{status:'same',id:'existing'}]})]);
+await press('register');
+assert.equal(el('#actionMsg').textContent,'もう入っていたよ');
+assert.equal(data.date_questions.length,0);
+assert.equal(area.innerHTML,'');
+assert.equal(calls.length,1);
+assert.equal(calls[0].url,'/api/date_questions/q/register');
+assert.equal(document.body.querySelector('#undo'),null);
+''')

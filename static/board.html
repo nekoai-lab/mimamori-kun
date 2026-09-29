@@ -1145,7 +1145,7 @@ $('#dateQuestions').addEventListener('click',async e=>{
       if(action==='later') {Object.assign(d,{step:'month',part:'start',message:'あとで確認できるように残しました。'});}
       else if(j.state===(action==='dismiss'?'dismissed':'registered')){
         data.date_questions=data.date_questions.filter(r=>r.id!==id);dateDrafts.delete(id);
-        $('#actionMsg').textContent=action==='confirmed'?'カレンダーに入っていることを確認しました。':action==='register'?'日付を決めて登録しました。':'とうろくせずに確認待ちから外しました。';
+        $('#actionMsg').textContent=action==='confirmed'?'カレンダーに入っていることを確認しました。':action==='register'?(j.already?'もう入っていたよ':'日付を決めて登録しました。'):'とうろくせずに確認待ちから外しました。';
       }else throw new Error();
     }catch(err){
       d.message=err.message && err.message!=='取得・更新できませんでした'?err.message:'保存結果を確認できません。再読込して確認してください。';
