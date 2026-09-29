@@ -134,7 +134,7 @@ def test_later_persists_first_and_dismiss_never_writes(monkeypatch):
     c = client()
     before = deepcopy(calendar_tools.list_tasks())
     id_ = queued(c, monkeypatch)
-    second = queued(c, monkeypatch)
+    second = queued(c, monkeypatch, title="別の行事")
     for _ in range(2):
         assert c.post(f"/api/date_questions/{id_}/later").status_code == 200
         assert client().get("/api/tasks").json()["date_questions"][0]["id"] == id_
@@ -146,7 +146,7 @@ def test_later_persists_first_and_dismiss_never_writes(monkeypatch):
 @pytest.mark.parametrize("path", ["/api/tasks", "/api/notices", "/api/date_questions"])
 def test_remind_once_at_three_days(path, monkeypatch):
     c = client()
-    queued(c, monkeypatch)
+    queued(c, monkeypatch, title="別の行事")
     queued(c, monkeypatch)
     monkeypatch.setattr(dates, "now", lambda: TODAY + dt.timedelta(days=3, seconds=-1))
     c.get(path)
