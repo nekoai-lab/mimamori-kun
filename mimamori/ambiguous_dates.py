@@ -40,6 +40,8 @@ def _title_parts(text):
 
 _TITLE_VERBS = sorted(("準備", "持参", "用意", "持ってくる", "持っていく",
                        "持ってくること", "持ってくるもの"), key=len, reverse=True)
+_TITLE_DATE_SUFFIXES = sorted(("期限", "締切", "締め切り", "〆切", "しめきり"),
+                              key=len, reverse=True)
 
 
 def _title_paraphrase(a, b):
@@ -47,6 +49,16 @@ def _title_paraphrase(a, b):
     b, b_supplements = _title_parts(b)
     if a_supplements and b_supplements and a_supplements != b_supplements:
         return False
+
+    def strip_date_suffix(title):
+        # 日付の種類だけを表す末尾語を1つ除く。保存値・完全一致キーは変えない。
+        for suffix in _TITLE_DATE_SUFFIXES:
+            if title.endswith(suffix):
+                remaining = title[:-len(suffix)]
+                return remaining if len(remaining) >= 2 else title
+        return title
+
+    a, b = strip_date_suffix(a), strip_date_suffix(b)
     short, long = sorted((a, b), key=len)
     if len(short) >= 2 and long.endswith(short):
         return True

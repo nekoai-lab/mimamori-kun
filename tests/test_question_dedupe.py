@@ -176,6 +176,42 @@ def test_fuzzy_paraphrases(capture, state, before, after, old_date, new_date):
     assert len(records()) == (1 if pending else 2)
 
 
+@pytest.mark.parametrize("registered", [False, True])
+@pytest.mark.parametrize("before,after,date_text", [
+    ("はちまき準備 期限", "はちまき準備", "今週の金曜日まで"),
+    ("観覧者名簿 提出期限", "観覧者名簿提出", "来週の水曜日まで"),
+    ("お弁当の有無確認票 提出期限", "お弁当の有無確認票提出", "運動会の前日まで"),
+])
+def test_deadline_suffix_reread(capture, registered, before, after, date_text):
+    c = client()
+    capture(c, [question(title=before, date_text=date_text)])
+    if registered:
+        assert c.post(f"/api/date_questions/{records()[0]['id']}/register",
+                      json={"date": "2026-12-09"}).status_code == 200
+    original = records()[0]
+    result = capture(c, [question(title=after, date_text=date_text)])
+    assert result["date_questions_count"] == 1
+    assert result["skipped_titles"] == []
+    assert records()[0] == original
+    assert len(records()) == (2 if registered else 1)
+    if registered:
+        assert records()[1]["title"] == after
+        assert records()[1]["state"] == "waiting"
+
+
+@pytest.mark.parametrize("suffix", ["期限", "締切", "締め切り", "〆切", "しめきり"])
+@pytest.mark.parametrize("after", ["はちまき準備", "はちまき持参"])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_deadline_suffix_before_title_paraphrase(suffix, after, reverse):
+    before = f"はちまき準備 {suffix}"
+    if reverse:
+        before, after = after, before
+    dates.enqueue([question(title=before)])
+    original = records()
+    assert dates.enqueue([question(title=after)]) == {"count": 1, "skipped_titles": []}
+    assert records() == original
+
+
 @pytest.mark.parametrize("before,after,old_date,new_date", [
     ("運動会", "運動会振替休業日", "再来週の土曜日", "再来週の土曜日"),
     ("運動会", "運動会当日の持ち物", "再来週の土曜日 午前8時45分開会（雨天順延）", "再来週の土曜日"),
@@ -301,6 +337,7 @@ def test_date_anchor_spelling_variations(old_date, new_date):
 @pytest.mark.parametrize("state", ["waiting", "registering", "registered", "answered"])
 @pytest.mark.parametrize("before,after,date_text", [
     ("算数プリント 提出", "国語プリント 提出", "今週の金曜日まで"),
+    ("算数プリント 提出期限", "国語プリント 提出", "今週の金曜日まで"),
     ("保護者会 出欠票 提出", "遠足 出欠票 提出", "今週の金曜日まで"),
     ("持ち物(体操服)", "持ち物(水着)", "来週の月曜日"),
 ])
@@ -354,6 +391,10 @@ def test_allowed_terminal_verbs(verb):
     ("はちまき準備", "はちまき"),
     ("はちまき持参", "はちまき持参予定"),
     ("はちまき(黒い布)準備", "はちまき(赤い布)持参"),
+    ("はちまき準備期限締切", "はちまき準備"),
+    ("期限はちまき準備", "はちまき持参"),
+    ("服期限", "冬服"),
+    ("期限", "提出"),
 ])
 def test_title_paraphrase_boundaries(before, after):
     dates.enqueue([question(title=before)])
