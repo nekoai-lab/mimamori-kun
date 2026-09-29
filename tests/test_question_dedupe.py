@@ -79,7 +79,7 @@ def test_different_date_text_keeps_question(capture, child, registered):
     if registered:
         assert client().post(f"/api/date_questions/{records()[0]['id']}/register",
                              json={"date": "2026-12-09"}).status_code == 200
-    result = capture(c, [question(date_text="再来週の水曜日まで")])
+    result = capture(c, [question(date_text="来月の最終金曜日まで")])
     assert result["date_questions_count"] == 1
     assert result["skipped"] == 0
     assert len(records()) == 2
@@ -128,7 +128,7 @@ def test_nfkc_date_text_and_calendar_failure(monkeypatch, state):
     assert len(records()) == 1
     assert result["count"] == int(state == "waiting")
     assert len(result["skipped_titles"]) == int(state == "registered")
-    assert dates.enqueue([question(date_text="１月中旬")])["count"] == 1
+    assert dates.enqueue([question(date_text="１月下旬")])["count"] == 1
 
 
 def test_dismissed_question_can_be_asked_again():
@@ -144,7 +144,7 @@ def test_confirmed_without_calendar_id_keeps_other_date_text():
     dates.change(row["id"], "register", "2026-12-09")
     calendar_tools.create_events([question(date="2026-12-09")])
     dates.change(row["id"], "confirmed")
-    dates.enqueue([question(date_text="再来週の水曜日まで")])
+    dates.enqueue([question(date_text="来月の最終金曜日まで")])
     assert len(records()) == 2 and len(events()) == 1
 
 
@@ -155,3 +155,97 @@ def test_existing_skipped_totals_are_preserved():
     assert result["skipped"] == 2
     assert result["skipped_titles"] == ["明確な日付の予定", question()["title"]]
     assert records() == []
+
+
+@pytest.mark.parametrize("state", ["waiting", "registering", "registered", "answered"])
+@pytest.mark.parametrize("before,after,old_date,new_date", [
+    ("予行練習", "運動会予行練習", "運動会の前週の木曜日 午前中", "運動会の前週の木曜日 午前中"),
+    ("はちまき準備", "はちまき持参", "今週の金曜日まで", "今週の金曜日まで"),
+    ("はちまき準備", "はちまき(黒い布) 持参", "今週の金曜日まで", "今週の金曜日までに"),
+])
+def test_fuzzy_paraphrases(capture, state, before, after, old_date, new_date):
+    c = client()
+    capture(c, [question(title=before, date_text=old_date)])
+    original = records()[0]
+    ledger.transact_setting(dates.KEY, lambda rows: [dict(r, state=state) for r in rows])
+    result = capture(c, [question(title=after, date_text=new_date)])
+    pending = state in ("waiting", "registering")
+    assert result.get("date_questions_count", 0) == int(pending)
+    assert result["skipped_titles"] == ([] if pending else [after])
+    assert records() == [dict(original, state=state)]
+
+
+@pytest.mark.parametrize("before,after,old_date,new_date", [
+    ("運動会", "運動会振替休業日", "再来週の土曜日", "再来週の土曜日"),
+    ("運動会", "運動会当日の持ち物", "再来週の土曜日 午前8時45分開会（雨天順延）", "再来週の土曜日"),
+    ("観覧者名簿 提出", "お弁当の有無確認票 提出", "今週の金曜日まで", "今週の金曜日まで"),
+])
+def test_fuzzy_distinct_questions(before, after, old_date, new_date):
+    dates.enqueue([question(title=before, date_text=old_date)])
+    result = dates.enqueue([question(title=after, date_text=new_date)])
+    assert result == {"count": 1, "skipped_titles": []}
+    assert [r["title"] for r in records()] == [before, after]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_fuzzy_exact_titles_take_priority(reverse):
+    batch = [question(title=t, date_text="今週の金曜日まで")
+             for t in ("算数プリント 提出", "国語プリント 提出")]
+    assert dates.enqueue(batch)["count"] == 2
+    original = records()
+    # 状態を分け、片方がもう片方の記録に吸収されていないことも確かめる。
+    ledger.transact_setting(dates.KEY, lambda rows: [dict(rows[0], state="registered"), rows[1]])
+    result = dates.enqueue(list(reversed(batch)) if reverse else batch)
+    assert result == {"count": 1, "skipped_titles": [batch[0]["title"]]}
+    assert records() == [dict(original[0], state="registered"), original[1]]
+
+
+def test_fuzzy_one_existing_row_cannot_absorb_two_candidates():
+    dates.enqueue([question(title="はちまき準備")])
+    original = records()[0]
+    result = dates.enqueue([question(title="はちまき持参"), question(title="はちまき準備")])
+    assert result == {"count": 2, "skipped_titles": []}
+    assert len(records()) == 2
+    assert records()[0] == original
+    assert records()[1]["title"] == "はちまき持参"
+
+
+def test_fuzzy_best_score_wins_before_input_order():
+    dates.enqueue([question(title="運動会予行練習")])
+    ledger.transact_setting(dates.KEY, lambda rows: [dict(r, state="answered") for r in rows])
+    result = dates.enqueue([question(title="予行練習"), question(title="運動会の予行練習")])
+    assert result == {"count": 1, "skipped_titles": ["運動会の予行練習"]}
+    assert records()[1]["title"] == "予行練習"
+
+
+def test_fuzzy_siblings_remain_separate():
+    dates.enqueue([question(title="はちまき準備", child="上の子")])
+    assert dates.enqueue([question(title="はちまき（黒い布）持参")])["count"] == 1
+    assert len(records()) == 2
+
+
+@pytest.mark.parametrize("brackets", ["(黒い布)", "（黒い布）", "【黒い布】", "[黒い布]", "〔黒い布〕", "（黒い【布】）"])
+def test_fuzzy_brackets_and_batch_exact_duplicates(brackets):
+    batch = [question(title="はちまき持参", date_text="今週の金曜日まで"),
+             question(title=f"はちまき{brackets} 持参", date_text="今週の金曜日まで（朝）")]
+    assert dates.enqueue(batch) == {"count": 1, "skipped_titles": []}
+    assert len(records()) == 1
+    original = records()[0]
+    assert dates.enqueue(batch[::-1])["count"] == 1
+    assert records() == [original]
+
+
+def test_fuzzy_two_pending_prints_survive_rereading():
+    batch = [question(title=t, date_text="今週の金曜日まで")
+             for t in ("算数プリント 提出", "国語プリント 提出")]
+    assert dates.enqueue(batch)["count"] == 2
+    original = records()
+    assert dates.enqueue(batch[::-1]) == {"count": 2, "skipped_titles": []}
+    assert records() == original
+
+
+def test_fuzzy_normalizes_existing_title_and_date_supplements():
+    dates.enqueue([question(title="はちまき【黒い布】準備", date_text="今週の金曜日まで（朝に提出）")])
+    original = records()
+    assert dates.enqueue([question(title="はちまき持参", date_text=" 今週の 金曜日までに ")])["count"] == 1
+    assert records() == original

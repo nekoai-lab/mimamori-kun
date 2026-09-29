@@ -14,6 +14,52 @@ JST = dt.timezone(dt.timedelta(hours=9))
 ISSUES = ("relative", "no_month", "year_cross", "weekday_mismatch", "vague",
           "undecided", "multiple", "recurring", "low_confidence")
 
+# 「まで／までに」の揺れを拾い、原文の日付表現が大きく違う候補は分ける。
+QUESTION_DATE_RATIO = 0.82
+# 「はちまき準備／持参」を拾い、「運動会／運動会振替休業日」は分ける。
+QUESTION_TITLE_RATIO = 0.6
+
+
+def _question_norm(text):
+    """補足のかっこを中身ごと除く（入れ子にも対応）。保存する原文は変えない。"""
+    text = unicodedata.normalize("NFKC", text or "")
+    pairs = {"(": ")", "[": "]", "{": "}", "【": "】", "「": "」",
+             "『": "』", "〈": "〉", "《": "》", "〔": "〕"}
+    stack, spans = [], []
+    for index, char in enumerate(text):
+        if char in pairs:
+            stack.append((index, pairs[char]))
+        elif stack and char == stack[-1][1]:
+            start, _ = stack.pop()
+            spans.append((start, index + 1))
+    # 閉じていないかっこ以降の本文まで消さない。
+    removed = {index for start, end in spans for index in range(start, end)}
+    return dedupe.norm("".join(char for index, char in enumerate(text) if index not in removed))
+
+
+def _question_matches(candidates, rows):
+    """読み取り開始時の記録だけに、件名完全一致→類似度順で1対1に割り当てる。"""
+    keys = [(_question_norm(r.get("title")), _question_norm(r.get("date_text")))
+            for r in rows]
+    edges = []
+    for i, item in enumerate(candidates):
+        title, text = _question_norm(item.get("title")), _question_norm(item.get("date_text"))
+        for j, row in enumerate(rows):
+            if (row.get("child") != item.get("child") or
+                    row["state"] not in ("waiting", "registering", "answered", "registered")):
+                continue
+            old_title, old_text = keys[j]
+            title_score = dedupe.similarity(title, old_title)
+            date_score = dedupe.similarity(text, old_text)
+            if title_score >= QUESTION_TITLE_RATIO and date_score >= QUESTION_DATE_RATIO:
+                edges.append((title == old_title, title_score, date_score, i, j))
+    matches, used = {}, set()
+    for _, _, _, i, j in sorted(edges, key=lambda e: (-e[0], -e[1], -e[2], e[3], e[4])):
+        if i not in matches and j not in used:
+            matches[i] = rows[j]
+            used.add(j)
+    return matches
+
 
 def now():
     return dt.datetime.now(JST)
@@ -109,26 +155,32 @@ def enqueue(items):
     stamp = now().isoformat()
     candidates = [dict(i, id=uuid.uuid4().hex, created_at=stamp, state="waiting", reminded_at=None)
                   for i in items]
+    # 同じ読み取り内では正規化後の完全一致だけをまとめる。
+    unique = {}
+    for item in candidates:
+        key = (item.get("child"), _question_norm(item.get("title")),
+               _question_norm(item.get("date_text")))
+        unique.setdefault(key, item)
+    candidates = list(unique.values())
     outcome = {}
 
     def add(old):
         rows = list(old or [])
+        matches = _question_matches(candidates, rows)
         question_ids, skipped = set(), []
-        for item in candidates:
+        for index, item in enumerate(candidates):
             title = dedupe.norm(item.get("title", ""))
             child = item.get("child")
             text = unicodedata.normalize("NFKC", item.get("date_text") or "")
             related = [r for r in rows if r.get("child") == child
                        and dedupe.norm(r.get("title", "")) == title]
-            same = [r for r in related if
-                    unicodedata.normalize("NFKC", r.get("date_text") or "") == text]
-            if any(r["state"] in ("answered", "registered") for r in same):
+            same = matches.get(index)
+            if same and same["state"] in ("answered", "registered"):
                 skipped.append(item.get("title", ""))
                 continue
-            pending_ids = {r["id"] for r in same if r["state"] in ("waiting", "registering")}
-            if pending_ids:
+            if same:
                 # 再読込でも未回答の確認を案内する。同一バッチの重複は1件と数える。
-                question_ids.update(pending_ids)
+                question_ids.add(same["id"])
                 continue
             # 原文が違うと分かる登録済み予定を、件名だけの照合で拾い直さない。
             other_rows = [r for r in related
