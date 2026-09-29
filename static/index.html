@@ -482,9 +482,15 @@ async function kidCandidates(data, token){
     });
     $("#result").insertAdjacentHTML("beforeend", exits());
   }
+  $("#result").insertAdjacentHTML("afterbegin", dateQuestionMessage(data));
+}
+function dateQuestionMessage(data){
+  if(!data.date_questions_count) return "";
+  return '<p class="skipped">'+(isKid() ? '日付は おうちの人に きいてもらうね' :
+    '日付が はっきりしないもの '+data.date_questions_count+'件は「確認すること」で聞きます')+'</p>';
 }
 function emptyResult(data){
-  $("#result").innerHTML = '<div class="ok">'+(data.skipped ? 'もう入っていたよ' : 'やることは見つからなかったよ')+'</div>'
+  $("#result").innerHTML = dateQuestionMessage(data) + '<div class="ok">'+(data.date_questions_count ? '日付の確認を待っています' : data.skipped ? 'もう入っていたよ' : 'やることは見つからなかったよ')+'</div>'
     + exits() + '<button class="btn ghost" id="another-photo">別の写真</button>';
   $("#another-photo").addEventListener("click", () => $("#album").click());
 }
@@ -492,7 +498,7 @@ function emptyResult(data){
 function render(d){
   const KIND = {event:"行事", deadline:"提出期限", homework:"宿題", bring:"持ち物"};
   const BR = {new:"b-new", diff:"b-diff", moved:"b-moved"};
-  let h = "<h2>登録候補</h2>";
+  let h = dateQuestionMessage(d) + "<h2>登録候補</h2>";
   h += '<p class="summary">' + esc(d.summary) + "</p>";
 
   // すでに入っているものは**候補に出さない**（D-33）。毎回承認させると、承認が面倒になる。

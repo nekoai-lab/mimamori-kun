@@ -15,7 +15,7 @@ class Item(BaseModel):
 
         既定値はキーが無いときにしか効かないので、null が来ると弾かれる。
         補足のないおたよりで note が null になり、抽出全体が 500 で落ちていた。
-        kind / title / child / date は必須のまま。null なら落として人に見せる。
+        kind / title / child は必須のまま。日付が不明なら date は null のまま残す。
         """
         if not isinstance(data, dict):
             return data
@@ -29,7 +29,10 @@ class Item(BaseModel):
     title: str = Field(description="カレンダーに出す短い件名。子どもの名前を先頭に付ける")
     child: str = Field(description="どの子のものか。判別できなければ '不明'")
     school_level: str = Field(default="unknown", description="elementary / junior_high / unknown")
-    date: str = Field(description="YYYY-MM-DD。締切なら締切日、行事なら開催日")
+    date: Optional[str] = Field(default=None, description="明確な場合だけ YYYY-MM-DD。あいまいなら null")
+    date_text: str = Field(default="", description="原文の日付表現をそのまま。曜日・年・予備日も残す")
+    date_issues: List[Literal["relative", "no_month", "year_cross", "weekday_mismatch", "vague", "undecided", "multiple", "recurring", "low_confidence"]] = Field(default_factory=list)
+    date_is_range: bool = Field(default=False, description="期間なら true。日付を作らず期間であることだけ残す")
     end_date: Optional[str] = Field(default=None, description="複数日にまたがる場合の最終日 YYYY-MM-DD")
     time_start: Optional[str] = Field(default=None, description="HH:MM。終日なら null")
     time_end: Optional[str] = Field(default=None, description="HH:MM。終日なら null")

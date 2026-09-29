@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from mimamori.agent import read_otayori, read_year_plan
 from mimamori import appearance as appearance_mod
+from mimamori import ambiguous_dates
 from mimamori import auth
 from mimamori import images as images_mod
 from mimamori import ledger
@@ -389,6 +390,18 @@ async def extract(request: Request, image: UploadFile = File(...), hint: str = F
                                     child=None if auth.is_parent(user) else user)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"読み取りに失敗しました: {e}") from e
+    waiting = result.pop("date_questions", [])
+    # API 境界でも検査する。子どもの帰属はセッションから決める。
+    candidates = []
+    for item in result["items"]:
+        checked = ambiguous_dates.check(item)
+        (waiting if checked["date_issues"] else candidates).append(checked)
+    if not auth.is_parent(user):
+        waiting = [dict(i, child=user) for i in waiting]
+    result["items"] = candidates
+    count = ambiguous_dates.enqueue(waiting)
+    if count:
+        result["date_questions_count"] = count
     return JSONResponse(result)
 
 
@@ -437,6 +450,12 @@ def register(req: RegisterRequest, request: Request):
         raise HTTPException(400, "登録するものがありません。")
     for i in req.items:
         _check_item(i)
+        try:
+            issues = ambiguous_dates.check(i)["date_issues"]
+        except (TypeError, ValueError):
+            raise HTTPException(400, "日付の確認情報が不正です。")
+        if issues:
+            raise HTTPException(400, "日付の確認が必要です。『確認すること』から日付を選んでください。")
     user = _user(request)
     if not auth.is_parent(user):
         # 子どもは自分のぶんだけ入れられる。「子が入れた」として親に知らせる。保留にはできない
@@ -475,6 +494,65 @@ def register(req: RegisterRequest, request: Request):
     return {"results": results, "notice": notice}
 
 
+
+class DateAnswer(BaseModel):
+    date: dt.date
+    end_date: Optional[dt.date] = None
+
+
+@app.get("/api/date_questions", dependencies=[Depends(parent_only)])
+def api_date_questions():
+    ambiguous_dates.remind()
+    return {"items": ambiguous_dates.pending()}
+
+
+def _date_action(id_, action, date=None, end_date=None):
+    try:
+        return ambiguous_dates.change(id_, action, date, end_date)
+    except KeyError as exc:
+        raise HTTPException(404, "日付の確認待ちが見つかりません。") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/api/date_questions/{id_}/later", dependencies=[Depends(parent_only)])
+def api_date_later(id_: str):
+    _date_action(id_, "later")
+    return {"state": "waiting"}
+
+
+@app.post("/api/date_questions/{id_}/dismiss", dependencies=[Depends(parent_only)])
+def api_date_dismiss(id_: str):
+    _date_action(id_, "dismiss")
+    return {"state": "dismissed"}
+
+
+@app.post("/api/date_questions/{id_}/register", dependencies=[Depends(parent_only)])
+def api_date_register(id_: str, req: DateAnswer, request: Request):
+    if req.end_date and req.end_date < req.date:
+        raise HTTPException(400, "いつまでは、いつから以降の日付を選んでください。")
+    row = _date_action(id_, "register", req.date.isoformat(),
+                       req.end_date.isoformat() if req.end_date else None)
+    if row["state"] == "registered":
+        return row["result"]
+    # #52 の照合・更新情報は持ち越さない。親が決めた日付で新規登録する。
+    item = {k: row[k] for k in ("kind", "title", "child", "school_level", "bring", "note",
+                                "time_start", "time_end") if k in row}
+    item.update(date=row["chosen_date"], end_date=row["chosen_end_date"], source="parent", branch="new")
+    item["note"] = (item.get("note", "") + "\nプリントの表記：" + row["date_text"]).strip()
+    try:
+        _check_item(item)
+        results = create_events([item], "todo", actor=_user(request))
+        if len(results) != 1 or results[0].get("status") != "ok":
+            raise ValueError("登録結果を確認できませんでした。")
+        result = {"results": results, "state": "registered"}
+        ambiguous_dates.finish(id_, result)
+        return result
+    except Exception as exc:
+        # Calendar は台帳と一括 commit できない。通信切断時は再送せず、確認対象として残す。
+        raise HTTPException(502, "登録結果を確認できません。カレンダーを確認してください。二重登録を避けるため再送を止めています。") from exc
+
+
 @app.post("/api/notify/test", dependencies=[Depends(parent_only)])
 def api_notify_test():
     """送り先が本当に届くかを、1本だけ投げて確かめる。"""
@@ -493,6 +571,7 @@ def api_notify_config():
 
 @app.get("/api/notices", dependencies=[Depends(parent_only)])
 def api_notices(unseen: bool = False):
+    ambiguous_dates.remind()
     return {"items": notify_mod.notices(unseen_only=unseen)}
 
 
@@ -556,6 +635,9 @@ def tasks(request: Request, days: int = 14):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"タスクの取得に失敗しました: {e}") from e
     user = _user(request)
+    if auth.is_parent(user):
+        ambiguous_dates.remind()
+        data["date_questions"] = ambiguous_dates.pending()
     if not auth.is_parent(user):
         # 子どもには自分のぶんだけ（兄弟のやること・ポイントは見せない）
         data["items"] = [i for i in data["items"] if i.get("child") == user]
