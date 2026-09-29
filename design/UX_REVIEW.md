@@ -14,4 +14,4 @@ UX レビュー（ChatGPT）は PR ごとに `design/reviews/PR-<番号>.md` に
 | [#39](https://github.com/nekoai-lab/mimamori-kun/pull/39) | 子ごとの設定の保存（塊 F：見た目・相棒の名前・学年とふりがな） | ux-pass でよい。F1は解消、その他は前回の判定のまま（2026-09-29、Codex の再確認） | [PR-39.md](reviews/PR-39.md) |
 | [#41](https://github.com/nekoai-lab/mimamori-kun/pull/41) | ごほうび（/reward、塊 C） | ux-pass（C1〜C4 解消。その他は前回の判定のまま）（2026-09-29、ChatGPT の再確認） | [PR-41.md](reviews/PR-41.md) |
 | [#51](https://github.com/nekoai-lab/mimamori-kun/pull/51) | ポイントの言葉（/kid「きょう がんばった」・/reward「いま つかえる ポイント」） | ux-pass でよい。直すものなし（持ち越し：低学年本人での理解確認・取得不明時の読み上げ）（2026-09-29、ChatGPT） | [PR-51.md](reviews/PR-51.md) |
-| [#67](https://github.com/nekoai-lab/mimamori-kun/pull/67) | 読み取りを速くする（待つ間の段階・写真・＋ついか・一時的な失敗） | まだ ux-pass にはしない。直すもの S62-1（一時的な失敗のボタンを「もういちど よむ」に）・S62-2（もう入っていた予定と日付を聞く予定を並べて出す）2件（2026-09-29、ChatGPT） | [PR-67.md](reviews/PR-67.md) |
+| [#67](https://github.com/nekoai-lab/mimamori-kun/pull/67) | 読み取りを速くする（待つ間の段階・写真・＋ついか・一時的な失敗） | ux-pass（S62-1・S62-2 を直した。ChatGPT の再確認は人の判断で省略し、修正前後のスクリーンショットとテストで確認）（2026-09-29） | [PR-67.md](reviews/PR-67.md) |
