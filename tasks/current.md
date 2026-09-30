@@ -2,47 +2,38 @@
 
 # 今の作業 — mimamori-kun
 
-- 更新日: 2026-09-29
-- 担当エージェント: Codex（実装）・Claude Code（確認）。C のあとの単位は実装 Codex・確認 Claude（2026-09-29 に人が決めた）
-- レビュー: UX レビューは PR ごとに `design/reviews/PR-<番号>.md`、`design/UX_REVIEW.md` は目次（2026-09-28 に人が決めた）。#17・#28・#29・#34・#35・#36・#38・#39・#41・#51 は最新判定が ux-pass でよい。UX レビューの担当は `tasks/current.md` を変えない（書き込むのは `design/inbox/UX_REVIEW.md` だけ。UX_RULES.md・CLAUDE.md に明記）
+- 更新日: 2026-09-30
+- 担当エージェント: Codex（実装）・Claude Code（確認）。Claude が実装した場合は request-qa の前に Codex がレビューする（人の決定）
+- レビュー: UX レビューは PR ごとに `design/reviews/PR-<番号>.md`、`design/UX_REVIEW.md` は目次。UX レビュー担当はこのファイルを変えない（`design/inbox/UX_REVIEW.md` に書く）
 
 <!-- 上限で交代するときは、次のエージェントがこのファイルだけ読めば続きができるように書く -->
 
 ## 現状
 
-- ai-dev-harness を適用した直後（2026-09-27）
-- 構成図を `docs/architecture/` に追加（#4）。PRODUCT.md を埋め、README を今の状態に合わせた（#6）
-- UX 見直し前の画面を `design/screenshots/before/` に（#7）。撮っていて #8・#9 を見つけ、どちらもマージ（#10・#11）
-- 台帳を Firestore に（#5 → #13、実装 Codex）。ローカルは既定で JSON（#14 → #15、実装 Codex）。**GCP への反映（deploy.sh）はまだ**
-- ログイン（#16 → #17）をマージ。ページと /api/* をすべて守る。子どもは自分のぶんだけ。合言葉は tools/set_passcode.py で手元から決める（画面からは決めない）。子どもの端末で親に一時的に切り替え（10分で戻る）
-- UX の塊：G（#27）・H（#30）・B（#28）・E（#29）をマージ。リマインダーを終日と時刻つきで分けた（#32）
-- 塊 A（#34、見た目の共通基盤：3テーマ×明暗・ナビ・見た目の選択シート・プロフィール）・D（#35、親の一覧）・A の結合（#36、見出しの書体・ログアウトの強弱・「暗く」の位置）をマージ。main のテストは 472件通過（2026-09-28、c359d3c）
-  - A の結合（2）（#38）・F（#39、子ごとの設定の保存：見た目・相棒の名前・学年とふりがな。`GET/POST /api/child-settings`、部分更新）をマージ。main のテストは 517件通過（2026-09-29、3c3e4b7）。本番の Firestore での保存は未確認（デプロイ直後に確認）
-  - /board の再確認のために `GET /api/status?event_id=`（親だけ）を足した（#35）
-- C（#21 → #41、ごほうびの画面）をマージ（2026-09-29、876d824）。UX の塊はすべて入った。main のテストは 615件通過
-- デプロイ前の修正をマージ（2026-09-29）：名前と見本を Tsukineko／つきねこに（#44 → #48）、重複の判定を NFKC に（#46 → #49）、ごほうびの申込・決定を冪等・一体に（#42 → #50）、ポイントの言葉「きょう がんばった／いま つかえる ポイント」（#45 → #51）、ポイントを完了した時点で台帳に記録（#47 → #53）、日程変更・追記は既存の予定を更新（#52 → #54）。main のテストは 736件通過
-- ai-dev-harness に「デプロイの準備」（#22・#23）：`scripts/check_deploy_ready.sh`（gcloud の `--project`・`config set project` 禁止・`.gcloudignore` の許可リスト・秘密は `--set-secrets`）とその CI、Claude Code の `.claude/` の gcloud フック、雛形。mimamori には PR #43（デプロイ前チェック）で入れる
+- **実装は main 367cc47 まで取り込み済み。人によるデプロイ待ち。** UX の塊 A〜F は #28・#29・#34〜#39・#41 で入り、G・H（相棒・学年と読み）も #27・#30 で入った
+- ログイン（#17）：画面と API を保護し、子は自分のぶんだけ。親への一時切替は、無操作10分で子へ戻る。台帳はローカル JSON／Cloud Run は Firestore 必須（#13・#15）。本番の保存・読み書きは⑤で確認する
+- ごほうび（#41）とデプロイ前の修正（#48〜#54）は済み。申込・決定は冪等、ポイントは完了時に記録、日程変更・追記は予定の ID を保って更新する
+- あいまいな日付は推測せず、親に「何月何日？」と聞く（#59 → #65）。「確認すること」に残し、3日後以降の確認時に1回だけ知らせ直す。同じ質問・言い換えをまとめ、回答後の登録でも同じ子・同じ日のほぼ同じ予定を増やさない（#69 → #70〜#72・#74）
+- 読み取りは通常1回のストリーミング生成、段階表示、写真の長辺1600px・横出しと「＋ついか」、一時的な失敗からの再読み取り、全体25秒（#62 → #67）。空・壊れた JSON のときだけ1回再試行（#57 → #58、#67 に引継ぎ）
+- 開発時は Vertex AI＋ADC。`GOOGLE_CLOUD_QUOTA_PROJECT` と `GOOGLE_CLOUD_PROJECT` の一致を確認する（#64 → #66）。モデルは `gemini-2.5-flash`、`thinking_budget=512`（#61 → #63）で出す
+- **デプロイ前チェックは #43 で済み**：`.gcloudignore` の許可リスト、gcloud の `--project`、Webhook の `--set-secrets`、SA・Secret・Firestore の存在確認、手順書。09-29 の main 通し確認・公開資料の点検は当時の記録を参照（#43）。今回クラウド操作はしていない
+- **文書の見直しはこの PR で実施済み**：README・現在地・WBS・画面設計・構成図（JSON と HTML、archify の showcase 検査を通過）・CLAUDE.md のコマンドを、いまの実装に合わせた
+- 読み取りの実測（Vertex・ブラウザ、09-30）：最初の1件が約7〜8秒、全部で約7〜11秒（前は22〜60秒）。精度は元の見本97%・新しい見本98%、落ち0・日付の誤り0。費用は1回約0.88円
+- 検証の進め方は [VERIFICATION.md](../VERIFICATION.md)（harness の policies/verification.md の写し。#83）
+- ローカル検証（2026-09-30）：`.venv/bin/python -m pytest -q` は **1311件通過**、`bash scripts/check_deploy_ready.sh` は指摘0件。CI の定義は `test`・`check`（deploy-ready）
 
 ## やり残し
 
-- **デプロイ前チェック（PR #43、実装 Codex・確認 Claude）**。deploy.sh の実行は人が確認してから
-  - [x] デプロイ先のプロジェクト作成と課金、`.env` の設定、リマインダー（2026-09-28）
-  - [x] `.gcloudignore` を許可リストに（Dockerfile・requirements.txt・main.py・mimamori/・static/ だけ。`__pycache__`・`*.pyc`・`.DS_Store` は除外）。`gcloud meta list-files-for-upload` で 42件、禁止対象なし
-  - [x] deploy.sh：すべての gcloud に `--project`、`config set project` を削除、Webhook は `--set-secrets`、SA・Secret・Firestore は **あるかを確かめるだけ**（作るのは `scripts/setup_service_account.sh`・`scripts/put_secret.sh`）
-  - [x] `bash scripts/check_deploy_ready.sh` が 0件。CI（deploy-ready.yml）も同じ PR で入れる
-  - [x] 手順書 `docs/デプロイ手順.md`：① SA の作成とカレンダー共有 ② Webhook を Secret Manager へ（read -s → --data-file=-） ③ 合言葉3つ ④ デプロイ ⑤ デプロイ直後の確認 ⑥ 戻し方・初回の公開停止。**値はすべて人が入れる。Claude・Codex は見ない・聞かない**
-  - [x] main での通し確認（ログイン → 撮る → 親の一覧 → 子の一日 → ごほうび、375・PC。2026-09-29）
-  - [x] 公開リポジトリの点検（報告だけ、消していない。PR #43 のコメント）
-  - [ ] 人：手順書の ①〜③ → ④ `bash deploy.sh` → ⑤
-- **デプロイ前に直す不具合の線引き**（2026-09-29 に人が決めた）：#52 のあとに見つかったものは「ポイントが増減する・個人情報が漏れる・データが消える」に当たるものだけデプロイ前。それ以外はデプロイ後の Issue
-- **デプロイ後の Issue**：#55（日程変更・追記の結果の文言）・#56（/kid の「きょう がんばった」が分からないときの読み上げ、低学年本人での理解確認）
+- **人が AI と共有しない端末で `docs/デプロイ手順.md` の①〜④を実行 → ⑤で実環境確認**。Claude・Codex は gcloud・deploy.sh・set_passcode を実行せず、Webhook・合言葉・SA アドレスを聞かない・受け取らない
+- **デプロイ前に直す範囲**：ポイントの増減・個人情報の漏れ・データが消える・中心の機能（撮る→読む→登録→おわった）が動かない不具合。それ以外はデプロイ後の Issue
+- **デプロイ後の Issue**（09-30 時点ですべて open）：#55・#56・#60・#68・#73。#60 では 3.5 Flash-Lite を採点し直す。検証の導入（#76〜#82：受け入れ条件・スクショ差分・axe・UX レビューの範囲・評価セット・VCR・property-based test）もデプロイ後に相談してから始める
 - **デプロイ後にやること**
-  - [ ] mimamorikun-family の Artifact Registry（us-central1 / `cloud-run-source-deploy`。初回デプロイで自動作成される）にクリーンアップポリシーを設定する：30日より古いものは削除、最新3つは保持。最初はドライランで確認する。**操作は月ねこ**（Claude・Codex は gcloud を実行しない）
-- docs/WBS.md の A-1 は「実装済み・実環境確認待ち」。実環境で確認するまで ✅ にしない（手順書の⑤が通ったら）
-- **ドキュメントの見直しは、UX の塊 A〜F（#19〜#24）がマージされてから1本の PR でまとめてやる**：README・docs/現在地.md・docs/WBS.md・docs/画面設計.md・構成図（docs/architecture/）。**それまでは触らない**（塊の PR と衝突させない。2026-09-28 に人が決めた）
+  - [ ] ⑤の結果を確認し、問題があれば調査・修正。WBS の **A-1 は⑤がすべて通るまで ✅ にしない**
+  - [ ] 本番用のプロジェクトの Artifact Registry（us-central1 / `cloud-run-source-deploy`）にクリーンアップポリシー：30日より古いものを削除、最新3つを保持。人がまずドライランで確認する（#75）
+  - [ ] Vertex の利用がクーポンで賄われたか、人が確認した請求レポートの結果を Claude が報告する
+- 後回し：screenshots の容量ルール、ARCHITECTURE.md のコマンド
 
 ## 次の1手
 
-- PR #43（デプロイ前チェック）をマージ → main で通し確認 → 人が手順書 ①〜③ → `bash deploy.sh`（人の確認のあと）→ ⑤ デプロイ直後の確認
-- 後回し（今の順番のまま）：ドキュメントの見直し（上）・tasks の整理・screenshots の容量ルール（今 29MB）
-- ARCHITECTURE.md と CLAUDE.md のコマンドを埋める
+- 人の①〜④の完了を待つ → ⑤の結果を確認 → デプロイ後の Issue へ
+- 実装の残タスクと完了条件は `docs/WBS.md`。デプロイの順序・戻し方は `docs/デプロイ手順.md` を正とする
