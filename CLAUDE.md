@@ -23,6 +23,7 @@
 ## 共通ルール
 
 作業の前に `~/Projects/ai-dev-harness/bin/preflight` を実行し、`~/Projects/ai-dev-harness/policies/` を読むこと。
+検証の量（実 Gemini は事前に回数と金額を出してTsukineko の OK、止める条件、スクショの枚数、リスクの段階）は [VERIFICATION.md](VERIFICATION.md) に従う。
 
 - git-flow.md：ブランチ → PR → CI・レビュー → テストが通れば AI がマージ
 - agents.md：役割、1 Issue = 1 Agent = 1 Branch = 1 Worktree（`~/Projects/mimamori-kun.wt/<branch>/`）、交代の順番
