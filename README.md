@@ -14,45 +14,47 @@
 ## エージェントが自律で回すステップ
 
 1. おたよりの画像を読む（マルチモーダル）
-2. 「来週金曜まで」などの相対表現を実日付に直す
+2. 日付を読み取り、あいまいなものは推測せず親への確認待ちにする
 3. 学年表記・教科・持ち物から、どちらの子のものか判定する
-4. **`list_events` で既存カレンダーを照会し、重複を見つける** ← 書く前に読む
-5. 登録候補を返す（この時点では書かない）
+4. **コードで既存カレンダーを照会し、重複・追記・日程変更を照合する** ← 書く前に読む
+5. 確定日付の登録候補を逐次返す（この時点ではカレンダーに書かない）
 
 親が撮ったものは、候補を画面で確認してから書き込む。**読み取りと判断は自律、処置は承認。**
 
-**子が撮ったものは、承認を挟まずそのまま入れて、親に知らせる（D-62）。**
+**子が撮った確定日付の予定は、承認を挟まずそのまま入れて、親に知らせる（D-62）。**
+あいまいな日付は台帳の確認待ちに保存し、親が「何月何日？」に答えてから登録する。
 承認を挟むと、親が忘れた日は子のやることが空のまま1日が終わり、子は次の日から撮らなくなる。
 親には `/board` の帯（と、設定していれば `MIMAMORI_NOTIFY_WEBHOOK` の先）で知らせ、違っていればその場で消せる。
 
 ## 画面
 
-6画面。要素・状態・遷移の詳細は [`docs/画面設計.md`](docs/画面設計.md)。
+ログイン＋6画面。画面の正本は [`design/UX_SPEC.md`](design/UX_SPEC.md)。
+後から増えた状態と旧設計からの案内は [`docs/画面設計.md`](docs/画面設計.md)。
 
 | URL | 誰が | 何をする |
 |---|---|---|
 | `/` | 子ども（親も可） | 撮る／手入力 → 候補確認 → カレンダーに登録 |
 | `/kid` | 子ども | 今日やること・完了・相棒と話す。★⑤ 伴走する人。上の子は今日の分と枠バー |
 | `/plan` | 上の子 | 学習計画の全体像と割りふり（締切から前倒しで配る） |
-| `/board` | 親 | 知らせの帯・やること一覧・予定。手で1件足す、年間予定をまとめて入れる |
+| `/board` | 親 | 確認すること・日付の確認待ち・知らせ。管理はメニューから開く |
 | `/reward` | 子ども＋親 | 残高・履歴・引き換え（申請 → 親が承認 → 手渡し）・月の上限 |
 | `/schedule` | 親・子ども | 予定表（月表示）。日を押すと中身が出る |
 | `/login` | だれでも | だれ（おうちの人・中学生・小学生）→ 合言葉 |
 
-6画面ともヘッダの2行目に同じナビがある（撮る／一覧／やりとり／計画／ごほうび／予定表）。
-右端のボタンで明るい／暗いを選べる。選ぶまでは OS の設定に従う。
-画面設計にある `/settings` はまだ無い。
+子の `/kid`・`/reward`・撮る画面の下部ナビは「きょう・とる・ごほうび」。
+親は「確認・撮る・メニュー」。子は3テーマ×明暗を選べ、相棒・学年と読みも子ごとに保存する。
+独立した `/settings` はなく、設定は見た目のシートや各画面のメニューから開く。
 
 `/board` と `/kid` は `MIMAMORI_DEMO=1` を付けるとダミーのタスクで動く（`/kid` の会話は Gemini が必要）。
 
-### ログイン（#16）
+### ログイン（#17）
 
-ページも `/api/*` も、ログインしないと使えない（未ログインのページは `/login` へ、API は 401）。
+ログイン用の公開 API と `/healthz` を除き、画面と API はログインで守る（未ログインのページは `/login` へ、API は 401）。
 Cloud Run は `--allow-unauthenticated` のまま、アプリの入口で守る。
 
 - 親・子どもそれぞれに合言葉。入れると署名付き Cookie（HttpOnly・Secure・SameSite=Lax、180日）で端末が覚える
 - **子どもは自分のぶんだけ**。「だれ？」は自分だけになり、兄弟には切り替えられない。`/board` と親だけの API（知らせ・年間予定・定期タスク・ごほうびの設定・引き換えの承認）は使えない。予定・課題・引き換えは、持ち主が自分のものだけ変えられる
-- 親は全部。`/board` の下に「この端末をログアウト」「すべての端末をログアウト」
+- 親は全部。子の端末から合言葉で親に一時切替でき、操作がないまま10分たつと子へ戻る。`/board` に端末単位・全端末のログアウトがある
 - ログイン画面には子どもの呼び名を出さない（ログイン前の画面は誰でも開けるため）。学齢で見せる
 - 同じ人で5回続けて間違えると15分ロック
 - 合言葉はハッシュ（scrypt）だけを台帳に置く。Cookie の署名の鍵と「世代」（全端末ログアウト用）も台帳。環境変数には置かない
@@ -60,23 +62,25 @@ Cloud Run は `--allow-unauthenticated` のまま、アプリの入口で守る�
 
 ## いまどこまで動くか
 
-**正本は [`docs/現在地.md`](docs/現在地.md)（いまの状態と次の手）と [`docs/WBS.md`](docs/WBS.md)（残タスク。全タスクに DoD つき）。** ここは要約だけ（2026-09-13 時点の現在地.md による）。
+**2026-09-30 時点：UX の塊 A〜F とデプロイ前の修正が入り、人のデプロイ待ち。**
+いまの状態と次の手は [`docs/現在地.md`](docs/現在地.md)、実装の残タスクは [`docs/WBS.md`](docs/WBS.md) が正本。
 
-- v0.2（下の子が毎日使える状態）と v0.3（上の子の学習計画 `/plan`）は済み
-- ごほうびの引き換え（申請 → 承認 → 手渡し）・月の上限・「今のペースだと約◯日」も済み（E-1〜E-3）
-- 残りの主なもの：カレンダー共有で同期を本番にする（P-3）、週次目標・おやすみ券・スタンプ・調整（E-4〜E-6）、`/board` の「例外だけ」画面（D-6）、オフラインでも開ける（A-12）。上の子まわり（B-6 / B-7 / C系）は実物を見てから作る
-- **既知の問題：本番（Cloud Run）では、台帳（ポイント・知らせ・設定）が再デプロイ・再起動で消える。** → [#5](https://github.com/nekoai-lab/mimamori-kun/issues/5)
+- ログイン、撮る→読む→登録→おわった、ごほうびの申請→承認→手渡し、親の「確認すること」が動く
+- 日付の確認待ち・同じ質問の照合・登録直前の重複防止、完了時のポイント記録まで実装済み
+- Cloud Run の台帳は Firestore 必須。実環境の永続化・連携はデプロイ手順⑤で確認する（WBS A-1 は未完了）
+- ローカルのテスト **1311件通過**、デプロイ準備チェックは指摘0件。CI は `test` と `check`（deploy-ready）
 
 ## 画面と API の契約
 
-画面は自分の口だけを叩く。口の形を変えるときは、その口を使っている画面も合わせて直す。
+主な API を挙げる。契約を変えるときは、その API を使っている画面も合わせて直す。
+ログインは `/api/auth/*`、見た目・相棒・学年の設定は `/api/child-settings` を使う。
 
 | 画面 | 叩く口 |
 |---|---|
-| `/`（index.html） | `/api/config` `/api/extract` `/api/register` `/api/register/undo` `/api/quick/repeat` |
-| `/kid`（kid.html） | `/api/config` `/api/extract` `/api/register` `/api/tasks` `/api/status` `/api/kid/chat` `/api/week` `/api/capacity` `/api/postpone` |
+| `/`（index.html） | `/api/config` `/api/extract/stream` `/api/register` `/api/register/undo` `/api/quick/repeat` |
+| `/kid`（kid.html） | `/api/config` `/api/tasks` `/api/status` `/api/kid/chat` `/api/week` `/api/capacity` `/api/postpone` |
 | `/plan`（plan.html） | `/api/config` `/api/plan` `/api/study/range` `/api/assignments`（`/update` `/remove`）`/api/capacity` |
-| `/board`（board.html） | `/api/config` `/api/tasks` `/api/status` `/api/register`（手で足す）`/api/notices` `/api/notices/seen` `/api/recurring` `/api/year_plan/*` |
+| `/board`（board.html） | `/api/config` `/api/tasks` `/api/status` `/api/register`（手で足す）`/api/date_questions` とその操作 API `/api/notices` `/api/notices/seen` `/api/recurring` `/api/year_plan/*` |
 | `/reward`（reward.html） | `/api/config` `/api/points` `/api/rewards` `/api/redeem/*` |
 | `/schedule`（schedule.html） | `/api/schedule` |
 
@@ -91,14 +95,15 @@ points_for(kind, fixed_count=0) -> int
 RULES: dict                      # calendar_tools._points_for と値を揃えること
 ```
 
-## 台帳は Google カレンダー
+## タスクは Google カレンダー、ポイント・設定は台帳
 
-新しいDBは作らない。予定の `extendedProperties.private` に
+タスクは予定の `extendedProperties.private` に
 `app / child / kind / status / points / bring` を持たせ、`/board` はそれを読むだけ。
-カレンダー側で人が手で直しても整合が壊れない。完了しても予定は消さず、件名に ✓ を付けて残す。
+日程変更・追記は同じ予定の ID を保って更新する。完了しても予定は消さず、件名に ✓ を付けて残す。
 
-ポイントの加減算・親への知らせ・設定（ごほうび一覧・定期タスクなど）だけは、別の台帳（`mimamori/ledger.py`）に持つ。
-本番でこの台帳が消える問題は [#5](https://github.com/nekoai-lab/mimamori-kun/issues/5)。
+ポイント・親への知らせ・日付の確認待ち・設定・認証は、別の台帳（`mimamori/ledger.py`）に持つ。
+ローカルは `.data/ledger.json`、Cloud Run は Firestore（`families/default/points_ledger` と `settings`）。
+あいまいな日付の確認待ちはカレンダーの `pending` とは別で、親が日付を決めるまで予定にしない。
 
 `status` は5つ。保留も「けした」も、保存先を増やさずここで表す。
 
@@ -111,14 +116,15 @@ RULES: dict                      # calendar_tools._points_for と値を揃える
 | `rejected` | 親が「けす」を押した | 出ない | 出ない |
 
 `/board` は今日の 14日前から 14日後までを読む。前に遡るのは遅れているものを拾うためで、
-過去の済んだものは捨てる（拾うとポイント合計が膨らみ、やり残しを探す目的から外れる）。
+過去の済んだものは一覧の取得対象から外す。ポイントは予定の一覧から数え直さず、台帳の記録を合算する。
 
 ## ポイントの付け方
 
 **行動に付ける。結果（テストの点数）には付けない。**
 宿題 3pt ／ 提出 3pt ／ 持ち物 2pt ／ 行事 0pt。
 テストは点数ではなく「直した問題の数」に付ける（点が悪いほどポイントが取れる＝隠す動機を消す）。
-何ptで何と交換するかはアプリに持たせない。親が決める。
+何ptで何と交換するかは親が決め、設定として保存する。
+完了時に台帳へ加点し、取り消しはその記録を無効化する。再送・再完了で二重に増やさない（#53）。
 
 ## ★⑤ の態度（人格ではなく態度）
 
@@ -139,14 +145,17 @@ UIの文言もこれに合わせる。理由は「漏れる→怒られる→子
 
 ## 構成
 
-構成図は [`docs/architecture/`](docs/architecture/)（archify で生成。元データは `mimamori-kun.architecture.json`）。
+構成図は [`docs/architecture/`](docs/architecture/)（元データは `mimamori-kun.architecture.json`）。
+JSON は main 45bc3eb に更新済み。HTML は Claude による再生成待ち。
 
 | 層 | 使うもの |
 |---|---|
-| エージェント | Google ADK `LlmAgent`：おたより読み取り（`list_events` ツール）・年間予定の読み取り・伴走（`get_my_tasks` / `finish_task` / `start_task`） |
-| モデル | Vertex AI Gemini |
+| 読み取り | おたよりは Gen AI SDK `generate_content_stream`、通常1回。日付検証・重複照合はコード。空・不正 JSON のみ1回再試行、全体25秒 |
+| エージェント | 年間予定の読み取りと伴走は Google ADK `LlmAgent`（伴走のツールは本人の予定に限定） |
+| モデル | Vertex AI `gemini-2.5-flash`。おたよりの thinking budget は512（設定で変更可） |
 | カレンダー | Google Calendar API（実行サービスアカウントの ADC）。タスクの正本 |
-| 台帳 | `mimamori/ledger.py`（ポイント・知らせ・設定。本番の保存先は [#5](https://github.com/nekoai-lab/mimamori-kun/issues/5)） |
+| 台帳 | `mimamori/ledger.py`。ローカル JSON／Cloud Run は Firestore 必須、接続失敗は起動停止 |
+| 認証 | `mimamori/auth.py`。合言葉のハッシュと署名 Cookie、所有者・親専用操作の確認 |
 | API / UI | FastAPI + 画面ごとの単一 HTML |
 | 実行環境 | Cloud Run |
 
@@ -157,7 +166,10 @@ mimamori-kun/
 │   ├── config.py            環境変数
 │   ├── schema.py            抽出結果の型
 │   ├── calendar_tools.py    カレンダーの読み書き（タスクの正本）
-│   ├── agent.py             おたより・年間予定を読むエージェント
+│   ├── agent.py             おたよりのストリーミング・年間予定の読み取り
+│   ├── ambiguous_dates.py   日付の確認待ち・同じ質問の照合
+│   ├── auth.py              ログイン・親への一時切替
+│   ├── appearance.py        子ごとの見た目・相棒・学年と読み
 │   ├── kid_agent.py         子どもと話すエージェント（★⑤）
 │   ├── ledger.py            台帳（ポイント・知らせ・設定）
 │   ├── points.py            ポイントと交換レート
@@ -175,7 +187,9 @@ mimamori-kun/
 │   ├── board.html           一覧（親）
 │   ├── reward.html          ごほうび・引き換え
 │   ├── schedule.html        予定表（月表示）
-│   ├── theme.js             明暗の切り替え。6画面で共有
+│   ├── login.html           合言葉でログイン
+│   ├── theme.js             明暗の切り替え
+│   ├── appearance.js        テーマ・ナビ・子ごとの設定
 │   └── who.js               「だれ？」の選択
 ├── samples/                 テスト用のダミーおたより（実物は置かない）
 ├── tools/check_extract.py   読み取り結果の突き合わせ（手で動かす）
@@ -197,56 +211,53 @@ UI の変更がある PR は `ux-pass` も要る。ルールの正本は ai-dev-
 3. **みまもりくんは外部から来た画像を LLM に食わせるアプリ**で、インジェクションの入口を持つ。
    同じ売りを持つ okane-kenko と事故の影響範囲を共有させない
 
-サービスアカウントも専用のものを `deploy.sh` が作る。付与するのは `roles/aiplatform.user` のみ。
+専用サービスアカウントは手順①の `scripts/setup_service_account.sh` で用意する。
+Vertex AI・Firestore の権限と、手順②で通知用 Secret 単位の読み取り権限を付与する。
+`deploy.sh` は SA・Secret・Firestore の存在を確かめるだけ。
 **カレンダーへの権限は IAM ではなく、カレンダー側の共有設定で個別に渡す。**
 共有を外せば、アプリはカレンダーに触れなくなる。
 
-## いちばん速い動かし方（会話画面だけ見たいとき）
+## いちばん速い動かし方（開発用デモ）
 
-Vertex での手元の開発は `bash scripts/dev_server.sh`（課金先の一致を確認し、ローカル JSON 台帳・デモ登録・通知なしで起動）。
-
-GCPプロジェクトも課金も要りません。**AI Studio の APIキー1本**で動きます。
-必要なのは **Python 3.10 以上**（`python3 -V` で確認。macOS 同梱の 3.9 だと `pip install` が落ちる）。
+**開発の読み取りは Vertex AI＋ADC を使う。** Python 3.10 以上と依存関係を用意する。
 
 ```bash
-cp .env.example .env
-# .env の GOOGLE_API_KEY に https://aistudio.google.com/apikey で取ったキーを入れる
-
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-set -a; source .env; set +a
-uvicorn main:app --reload --port 8080
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 ```
 
-`http://localhost:8080/kid` を開く。ダミーのやることで会話が始まります。
-「終わった」と言えば消え、`/board` にも反映されます（再起動すると戻ります）。
+人が下の設定と ADC の準備を済ませてから、起動する。
 
-カレンダーに本当に書き込むのは、下の「本番」の手順に進んでから。
+```bash
+bash scripts/dev_server.sh
+```
+
+`http://localhost:8080` を開く。ローカル JSON 台帳、デモのカレンダー、通知なしで動く。
+ログインは既定で有効なので、人がローカル用の合言葉を設定する（下の「4」）。
+画面だけのローカル確認では `MIMAMORI_AUTH=off bash scripts/dev_server.sh` でも起動できる。
+デモでも読み取り・会話は実際の Vertex AI を呼ぶ。
+
+**AI Studio の `GOOGLE_API_KEY` はこの起動方法では使わない。**
+`dev_server.sh` は `GOOGLE_API_KEY`・`GEMINI_API_KEY` を外し、Vertex AI を明示する。
+`agent.py` の `genai.Client()` 自体は SDK の標準環境変数による Gemini API の選択にも対応するが、
+キー1本の旧手順は現在の開発・デプロイ手順ではない。
 
 ## セットアップ
 
 ### 1. 設定
 
-```bash
-cp .env.example .env
-# GOOGLE_CLOUD_PROJECT と MIMAMORI_CALENDAR_ID、MIMAMORI_CHILDREN を埋める
-```
+人が `.env.example` を参考に、Git 管理外の `.env` に設定する（値は AI と共有しない）。
+開発では `GOOGLE_CLOUD_PROJECT` と **同じ値の `GOOGLE_CLOUD_QUOTA_PROJECT`** を必ず入れる。
+ローカルで Vertex AI または Firestore を使うとき、未設定・空・不一致は接続前に停止する。
+既定の ADC ファイルの課金先を変更する必要はない。
+モデルの既定は `gemini-2.5-flash`、`MIMAMORI_THINKING_BUDGET=512`。
 
 ### 2. ローカルで動かす
 
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
-gcloud auth application-default login \
-  --scopes=https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/calendar
-
-set -a; source .env; set +a
-uvicorn main:app --reload --port 8080
-```
-
-`http://localhost:8080` を開く。
-ローカルでは自分のユーザー資格情報で動くので、カレンダー共有の設定は不要。
+人が AI と共有しない端末で、対象プロジェクトの Vertex AI を使える ADC を準備する。
+カレンダーを実際に使う場合は Calendar API の権限も必要。通常の開発は上の `scripts/dev_server.sh` を使う。
+このスクリプトは `.env` を読み、課金先を確かめ、`127.0.0.1:8080` で起動する。
+`MIMAMORI_LEDGER` や `K_SERVICE` があると停止するので、開発用の設定から外しておく。
 
 ポイント・知らせ・設定の台帳は、ローカルでは既定で `.data/ledger.json` に保存する。
 `GOOGLE_CLOUD_PROJECT` や ADC があっても、台帳の Firestore クライアントは作らない。
@@ -259,44 +270,31 @@ Cloud Run（`K_SERVICE` がある環境）は `json` を指定しても Firestor
 
 ### 3. Cloud Run へ
 
-現行の準備・実行順・戻し方は [デプロイ手順](docs/デプロイ手順.md) を参照してください。
-
-```bash
-./deploy.sh
-```
-
-デプロイの最後に **サービスアカウントのメールアドレス** が表示される。
-Google カレンダー → 対象カレンダーの設定 → 「特定のユーザーとの共有」に、
-そのアドレスを **「予定の変更権限」** で追加する。これをやらないと登録が 404 で落ちる。
+**[デプロイ手順](docs/デプロイ手順.md) が正本。**
+人が AI と共有しない端末で、① SA とカレンダー共有 → ② Webhook を Secret Manager へ →
+③ 合言葉 → ④ デプロイ → ⑤ 実環境確認の順に行う。戻し方は⑥。
+Claude・Codex は gcloud・deploy.sh・set_passcode を実行せず、秘密の値や SA アドレスを受け取らない。
 
 ### 4. 合言葉を決める
 
-**画面からは決めない**（URL は公開なので、最初に開いた人が決められてしまう）。手元で1人ずつ決める。
-合言葉が決まっていない人はログインできない。
-
-```bash
-# ローカル（.data/ledger.json）
-python3 tools/set_passcode.py おうちの人
-python3 tools/set_passcode.py 下の子          # MIMAMORI_CHILDREN の呼び名
-
-# 本番（Firestore）。ADC が要る
-MIMAMORI_LEDGER=firestore GOOGLE_CLOUD_PROJECT=<プロジェクト> python3 tools/set_passcode.py おうちの人
-
-# すべての端末をログアウトさせる（合言葉を変えたあとなど）
-python3 tools/set_passcode.py --logout-all
-```
+**画面からは決めない。** 人が AI と共有しない端末で `tools/set_passcode.py` を使い、
+親・子それぞれに非表示入力する。合言葉を引数・文書・ログに書かない。
+ローカルの台帳に設定した合言葉は、本番には反映されない。
+本番は必ず [デプロイ手順③](docs/デプロイ手順.md#③-合言葉3つを本番の台帳へ設定) のとおり、
+Firestore を用意してから初回公開前に設定する。未設定の人はログインできない。
 
 ## つまずきポイント
 
 - **デモの途中でやることが初期化される** → `--reload` で起動していると、誰かがファイルを
-  保存したときにサーバーが再起動する。`MIMAMORI_DEMO=1` の台帳はプロセス内にあるので消える。
+  保存したときにサーバーが再起動する。デモのカレンダーはプロセス内にあるので消える（ポイント・設定などの JSON 台帳とは別）。
   見せるとき・録画するときは `--reload` を外して起動する
 - **`No matching distribution found for google-genai`** → `python3` が 3.9 になっている。
   `google-genai` は 3.10 以上が必要。`python3.13 -m venv .venv` のように版を指定して作り直す
 - **`404 Not Found` on insert** → カレンダーをサービスアカウントに共有できていない
 - **終日予定が1日ずれる** → Calendar API の `end.date` は排他。`calendar_tools._body` で +1 日している
-- **`403 Vertex AI API has not been used`** → `gcloud services enable aiplatform.googleapis.com`
-- **ADK のバージョン差** → `agent.py` の `InMemoryRunner` / `run_async` のシグネチャが版で変わることがある
+- **課金先の不一致で起動しない** → 人が `GOOGLE_CLOUD_QUOTA_PROJECT` と `GOOGLE_CLOUD_PROJECT` を同じ値に設定する
+- **`403 Vertex AI API has not been used`** → 人が対象プロジェクトの API 有効化・権限を確認する
+- **ADK のバージョン差** → 年間予定・伴走は ADK を使う。`requirements.txt` の依存条件を保つ
 
 ## 残りタスク
 

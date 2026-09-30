@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "みまもりくん 構成図（main 1087ada）",
+    "title": "みまもりくん 構成図（main 45bc3eb）",
     "quality_profile": "showcase",
     "viewBox": [
       1380,
@@ -12,7 +12,7 @@
       "url": "https://github.com/nekoai-lab/mimamori-kun",
       "provider": "github",
       "link_mode": "web",
-      "revision": "1087adaf8c73afba5bfc998cee849e06bc3ed9e7"
+      "revision": "45bc3ebfa51dfe355be0cb2deb5d72ebbf11c66e"
     }
   },
   "components": [
@@ -40,13 +40,13 @@
       "id": "board",
       "type": "frontend",
       "label": "親の一覧",
-      "sublabel": "/board board.html",
+      "sublabel": "/board 確認すること・日付の回答",
       "pos": [
         40,
         362
       ],
       "size": [
-        180,
+        245,
         76
       ],
       "sources": [
@@ -80,20 +80,19 @@
       "id": "ledger",
       "type": "database",
       "label": "台帳",
-      "sublabel": ".data/ledger.json",
+      "sublabel": "ローカル JSON / 本番 Firestore",
       "pos": [
-        400,
+        950,
         150
       ],
       "size": [
-        190,
+        245,
         76
       ],
       "sources": [
         {
           "path": "mimamori/ledger.py",
-          "line": 30,
-          "label": "保存先の切り替え"
+          "label": "store：保存先・起動時接続確認"
         }
       ]
     },
@@ -101,25 +100,27 @@
       "id": "api",
       "type": "backend",
       "label": "FastAPI",
-      "sublabel": "main.py（uvicorn）",
+      "sublabel": "認証・所有者確認・日付の確認待ち",
       "pos": [
         400,
         250
       ],
       "size": [
-        190,
+        245,
         300
       ],
       "sources": [
         {
           "path": "main.py",
-          "line": 99,
-          "label": "/api/extract"
+          "label": "画面・API・登録の制御"
         },
         {
-          "path": "main.py",
-          "line": 124,
-          "label": "/api/register"
+          "path": "mimamori/auth.py",
+          "label": "署名 Cookie と権限"
+        },
+        {
+          "path": "mimamori/ambiguous_dates.py",
+          "label": "確認待ち・質問の照合"
         }
       ]
     },
@@ -127,20 +128,23 @@
       "id": "reader",
       "type": "backend",
       "label": "おたより読み取り",
-      "sublabel": "ADK LlmAgent",
+      "sublabel": "Gen AI SDK / 通常1回の生成",
       "pos": [
         670,
         150
       ],
       "size": [
-        200,
+        245,
         76
       ],
       "sources": [
         {
           "path": "mimamori/agent.py",
-          "line": 115,
-          "label": "build_agent"
+          "label": "stream_otayori・_review"
+        },
+        {
+          "path": "mimamori/dedupe.py",
+          "label": "コードで重複照合"
         }
       ]
     },
@@ -160,8 +164,7 @@
       "sources": [
         {
           "path": "mimamori/kid_agent.py",
-          "line": 142,
-          "label": "build_agent"
+          "label": "ADK の本人用ツール"
         }
       ]
     },
@@ -201,8 +204,7 @@
       "sources": [
         {
           "path": "mimamori/calendar_tools.py",
-          "line": 339,
-          "label": "create_events"
+          "label": "予定の登録・更新・完了時の加点"
         }
       ]
     },
@@ -210,7 +212,7 @@
       "id": "gemini",
       "type": "cloud",
       "label": "Gemini",
-      "sublabel": "Vertex AI gemini-2.5-flash",
+      "sublabel": "Vertex AI / gemini-2.5-flash",
       "brand": "google-gemini",
       "pos": [
         1160,
@@ -223,8 +225,47 @@
       "sources": [
         {
           "path": "mimamori/config.py",
-          "line": 32,
-          "label": "MIMAMORI_MODEL"
+          "label": "モデル・thinking budget（既定512）"
+        }
+      ]
+    },
+    {
+      "id": "login",
+      "type": "frontend",
+      "label": "ログイン",
+      "sublabel": "/login 合言葉・親への一時切替",
+      "pos": [
+        40,
+        138
+      ],
+      "size": [
+        245,
+        76
+      ],
+      "sources": [
+        {
+          "path": "static/login.html",
+          "label": "ログイン"
+        }
+      ]
+    },
+    {
+      "id": "reward",
+      "type": "frontend",
+      "label": "ごほうび",
+      "sublabel": "/reward 残高・申請・承認・手渡し",
+      "pos": [
+        40,
+        586
+      ],
+      "size": [
+        245,
+        76
+      ],
+      "sources": [
+        {
+          "path": "static/reward.html",
+          "label": "ごほうび"
         }
       ]
     }
@@ -232,9 +273,8 @@
   "boundaries": [
     {
       "kind": "region",
-      "label": "Cloud Run mimamorikun（us-central1）",
+      "label": "Cloud Run（デプロイ待ち）",
       "wraps": [
-        "ledger",
         "api",
         "reader",
         "kidagent"
@@ -247,13 +287,13 @@
       "id": "shoot-api",
       "from": "shoot",
       "to": "api",
-      "label": "写真 /api/extract"
+      "label": "写真 /api/extract/stream"
     },
     {
       "id": "board-api",
       "from": "board",
       "to": "api",
-      "label": "一覧・知らせ",
+      "label": "例外・日付の回答・知らせ",
       "labelDx": -46
     },
     {
@@ -266,7 +306,7 @@
       "id": "api-reader",
       "from": "api",
       "to": "reader",
-      "label": "read_otayori"
+      "label": "stream_otayori"
     },
     {
       "id": "api-kidagent",
@@ -285,7 +325,7 @@
       "id": "reader-calendar",
       "from": "reader",
       "to": "calendar",
-      "label": "list_events 重複確認"
+      "label": "list_raw → コードで照合"
     },
     {
       "id": "kidagent-calendar",
@@ -297,7 +337,7 @@
       "id": "reader-gemini",
       "from": "reader",
       "to": "gemini",
-      "label": "画像を読む",
+      "label": "ストリーミング生成",
       "fromSide": "top",
       "toSide": "top",
       "via": [
@@ -333,41 +373,54 @@
       "id": "api-ledger",
       "from": "api",
       "to": "ledger",
-      "label": "ポイント・知らせ・設定"
+      "label": "ポイント・確認待ち・設定・認証"
     },
     {
       "id": "api-webhook",
       "from": "api",
       "to": "webhook",
-      "label": "子が入れたら知らせる",
+      "label": "登録通知・確認待ちの再通知",
       "variant": "dashed",
       "labelDy": 24
+    },
+    {
+      "id": "login-api",
+      "from": "login",
+      "to": "api",
+      "label": "認証・署名 Cookie"
+    },
+    {
+      "id": "reward-api",
+      "from": "reward",
+      "to": "api",
+      "label": "ポイント・引き換え"
     }
   ],
   "cards": [
     {
       "dot": "rose",
-      "title": "要確認：台帳が消える",
+      "title": "実環境確認はこれから",
       "items": [
-        "google-cloud-firestore が未導入で、本番もコンテナ内の JSON に保存",
-        "再デプロイ・再起動でポイント・知らせ・設定が消える"
+        "Cloud Run は Firestore 必須。接続失敗時は起動停止",
+        "ローカルは JSON。手順⑤が通るまで WBS A-1 は未完了"
       ]
     },
     {
       "dot": "cyan",
-      "title": "コードから読める作り",
+      "title": "読み取りから登録まで",
       "items": [
-        "タスクの正本は Google カレンダー（状態も予定に持つ）",
-        "読み取りは list_events で重複確認し、書くのは /api/register",
-        "子が入れたものは承認なしで入れ、親に知らせる（D-62）"
+        "通常1回の生成。空・不正 JSON のみ1回再試行、全体25秒",
+        "あいまいな日付は台帳に保存し、親の回答後に登録",
+        "同じ質問・予定を照合。子の確定日付は承認なしで登録"
       ]
     },
     {
       "dot": "amber",
-      "title": "権限",
+      "title": "認証と権限",
       "items": [
-        "SA は roles/aiplatform.user だけ。カレンダーは共有設定で渡す",
-        "Cloud Run は --allow-unauthenticated"
+        "Cloud Run の公開入口をアプリのログインで保護。子は本人の範囲だけ",
+        "専用 SA：Vertex AI・Firestore・通知用 Secret。カレンダーは共有で許可",
+        "ポイントは完了時に記録。引き換えは台帳と状態を一体に更新"
       ]
     }
   ]
