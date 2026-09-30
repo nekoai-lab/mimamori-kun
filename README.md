@@ -146,7 +146,7 @@ UIの文言もこれに合わせる。理由は「漏れる→怒られる→子
 ## 構成
 
 構成図は [`docs/architecture/`](docs/architecture/)（元データは `mimamori-kun.architecture.json`）。
-JSON は main 45bc3eb に更新済み。HTML は Claude による再生成待ち。
+JSON と HTML は main 367cc47 の実装に合わせてある。
 
 | 層 | 使うもの |
 |---|---|

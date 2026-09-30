@@ -2,17 +2,17 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "みまもりくん 構成図（main 45bc3eb）",
+    "title": "みまもりくん 構成図（main 367cc47）",
     "quality_profile": "showcase",
     "viewBox": [
       1380,
-      800
+      820
     ],
     "repository": {
       "url": "https://github.com/nekoai-lab/mimamori-kun",
       "provider": "github",
       "link_mode": "web",
-      "revision": "45bc3ebfa51dfe355be0cb2deb5d72ebbf11c66e"
+      "revision": "367cc47491d7fa8d49eae64a33e94fc15178159a"
     }
   },
   "components": [
@@ -23,10 +23,10 @@
       "sublabel": "/ index.html",
       "pos": [
         40,
-        250
+        200
       ],
       "size": [
-        180,
+        210,
         76
       ],
       "sources": [
@@ -43,10 +43,10 @@
       "sublabel": "/board 確認すること・日付の回答",
       "pos": [
         40,
-        362
+        320
       ],
       "size": [
-        245,
+        210,
         76
       ],
       "sources": [
@@ -63,10 +63,10 @@
       "sublabel": "/kid kid.html",
       "pos": [
         40,
-        474
+        440
       ],
       "size": [
-        180,
+        210,
         76
       ],
       "sources": [
@@ -82,11 +82,11 @@
       "label": "台帳",
       "sublabel": "ローカル JSON / 本番 Firestore",
       "pos": [
-        950,
-        150
+        400,
+        690
       ],
       "size": [
-        245,
+        210,
         76
       ],
       "sources": [
@@ -103,11 +103,11 @@
       "sublabel": "認証・所有者確認・日付の確認待ち",
       "pos": [
         400,
-        250
+        200
       ],
       "size": [
-        245,
-        300
+        250,
+        356
       ],
       "sources": [
         {
@@ -130,11 +130,11 @@
       "label": "おたより読み取り",
       "sublabel": "Gen AI SDK / 通常1回の生成",
       "pos": [
-        670,
-        150
+        780,
+        160
       ],
       "size": [
-        245,
+        210,
         76
       ],
       "sources": [
@@ -154,11 +154,11 @@
       "label": "伴走エージェント",
       "sublabel": "ADK LlmAgent",
       "pos": [
-        670,
-        510
+        780,
+        480
       ],
       "size": [
-        200,
+        210,
         76
       ],
       "sources": [
@@ -174,11 +174,11 @@
       "label": "通知 Webhook",
       "sublabel": "任意・親のスマホへ",
       "pos": [
-        400,
-        660
+        1140,
+        30
       ],
       "size": [
-        190,
+        210,
         76
       ],
       "sources": [
@@ -194,12 +194,12 @@
       "label": "Google カレンダー",
       "sublabel": "予定＝タスクの正本",
       "pos": [
-        950,
-        358
+        1140,
+        480
       ],
       "size": [
-        190,
-        84
+        210,
+        76
       ],
       "sources": [
         {
@@ -215,12 +215,12 @@
       "sublabel": "Vertex AI / gemini-2.5-flash",
       "brand": "google-gemini",
       "pos": [
-        1160,
-        358
+        1140,
+        160
       ],
       "size": [
-        190,
-        84
+        210,
+        76
       ],
       "sources": [
         {
@@ -236,10 +236,10 @@
       "sublabel": "/login 合言葉・親への一時切替",
       "pos": [
         40,
-        138
+        80
       ],
       "size": [
-        245,
+        210,
         76
       ],
       "sources": [
@@ -256,10 +256,10 @@
       "sublabel": "/reward 残高・申請・承認・手渡し",
       "pos": [
         40,
-        586
+        560
       ],
       "size": [
-        245,
+        210,
         76
       ],
       "sources": [
@@ -287,20 +287,17 @@
       "id": "shoot-api",
       "from": "shoot",
       "to": "api",
-      "label": "写真 /api/extract/stream"
+      "label": "写真"
     },
     {
       "id": "board-api",
       "from": "board",
-      "to": "api",
-      "label": "例外・日付の回答・知らせ",
-      "labelDx": -46
+      "to": "api"
     },
     {
       "id": "kidui-api",
       "from": "kidui",
-      "to": "api",
-      "label": "/api/kid/chat"
+      "to": "api"
     },
     {
       "id": "api-reader",
@@ -318,82 +315,61 @@
       "id": "api-calendar",
       "from": "api",
       "to": "calendar",
+      "variant": "emphasis",
       "label": "登録・一覧・状態",
-      "variant": "emphasis"
-    },
-    {
-      "id": "reader-calendar",
-      "from": "reader",
-      "to": "calendar",
-      "label": "list_raw → コードで照合"
+      "fromSide": "bottom",
+      "toSide": "bottom"
     },
     {
       "id": "kidagent-calendar",
       "from": "kidagent",
       "to": "calendar",
-      "label": "get_my_tasks・finish_task"
+      "label": "自分の予定・おわった"
     },
     {
       "id": "reader-gemini",
       "from": "reader",
       "to": "gemini",
-      "label": "ストリーミング生成",
-      "fromSide": "top",
-      "toSide": "top",
-      "via": [
-        [
-          770,
-          108
-        ],
-        [
-          1255,
-          108
-        ]
-      ]
+      "label": "ストリーミング生成"
     },
     {
       "id": "kidagent-gemini",
       "from": "kidagent",
       "to": "gemini",
       "label": "会話",
-      "fromSide": "bottom",
-      "toSide": "bottom",
-      "via": [
-        [
-          770,
-          650
-        ],
-        [
-          1255,
-          650
-        ]
-      ]
+      "fromSide": "top",
+      "toSide": "bottom"
     },
     {
       "id": "api-ledger",
       "from": "api",
       "to": "ledger",
-      "label": "ポイント・確認待ち・設定・認証"
+      "label": "ポイント・確認待ち・設定",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 70,
+      "labelDx": -80
     },
     {
       "id": "api-webhook",
       "from": "api",
       "to": "webhook",
-      "label": "登録通知・確認待ちの再通知",
       "variant": "dashed",
-      "labelDy": 24
+      "label": "知らせ",
+      "fromSide": "top",
+      "toSide": "left"
     },
     {
       "id": "login-api",
       "from": "login",
       "to": "api",
-      "label": "認証・署名 Cookie"
+      "fromSide": "right",
+      "toSide": "top"
     },
     {
       "id": "reward-api",
       "from": "reward",
-      "to": "api",
-      "label": "ポイント・引き換え"
+      "to": "api"
     }
   ],
   "cards": [

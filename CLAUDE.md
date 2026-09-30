@@ -4,16 +4,16 @@
 
 ## 概要
 
-みまもりくん：学校のおたよりを撮ると、日付・提出期限・持ち物を読み取って Google カレンダーに並べるエージェント（public）。FastAPI ＋ Google ADK。本番は Cloud Run の予定（`deploy.sh`、まだデプロイしていない）。
+みまもりくん：学校のおたよりを撮ると、日付・提出期限・持ち物を読み取って Google カレンダーに並べるエージェント（public）。FastAPI ＋ Google ADK。本番は Cloud Run（`docs/デプロイ手順.md`。デプロイは人が行う）。
 
 ## よく使うコマンド
 
 | 用途 | コマンド |
 |---|---|
 | install | `uv pip install -r requirements.txt` |
-| dev | `（未定）` |
+| dev | `bash scripts/dev_server.sh`（Vertex AI＋ADC） |
 | lint | `（未定）` |
-| test | `uv run pytest` |
+| test | `.venv/bin/python -m pytest -q` |
 | build | `（未定）` |
 
 ## レーン
@@ -23,7 +23,7 @@
 ## 共通ルール
 
 作業の前に `~/Projects/ai-dev-harness/bin/preflight` を実行し、`~/Projects/ai-dev-harness/policies/` を読むこと。
-検証の量（実 Gemini は事前に回数と金額を出してTsukineko の OK、止める条件、スクショの枚数、リスクの段階）は [VERIFICATION.md](VERIFICATION.md) に従う。
+検証の量（実 Gemini は事前に回数と金額を出して Tsukineko の OK、止める条件、スクショの枚数、リスクの段階）は [VERIFICATION.md](VERIFICATION.md) に従う。
 
 - git-flow.md：ブランチ → PR → CI・レビュー → テストが通れば AI がマージ
 - agents.md：役割、1 Issue = 1 Agent = 1 Branch = 1 Worktree（`~/Projects/mimamori-kun.wt/<branch>/`）、交代の順番
@@ -40,6 +40,6 @@
 ## このリポジトリ固有のルール
 
 - **子ども・学校名・氏名が写る実物は公開しない**（public リポジトリ。`.gitignore` の `samples/real/`・`asetts/`・`.data/` を守る）。鍵は `.env`（変数名だけ確認する）
-- テストはまだない（`tools/check_extract.py` は手で動かす確認）。本番に出す前に pytest と CI を足す
+- テストは `tests/`（pytest）と CI（`test`・`check`）。`tools/check_extract.py` は手で動かす確認
 - public なので、コミットは noreply アドレス（REPOS.md の置き場所のルール）
 - **UX レビューを書くとき（ChatGPT・Codex）は `tasks/current.md` を変更しない。書き込むのは `design/inbox/UX_REVIEW.md` だけ**（UX_RULES.md「受け渡し」）
