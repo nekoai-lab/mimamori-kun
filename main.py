@@ -237,6 +237,8 @@ def api_auth_login(req: LoginRequest, request: Request):
     user = auth.user_from_choice(req.who)
     if not user:
         raise HTTPException(400, "だれかを選んでください。")
+    # 認証中に全端末ログアウトされても、新しい世代の Cookie を発行しない。
+    generation = auth.epoch()
     result, n = auth.check(user, req.passcode)
     # 言葉の出し分け：小学生はひらがな中心、中学生と親は漢字（UX_REVIEW R6 の文言の表）
     kid = not auth.is_parent(user) and next(
@@ -278,7 +280,7 @@ def api_auth_login(req: LoginRequest, request: Request):
     res = JSONResponse({"user": auth.display_name(user), "role": "parent" if auth.is_parent(user) else "child",
                         "home": "/board" if auth.is_parent(user) else "/kid",
                         "back_to": back_to})
-    _set_session(res, user, back_to=back_to, sid=sid)
+    _set_session(res, user, back_to=back_to, generation=generation, sid=sid)
     return res
 
 
