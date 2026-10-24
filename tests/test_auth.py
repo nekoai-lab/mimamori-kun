@@ -235,6 +235,37 @@ def test_parent_can_log_out_every_device():
     assert login(YOUNGER).get("/api/tasks").status_code == 200     # 入り直せば使える
 
 
+@pytest.mark.parametrize("mode", ["child", "parent", "switch", "reswitch"])
+@pytest.mark.parametrize("timing", ["check", "issue"])
+def test_logout_all_during_login_invalidates_the_issued_cookie(monkeypatch, mode, timing):
+    """認証後・発行前の全端末ログアウトで、ログインの Cookie も無効になる。"""
+    c = login(YOUNGER) if mode in ("switch", "reswitch") else client()
+    if mode == "reswitch":
+        switch_to_parent(c)
+    user = YOUNGER if mode == "child" else auth.PARENT
+    generation = auth.epoch()
+    real = getattr(auth, timing)
+
+    def logout_all_meanwhile(*args, **kwargs):
+        if timing == "check":
+            result = real(*args, **kwargs)
+            assert result[0] == "ok"
+            auth.logout_all()
+            return result
+        auth.logout_all()
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(auth, timing, logout_all_meanwhile)
+    r = c.post("/api/auth/login", json={"who": WHO[user], "passcode": CODES[user]})
+    assert r.status_code == 200
+    token = r.cookies.get(auth.COOKIE)
+    assert token
+    assert auth.epoch() == generation + 1
+    assert auth.read(token) is None
+    if timing == "issue" and mode in ("switch", "reswitch"):
+        assert r.json()["back_to"] == YOUNGER
+
+
 # ---------------------------------------------------------------- 外せるか
 
 def test_auth_can_be_turned_off_only_locally(monkeypatch):
