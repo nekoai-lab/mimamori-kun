@@ -20,7 +20,8 @@ def commands(source, base=1, depth=0):
     parts, line_map = [], []
     for n, text in enumerate(source.splitlines(keepends=True), 1):
         if text.rstrip("\r\n").endswith("\\") and not text.lstrip().startswith("#"):
-            text = text.rstrip("\r\n")[:-1] + " "
+            # The shell removes backslash-newline without inserting a space (gcl\<newline>oud is gcloud).
+            text = text.rstrip("\r\n")[:-1]
         parts.append(text)
         line_map.extend([base + n - 1] * len(text))
     source = "".join(parts)
